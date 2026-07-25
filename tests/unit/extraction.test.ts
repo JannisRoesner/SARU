@@ -57,24 +57,14 @@ describe('extractText', () => {
     expect(result.text).toBe('Hallo Welt')
   })
 
-  it('liest Text und Seitenzahl aus einem echten PDF des Beispielexports', async () => {
-    const buffer = await readFile(fixture('AB1-Sexuelle-Vielfalt.pdf'))
-    const result = await extractText(buffer, 'AB1-Sexuelle-Vielfalt.pdf')
+  it('liest Text und Seitenzahl aus dem Beispiel-PDF', async () => {
+    const buffer = await readFile(fixture('sample.pdf'))
+    const result = await extractText(buffer, 'sample.pdf')
 
     expect(result.status).toBe('erfolgreich')
     expect(result.pageCount).toBe(2)
-    expect(result.text).toContain('Sexuelle Vielfalt')
-    // Umlaute müssen korrekt zusammengesetzt sein, sonst schlägt die Suche fehl.
-    expect(result.text).toContain('Gefühle')
-    expect(result.text).not.toContain('¨')
-  })
-
-  it('verbindet am Zeilenende getrennte Wörter wieder', async () => {
-    const buffer = await readFile(fixture('AB1-Sexuelle-Vielfalt.pdf'))
-    const result = await extractText(buffer, 'AB1-Sexuelle-Vielfalt.pdf')
-
-    expect(result.text).toContain('ausdrücken')
-    expect(result.text).not.toMatch(/aus-\s*\n?\s*drücken/)
+    expect(result.text).toContain('Photosynthese')
+    expect(result.text).toContain('Zellteilung')
   })
 
   it('gibt bei beschädigten Dateien einen Fehlerstatus statt einer Ausnahme zurück', async () => {

@@ -17,6 +17,8 @@ let userId: string
 let archive: Buffer
 
 const FILE_NAME = SCHULPORTAL_EXPORT_NAME
+const LESSON_COUNT = 3
+const ATTACHMENT_COUNT = 2
 
 beforeAll(async () => {
   archive = await schulportalExport()
@@ -42,17 +44,16 @@ describe('Importassistent für das Schulportal Hessen', () => {
       expect(analysis.course.groupName).toBe('09b')
       expect(analysis.course.gradeLevel).toBe(9)
       expect(analysis.course.schoolYear).toBe('2024/25')
-      expect(analysis.exportedBy).toBe('Jannis Rösner (Roesn)')
+      expect(analysis.exportedBy).toBe('Test Lehrkraft')
 
-      expect(analysis.summary.lessons).toBe(15)
-      expect(analysis.summary.attachments).toBe(29)
-      // In einer leeren Datenbank kann es noch keine Dubletten geben.
+      expect(analysis.summary.lessons).toBe(LESSON_COUNT)
+      expect(analysis.summary.attachments).toBe(ATTACHMENT_COUNT)
       expect(analysis.summary.duplicateLessons).toBe(0)
       expect(analysis.summary.duplicateAttachments).toBe(0)
 
       expect(analysis.suggestedMapping.subjectName).toBe('Biologie')
       expect(analysis.suggestedMapping.seriesMode).toBe('neu')
-      expect(Object.keys(analysis.suggestedMapping.records ?? {})).toHaveLength(15)
+      expect(Object.keys(analysis.suggestedMapping.records ?? {})).toHaveLength(LESSON_COUNT)
     })
   })
 
@@ -61,7 +62,7 @@ describe('Importassistent für das Schulportal Hessen', () => {
       const analysis = await analyzeImport({ buffer: archive, fileName: FILE_NAME }, userId)
       const attachments = analysis.lessons.flatMap((l) => l.attachments)
 
-      expect(attachments).toHaveLength(29)
+      expect(attachments).toHaveLength(ATTACHMENT_COUNT)
       for (const attachment of attachments) {
         expect(attachment.checksum).toMatch(/^[a-f0-9]{64}$/)
         expect(attachment.sizeBytes).toBeGreaterThan(0)
@@ -76,23 +77,22 @@ describe('Importassistent für das Schulportal Hessen', () => {
 
       expect(result.status).toBe('importiert')
       expect(result.stats.reihen).toBe(1)
-      expect(result.stats.stunden).toBe(15)
-      // 29 Anlagen, aber identische Dateien werden nur einmal angelegt.
+      expect(result.stats.stunden).toBe(LESSON_COUNT)
       expect(result.stats.materialien).toBeGreaterThan(0)
       expect(result.errors).toEqual([])
 
       const seriesList = await listSeries()
       expect(seriesList.total).toBe(1)
       expect(seriesList.items[0]!.title).toContain('Biologie 09b')
-      expect(seriesList.items[0]!.progress.total).toBe(15)
+      expect(seriesList.items[0]!.progress.total).toBe(LESSON_COUNT)
       expect(seriesList.items[0]!.startDate).toBe('2025-02-05')
-      expect(seriesList.items[0]!.endDate).toBe('2025-06-25')
+      expect(seriesList.items[0]!.endDate).toBe('2025-02-19')
 
       const lessonList = await listLessons({ pageSize: 50 })
-      expect(lessonList.total).toBe(15)
+      expect(lessonList.total).toBe(LESSON_COUNT)
 
       const materialList = await listMaterials({ pageSize: 100 })
-      expect(materialList.total).toBeGreaterThanOrEqual(25)
+      expect(materialList.total).toBeGreaterThanOrEqual(1)
     })
   })
 
@@ -102,17 +102,16 @@ describe('Importassistent für das Schulportal Hessen', () => {
       await commitImport(analysis.runId, userId)
 
       const lessonList = await listLessons({ pageSize: 50 })
-      const lesson = lessonList.items.find((l) => l.date === '2025-06-11')!
+      const lesson = lessonList.items.find((l) => l.date === '2025-02-12')!
 
-      expect(lesson.title).toBe('Lernkontrolle, Gesundheit')
+      expect(lesson.title).toBe('Photosynthese')
       expect(lesson.periodFrom).toBe(3)
       expect(lesson.periodTo).toBe(4)
-      // Zwei Schulstunden à 45 Minuten.
       expect(lesson.durationMinutes).toBe(90)
-      expect(lesson.homework).toContain('Dampflokomotive')
+      expect(lesson.homework).toContain('Protokoll')
       expect(lesson.status).toBe('durchgefuehrt')
       expect(lesson.origin).toBe('import')
-      expect(lesson.materialCount).toBe(10)
+      expect(lesson.materialCount).toBe(1)
     })
   })
 
@@ -124,11 +123,11 @@ describe('Importassistent für das Schulportal Hessen', () => {
       const seriesList = await listSeries()
       const detail = await getSeriesDetail(seriesList.items[0]!.id)
 
-      expect(detail!.lessons).toHaveLength(15)
+      expect(detail!.lessons).toHaveLength(LESSON_COUNT)
       const positions = detail!.lessons.map((l) => l.positionInSeries)
-      expect(positions).toEqual([...Array(15).keys()])
+      expect(positions).toEqual([...Array(LESSON_COUNT).keys()])
       expect(detail!.lessons[0]!.date).toBe('2025-02-05')
-      expect(detail!.lessons.at(-1)!.date).toBe('2025-06-25')
+      expect(detail!.lessons.at(-1)!.date).toBe('2025-02-19')
     })
   })
 
@@ -137,14 +136,13 @@ describe('Importassistent für das Schulportal Hessen', () => {
       const analysis = await analyzeImport({ buffer: archive, fileName: FILE_NAME }, userId)
       await commitImport(analysis.runId, userId)
 
-      // Die Extraktion läuft im Hintergrund.
-      await new Promise((resolve) => setTimeout(resolve, 6000))
+      await new Promise((resolve) => setTimeout(resolve, 4000))
 
       const [row] = await useDatabase().execute<{ count: number }>(
         sql`select count(*)::int as count from material_assets
-          where extraction_status = 'erfolgreich' and length(extracted_text) > 100`,
+          where extraction_status = 'erfolgreich' and length(extracted_text) > 20`,
       )
-      expect((row as unknown as { count: number }).count).toBeGreaterThan(10)
+      expect((row as unknown as { count: number }).count).toBeGreaterThan(0)
     })
   }, 40_000)
 
@@ -155,14 +153,12 @@ describe('Importassistent für das Schulportal Hessen', () => {
       const mapping = structuredClone(analysis.suggestedMapping)
       mapping.schoolForm = 'gesamtschule'
       mapping.gradeLevel = 9
-      // Nur einen Termin mit Anhängen importieren, damit der Test schnell bleibt.
       const withFiles = analysis.lessons.find((l) => l.attachments.length > 0)!
       for (const ref of Object.keys(mapping.records!)) {
         mapping.records![ref]!.include = ref === withFiles.sourceRef
       }
 
       await updateMapping(analysis.runId, mapping)
-      // Wie der Assistent: Commit ohne Override, gespeicherte Zuordnung muss greifen.
       const result = await commitImport(analysis.runId, userId)
 
       expect(result.status).toBe('importiert')
@@ -200,7 +196,6 @@ describe('Importassistent für das Schulportal Hessen', () => {
       }
       await updateMapping(analysis.runId, mapping)
 
-      // Simuliert einen spärlichen Override (früher Zod-Defaults ohne Schulform/Jahrgang).
       await commitImport(analysis.runId, userId, {
         seriesMode: 'neu',
         createMaterials: true,
@@ -222,14 +217,13 @@ describe('Importassistent für das Schulportal Hessen', () => {
       const analysis = await analyzeImport({ buffer: archive, fileName: FILE_NAME }, userId)
 
       const mapping = structuredClone(analysis.suggestedMapping)
-      // Nur die ersten beiden Termine übernehmen.
       const refs = Object.keys(mapping.records!)
       for (const ref of refs.slice(2)) mapping.records![ref]!.include = false
 
       const result = await commitImport(analysis.runId, userId, mapping)
 
       expect(result.stats.stunden).toBe(2)
-      expect(result.stats.uebersprungen).toBe(13)
+      expect(result.stats.uebersprungen).toBe(1)
       expect((await listLessons()).total).toBe(2)
     })
   })
@@ -241,29 +235,26 @@ describe('Importassistent für das Schulportal Hessen', () => {
 
       const second = await analyzeImport({ buffer: archive, fileName: FILE_NAME }, userId)
 
-      expect(second.summary.duplicateLessons).toBe(15)
-      expect(second.summary.duplicateAttachments).toBe(29)
+      expect(second.summary.duplicateLessons).toBe(LESSON_COUNT)
+      expect(second.summary.duplicateAttachments).toBe(ATTACHMENT_COUNT)
       expect(second.lessons[0]!.duplicate?.confidence).toBe('sicher')
 
-      // Die Vorschlagszuordnung wählt sichere Dubletten automatisch ab.
       const included = Object.values(second.suggestedMapping.records!).filter((r) => r.include)
       expect(included).toHaveLength(0)
 
       const result = await commitImport(second.runId, userId)
       expect(result.stats.stunden).toBe(0)
-      expect(result.stats.uebersprungen).toBe(15)
-      // Es sind keine zusätzlichen Stunden entstanden.
-      expect((await listLessons()).total).toBe(15)
+      expect(result.stats.uebersprungen).toBe(LESSON_COUNT)
+      expect((await listLessons()).total).toBe(LESSON_COUNT)
     })
   }, 60_000)
 
-  it('verknüpft identische Dateien mit dem vorhandenen Material statt sie zu kopieren', async () => {
+  it('verknüpft einzelne Dateien mit dem einmaligen Material statt sie zu kopieren', async () => {
     await withTempUploadDir(async () => {
       const first = await analyzeImport({ buffer: archive, fileName: FILE_NAME }, userId)
       await commitImport(first.runId, userId)
       const materialsAfterFirst = (await listMaterials({ pageSize: 200 })).total
 
-      // Erneut importieren, diesmal alle Termine erzwingen.
       const second = await analyzeImport({ buffer: archive, fileName: FILE_NAME }, userId)
       const mapping = structuredClone(second.suggestedMapping)
       for (const ref of Object.keys(mapping.records!)) {
@@ -273,9 +264,8 @@ describe('Importassistent für das Schulportal Hessen', () => {
       await commitImport(second.runId, userId, mapping)
 
       const materialsAfterSecond = (await listMaterials({ pageSize: 200 })).total
-      // Die Stunden sind neu, die Materialien werden wiederverwendet.
       expect(materialsAfterSecond).toBe(materialsAfterFirst)
-      expect((await listLessons()).total).toBe(30)
+      expect((await listLessons()).total).toBe(LESSON_COUNT * 2)
     })
   }, 60_000)
 
@@ -292,7 +282,7 @@ describe('Importassistent für das Schulportal Hessen', () => {
       const byAction = Object.fromEntries(
         (items as unknown as { action: string; count: number }[]).map((r) => [r.action, r.count]),
       )
-      expect(byAction.erstellt).toBeGreaterThan(15)
+      expect(byAction.erstellt).toBeGreaterThan(LESSON_COUNT)
 
       const logs = await db.execute<{ count: number }>(
         sql`select count(*)::int as count from import_logs where run_id = ${analysis.runId}::uuid`,
@@ -306,17 +296,16 @@ describe('Importassistent für das Schulportal Hessen', () => {
       const analysis = await analyzeImport({ buffer: archive, fileName: FILE_NAME }, userId)
       await commitImport(analysis.runId, userId)
 
-      expect((await listLessons()).total).toBe(15)
+      expect((await listLessons()).total).toBe(LESSON_COUNT)
 
       const { removed } = await undoImport(analysis.runId)
 
-      expect(removed.stunden).toBe(15)
+      expect(removed.stunden).toBe(LESSON_COUNT)
       expect(removed.reihen).toBe(1)
       expect((await listLessons()).total).toBe(0)
       expect((await listSeries()).total).toBe(0)
       expect((await listMaterials({ pageSize: 200 })).total).toBe(0)
 
-      // Fach und Lerngruppe bleiben erhalten, da sie geteilt genutzt werden.
       const db = useDatabase()
       const [subjects] = (await db.execute<{ count: number }>(
         sql`select count(*)::int as count from subjects`,

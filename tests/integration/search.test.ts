@@ -57,13 +57,13 @@ describe('Hybride Suche', () => {
   it('durchsucht Metadaten wie Fach, Schlagwörter und Autor', async () => {
     const subjectId = await getOrCreateSubject('Biologie')
     await createMaterial(
-      { title: 'Unbenanntes Blatt', subjectIds: [subjectId], tagNames: ['Pubertät'], author: 'Rösner' },
+      { title: 'Unbenanntes Blatt', subjectIds: [subjectId], tagNames: ['Botanik'], author: 'Muster' },
       userId,
     )
     await waitForIndex()
 
-    expect((await search('Pubertät')).hits).toHaveLength(1)
-    expect((await search('Rösner')).hits).toHaveLength(1)
+    expect((await search('Botanik')).hits).toHaveLength(1)
+    expect((await search('Muster')).hits).toHaveLength(1)
     expect((await search('Biologie')).hits).toHaveLength(1)
   })
 
@@ -72,7 +72,7 @@ describe('Hybride Suche', () => {
       const { readFile } = await import('node:fs/promises')
       const { fileURLToPath } = await import('node:url')
       const buffer = await readFile(
-        fileURLToPath(new URL('../fixtures/AB1-Sexuelle-Vielfalt.pdf', import.meta.url)),
+        fileURLToPath(new URL('../fixtures/sample.pdf', import.meta.url)),
       )
 
       // Der Titel enthält den gesuchten Begriff bewusst nicht.
@@ -80,19 +80,19 @@ describe('Hybride Suche', () => {
       const detail = await getMaterialDetail(id)
       await addFileAsset(detail!.variants[0]!.id, {
         buffer,
-        fileName: 'AB1-Sexuelle-Vielfalt.pdf',
+        fileName: 'sample.pdf',
       })
 
       await new Promise((resolve) => setTimeout(resolve, 3000))
       await waitForIndex()
 
-      const result = await search('Heterosexualität')
+      const result = await search('Zellteilung')
       expect(result.hits).toHaveLength(1)
       expect(result.hits[0]!.entityId).toBe(id)
       expect(result.hits[0]!.matchedIn).toContain('inhalt')
       // Der Textausschnitt zeigt die Fundstelle mit Hervorhebung.
       expect(result.hits[0]!.snippet).toContain('<mark>')
-      expect(result.hits[0]!.sourceLabel).toBe('AB1-Sexuelle-Vielfalt.pdf')
+      expect(result.hits[0]!.sourceLabel).toBe('sample.pdf')
     })
   }, 30_000)
 

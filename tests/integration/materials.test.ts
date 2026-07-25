@@ -53,7 +53,7 @@ describe('Materialverwaltung', () => {
         description: 'Beschriftung der Bestandteile des Auges',
         materialType: 'arbeitsblatt',
         schoolForm: 'gesamtschule',
-        author: 'J. Rösner',
+        author: 'J. Muster',
         pages: 'S. 244–245',
         learningObjectives: ['Bestandteile des Auges benennen'],
         subjectIds: [subjectId],
@@ -138,14 +138,14 @@ describe('Materialverwaltung', () => {
       const { readFile } = await import('node:fs/promises')
       const { fileURLToPath } = await import('node:url')
       const buffer = await readFile(
-        fileURLToPath(new URL('../fixtures/AB1-Sexuelle-Vielfalt.pdf', import.meta.url)),
+        fileURLToPath(new URL('../fixtures/sample.pdf', import.meta.url)),
       )
 
-      const id = await createMaterial({ title: 'Sexuelle Vielfalt' }, userId)
+      const id = await createMaterial({ title: 'Photosynthese' }, userId)
       const detail = await getMaterialDetail(id)
       const assetId = await addFileAsset(detail!.variants[0]!.id, {
         buffer,
-        fileName: 'AB1-Sexuelle-Vielfalt.pdf',
+        fileName: 'sample.pdf',
       })
       expect(assetId).toBeTruthy()
 
@@ -154,7 +154,7 @@ describe('Materialverwaltung', () => {
 
       const updated = await getMaterialDetail(id)
       const asset = updated!.variants[0]!.assets[0]!
-      expect(asset.fileName).toBe('AB1-Sexuelle-Vielfalt.pdf')
+      expect(asset.fileName).toBe('sample.pdf')
       expect(asset.mimeType).toBe('application/pdf')
       expect(asset.sizeBytes).toBe(buffer.length)
       expect(asset.extractionStatus).toBe('erfolgreich')

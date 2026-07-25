@@ -68,10 +68,10 @@ describe('normalizeSchoolYear', () => {
 })
 
 describe('Erkennung des Schulportal-Exports', () => {
-  it('erkennt den realen Export mit voller Sicherheit', async () => {
+  it('erkennt das Beispielarchiv mit voller Sicherheit', async () => {
     const result = await adapter.detect(source)
     expect(result.confidence).toBe(1)
-    expect(result.reason).toContain('15 Terminen')
+    expect(result.reason).toContain('3 Terminen')
   })
 
   it('lehnt Dateien ab, die kein ZIP-Archiv sind', async () => {
@@ -106,15 +106,15 @@ describe('Auswertung des Schulportal-Exports', () => {
     expect(parsed.course.gradeLevel).toBe(9)
     expect(parsed.course.schoolYear).toBe('2024/25')
     expect(parsed.course.halfYear).toBe(2)
-    expect(parsed.exportedBy).toBe('Jannis Rösner (Roesn)')
+    expect(parsed.exportedBy).toBe('Test Lehrkraft')
   })
 
-  it('liest alle 15 Termine chronologisch aufsteigend', async () => {
+  it('liest die Termine chronologisch aufsteigend', async () => {
     const parsed = await adapter.parse(source)
 
-    expect(parsed.lessons).toHaveLength(15)
+    expect(parsed.lessons).toHaveLength(3)
     expect(parsed.lessons[0]!.date).toBe('2025-02-05')
-    expect(parsed.lessons.at(-1)!.date).toBe('2025-06-25')
+    expect(parsed.lessons.at(-1)!.date).toBe('2025-02-19')
 
     const dates = parsed.lessons.map((l) => l.date)
     expect([...dates].sort()).toEqual(dates)
@@ -122,35 +122,34 @@ describe('Auswertung des Schulportal-Exports', () => {
 
   it('übernimmt Thema, Inhalt, Hausaufgaben und Schulstunden', async () => {
     const parsed = await adapter.parse(source)
-    const lesson = parsed.lessons.find((l) => l.date === '2025-06-11')!
+    const lesson = parsed.lessons.find((l) => l.date === '2025-02-12')!
 
-    expect(lesson.topic).toBe('Lernkontrolle, Gesundheit')
+    expect(lesson.topic).toBe('Photosynthese')
     expect(lesson.periodFrom).toBe(3)
     expect(lesson.periodTo).toBe(4)
     expect(lesson.periods).toBe(2)
-    expect(lesson.content).toContain('Brustkrebs und Hodenkrebs')
-    expect(lesson.homework).toContain('Dampflokomotive')
+    expect(lesson.content).toContain('Photosynthese')
+    expect(lesson.homework).toContain('Protokoll')
     expect(lesson.substituteTeacher).toBeNull()
   })
 
   it('ordnet die Anlagen den richtigen Terminen zu', async () => {
     const parsed = await adapter.parse(source)
-    const lesson = parsed.lessons.find((l) => l.date === '2025-06-11')!
+    const lesson = parsed.lessons.find((l) => l.date === '2025-02-05')!
 
-    expect(lesson.attachments).toHaveLength(10)
-    expect(lesson.attachments.map((a) => a.fileName)).toContain('AB-Hoden.pdf')
-    // Die Größe stammt aus dem Archiv und wird für die Vorschau benötigt.
+    expect(lesson.attachments).toHaveLength(1)
+    expect(lesson.attachments[0]!.fileName).toBe('Arbeitsblatt.pdf')
     expect(lesson.attachments[0]!.sizeBytes).toBeGreaterThan(0)
 
     const total = parsed.lessons.reduce((sum, l) => sum + l.attachments.length, 0)
-    expect(total).toBe(29)
+    expect(total).toBe(2)
   })
 
   it('behandelt Termine ohne Inhalt oder Anlagen fehlerfrei', async () => {
     const parsed = await adapter.parse(source)
-    const lesson = parsed.lessons.find((l) => l.date === '2025-06-25')!
+    const lesson = parsed.lessons.find((l) => l.date === '2025-02-19')!
 
-    expect(lesson.topic).toBe('Abschluss Biologie')
+    expect(lesson.topic).toBe('Abschluss')
     expect(lesson.content).toBeNull()
     expect(lesson.homework).toBeNull()
     expect(lesson.attachments).toEqual([])
@@ -158,7 +157,6 @@ describe('Auswertung des Schulportal-Exports', () => {
 
   it('meldet keine verwaisten Dateien für einen vollständigen Export', async () => {
     const parsed = await adapter.parse(source)
-    // Manifest und Hinweis.txt zählen nicht als verwaist.
     expect(parsed.orphanFiles).toEqual([])
   })
 
@@ -166,13 +164,13 @@ describe('Auswertung des Schulportal-Exports', () => {
     const parsed = await adapter.parse(source)
     const refs = parsed.lessons.map((l) => l.sourceRef)
     expect(new Set(refs).size).toBe(refs.length)
-    expect(refs).toContain('termin:2025-06-11')
+    expect(refs).toContain('termin:2025-02-12')
   })
 
   it('liefert den Inhalt einer Anlage auf Anforderung', async () => {
     const buffer = await adapter.readAttachment(
       source,
-      '20250611_Lernkontrolle_Gesundheit/AB-Hoden.pdf',
+      '20250205_Einfuehrung/Arbeitsblatt.pdf',
     )
     expect(buffer).not.toBeNull()
     expect(buffer!.subarray(0, 4).toString()).toBe('%PDF')
