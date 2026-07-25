@@ -588,7 +588,7 @@ const loesungBearbeitbar = computed(
             icon="code-branch"
             einklappbar
             einklapp-id="material-varianten"
-            :standard-offen="false"
+            :standard-offen="!data.variants.some((v) => v.assets.length)"
           >
             <template #kopf>
               <UiButton
@@ -632,7 +632,7 @@ const loesungBearbeitbar = computed(
                         @change="dateienHochladen(variante.id, ($event.target as HTMLInputElement).files)"
                       >
                       <span class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line bg-surface px-3 text-sm hover:bg-surface-hover">
-                        <UiIcon name="upload" fest /> Datei
+                        <UiIcon name="upload" fest /> Hochladen
                       </span>
                     </label>
                     <UiButton

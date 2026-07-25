@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
  * Papierähnliche Dokument-Miniatur (paperless-Stil).
- * Lädt `/api/assets/:id/thumbnail`; bei Fehler oder fehlender Datei Icon-Platzhalter.
+ * Lädt die Miniatur per fetch (kein <img src> auf 404 → weniger Konsolen-Spam)
+ * und fällt bei Fehler auf Icon-Platzhalter zurück.
  */
 const props = withDefaults(
   defineProps<{
@@ -19,6 +20,8 @@ const emit = defineEmits<{ klick: [] }>()
 
 const geladen = ref(false)
 const fehler = ref(false)
+const src = ref<string | null>(null)
+let objectUrl: string | null = null
 
 const hatMiniatur = computed(() => {
   if (!props.assetId) return false
@@ -31,10 +34,6 @@ const hatMiniatur = computed(() => {
   )
 })
 
-const src = computed(() =>
-  hatMiniatur.value && props.assetId ? `/api/assets/${props.assetId}/thumbnail` : null,
-)
-
 const icon = computed(() => dateiIcon(props.fileName))
 
 const mass = computed(() => {
@@ -43,9 +42,52 @@ const mass = computed(() => {
   return 'h-24 w-[4.5rem]'
 })
 
-watch(src, () => {
+function revokeObjectUrl() {
+  if (objectUrl) {
+    URL.revokeObjectURL(objectUrl)
+    objectUrl = null
+  }
+}
+
+async function ladeMiniatur(assetId: string) {
   geladen.value = false
   fehler.value = false
+  revokeObjectUrl()
+  src.value = null
+
+  try {
+    const response = await fetch(`/api/assets/${assetId}/thumbnail`, {
+      credentials: 'same-origin',
+    })
+    if (!response.ok) {
+      fehler.value = true
+      return
+    }
+    const blob = await response.blob()
+    objectUrl = URL.createObjectURL(blob)
+    src.value = objectUrl
+  } catch {
+    fehler.value = true
+  }
+}
+
+watch(
+  () => (hatMiniatur.value ? props.assetId : null),
+  (assetId) => {
+    if (!assetId) {
+      geladen.value = false
+      fehler.value = false
+      revokeObjectUrl()
+      src.value = null
+      return
+    }
+    void ladeMiniatur(assetId)
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(() => {
+  revokeObjectUrl()
 })
 </script>
 

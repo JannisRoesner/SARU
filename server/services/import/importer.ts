@@ -692,6 +692,13 @@ export async function getRunOverview(runId: string): Promise<RunOverview> {
     .limit(1)
   if (!run) throw notFound('Der Importvorgang')
 
+  if (run.adapterId === 'bulk-pdf-materials') {
+    throw appError(
+      'UNGUELTIGE_EINGABE',
+      'Dieser Vorgang ist ein PDF-Stapel-Upload. Bitte unter Materialien → Stapel-Upload öffnen.',
+    )
+  }
+
   const detected = (run.detected ?? {}) as {
     course?: ParsedExport['course']
     lessons?: AnalyzedLesson[]

@@ -326,6 +326,30 @@ export const importMappingSchema = z.object({
     .optional(),
 })
 
+/** Gemeinsame Zuordnung + pro Datei editierbare Vorschläge beim PDF-Stapel-Upload. */
+export const bulkUploadMappingSchema = z.object({
+  subjectId: uuidSchema.nullish(),
+  subjectName: z.string().max(120).optional(),
+  gradeLevel: gradeLevelSchema.nullish(),
+  schoolForm: z.enum(SCHOOL_FORMS).nullish(),
+  defaultMaterialType: z.enum(MATERIAL_TYPES).default('arbeitsblatt'),
+  linkDuplicates: z.boolean().default(true),
+  records: z
+    .record(
+      z.string(),
+      z.object({
+        include: z.boolean().default(true),
+        title: z.string().max(300).optional(),
+        materialType: z.enum(MATERIAL_TYPES).optional(),
+        description: z.string().max(2000).optional(),
+        tagNames: z.array(z.string().min(1).max(120)).max(12).optional(),
+        action: z.enum(['erstellen', 'ueberspringen']).default('erstellen'),
+        duplicateOfId: uuidSchema.nullish(),
+      }),
+    )
+    .optional(),
+})
+
 // --------------------------------------------------------------- Einstellungen
 
 export const aiSettingsSchema = z

@@ -1,6 +1,7 @@
-import { desc } from 'drizzle-orm'
+import { and, desc } from 'drizzle-orm'
 import { useDatabase } from '../../database/client'
 import { importRuns } from '../../database/schema'
+import { excludeBulkAdapterSql } from '../../services/bulk-upload/bulk-upload.service'
 import { requireEditor } from '../../utils/auth'
 
 export default defineEventHandler(async (event) => {
@@ -21,6 +22,7 @@ export default defineEventHandler(async (event) => {
       undoneAt: importRuns.undoneAt,
     })
     .from(importRuns)
+    .where(and(excludeBulkAdapterSql()))
     .orderBy(desc(importRuns.startedAt))
     .limit(50)
 })

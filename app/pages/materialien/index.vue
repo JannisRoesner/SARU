@@ -125,6 +125,9 @@ const aktiveFilter = computed(() => {
       untertitel="Arbeitsblätter, Präsentationen und anderes Unterrichtsmaterial. Suchen, filtern und wiederverwenden."
     >
       <template v-if="darfBearbeiten" #aktionen>
+        <UiButton to="/materialien/stapel" variante="sekundaer" icon="layer-group">
+          Stapel-Upload
+        </UiButton>
         <UiButton to="/materialien/neu" variante="primaer" icon="plus">
           Material anlegen
         </UiButton>

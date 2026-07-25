@@ -66,6 +66,22 @@ export default defineNuxtConfig({
 
   nitro: {
     experimental: { asyncContext: true },
+    // Native Bindings und pdf.js-Assets nicht in Server-Chunks bündeln –
+    // sonst scheitern dlopen / cMap-/Font-/WASM-Pfade im Produktionsimage.
+    externals: {
+      external: [
+        '@napi-rs/canvas',
+        /^@napi-rs\/canvas-.*/,
+        'pdfjs-dist',
+        /^pdfjs-dist\/.*/,
+      ],
+      traceInclude: [
+        'node_modules/@napi-rs/canvas/**',
+        'node_modules/@napi-rs/canvas-linux-x64-gnu/**',
+        'node_modules/@napi-rs/canvas-linux-arm64-gnu/**',
+        'node_modules/pdfjs-dist/**',
+      ],
+    },
   },
 
   typescript: {

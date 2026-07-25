@@ -5,12 +5,22 @@ import { createLogger } from '../../utils/logger'
 
 const log = createLogger('ai:rasterize')
 
+/** Resolve über package-Name, nicht über gebündelte Chunk-URL (Nitro/Docker). */
 const require = createRequire(import.meta.url)
 
+function pdfjsPackageRoot(): string {
+  try {
+    return dirname(require.resolve('pdfjs-dist/package.json'))
+  } catch {
+    // Fallback: NODE_PATH=/app/node_modules im Produktionsimage
+    const fromNodePath = createRequire(join(process.cwd(), 'package.json'))
+    return dirname(fromNodePath.resolve('pdfjs-dist/package.json'))
+  }
+}
+
 function pdfjsAssetUrl(...segments: string[]): string {
-  const root = dirname(require.resolve('pdfjs-dist/package.json'))
   // Trailing slash ist für pdf.js Pflicht (cMapUrl / standardFontDataUrl / wasmUrl).
-  return pathToFileURL(join(root, ...segments) + '/').href
+  return pathToFileURL(join(pdfjsPackageRoot(), ...segments) + '/').href
 }
 
 export interface RasterizedPage {

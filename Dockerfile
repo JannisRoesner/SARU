@@ -19,8 +19,11 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
+    fontconfig \
+    fonts-dejavu-core \
     gosu \
     gnupg \
+    libfontconfig1 \
   && curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
   && apt-get install -y --no-install-recommends nodejs \
   && apt-get clean \
@@ -35,15 +38,19 @@ COPY --from=build /app/scripts ./scripts
 COPY --from=build /app/server/database/migrations ./server/database/migrations
 COPY docker/entrypoint.sh /entrypoint.sh
 
+# @napi-rs/canvas braucht libfontconfig zur Laufzeit; nativer Binding + pdfjs
+# müssen aus /app/node_modules auflösbar sein (nicht nur Nitro-Trace).
 RUN chmod +x /entrypoint.sh \
   && mkdir -p /data/uploads \
-  && chown -R postgres:postgres /var/lib/postgresql
+  && chown -R postgres:postgres /var/lib/postgresql \
+  && node scripts/check-canvas.mjs
 
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000 \
     NITRO_HOST=0.0.0.0 \
     NITRO_PORT=3000 \
+    NODE_PATH=/app/node_modules \
     PGDATA=/var/lib/postgresql/data \
     POSTGRES_USER=saru \
     POSTGRES_DB=saru \
