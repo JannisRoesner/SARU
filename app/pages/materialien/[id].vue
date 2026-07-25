@@ -935,6 +935,7 @@ const loesungBearbeitbar = computed(
       :titel="vorschauTitel"
       :loesung-bearbeiten="loesungBearbeitbar"
       :struktur="loesungStruktur"
+      :material-id="loesungBearbeitbar ? id : null"
       :quellen-asset-id="data?.aiMeta?.sourceAssetId ?? null"
       :modell-credit="kiCredit"
       :geprueft="Boolean(data?.aiMeta?.reviewed)"

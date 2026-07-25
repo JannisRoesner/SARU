@@ -4,6 +4,7 @@ import type {
   StoredSolutionAnswer,
   StoredStructuredSolution,
 } from '~~/server/database/schema/materials'
+import { overlayFieldType, overlayFontSizePx } from '#shared/utils/solution-overlay'
 
 const offen = defineModel<boolean>({ required: true })
 
@@ -14,6 +15,8 @@ const props = defineProps<{
   /** KI-Musterlösung: strukturierte Antworten bearbeiten + Overlay neu zeichnen. */
   loesungBearbeiten?: boolean
   struktur?: StoredStructuredSolution | null
+  /** Material-ID – lädt an PDF-Geometrie ausgerichtete bboxes für die Vorschau. */
+  materialId?: string | null
   /** Quell-PDF für Seitenbild mit verschiebbaren Antwortboxen. */
   quellenAssetId?: string | null
   modellCredit?: string | null
@@ -50,6 +53,8 @@ const drag = ref<{
 } | null>(null)
 
 const seitenFlaeche = ref<HTMLElement | null>(null)
+const seitenHoehePx = ref(0)
+let seitenResizeObserver: ResizeObserver | null = null
 
 async function laden() {
   if (!props.assetId) return
@@ -74,7 +79,7 @@ async function laden() {
   }
 }
 
-function strukturInitialisieren() {
+function strukturAusProps() {
   if (!props.struktur) {
     lokalStruktur.value = null
     return
@@ -85,10 +90,28 @@ function strukturInitialisieren() {
   seite.value = lokalStruktur.value.answers[0]?.page ?? 1
 }
 
+async function strukturInitialisieren() {
+  strukturAusProps()
+  if (!props.loesungBearbeiten || !props.materialId || !props.struktur) return
+  try {
+    const data = await $fetch<{ structuredSolution: StoredStructuredSolution }>(
+      `/api/materials/${props.materialId}/solution`,
+    )
+    if (!data?.structuredSolution?.answers || !offen.value) return
+    const aktive = aktiveAntwortId.value
+    lokalStruktur.value = data.structuredSolution
+    if (aktive && data.structuredSolution.answers.some((a) => a.id === aktive)) {
+      aktiveAntwortId.value = aktive
+    }
+  } catch {
+    // Fallback: props.struktur (Vision-bboxes) bleibt.
+  }
+}
+
 watch(offen, (istOffen) => {
   if (istOffen) {
     void laden()
-    strukturInitialisieren()
+    void strukturInitialisieren()
   }
 })
 
@@ -102,9 +125,24 @@ watch(
 watch(
   () => props.struktur,
   () => {
-    if (offen.value) strukturInitialisieren()
+    if (offen.value) void strukturInitialisieren()
   },
 )
+
+function seitenObserverAnbinden(el: HTMLElement | null) {
+  seitenResizeObserver?.disconnect()
+  seitenResizeObserver = null
+  if (!el || typeof ResizeObserver === 'undefined') return
+  seitenResizeObserver = new ResizeObserver((entries) => {
+    const h = entries[0]?.contentRect.height ?? 0
+    if (h > 0) seitenHoehePx.value = h
+  })
+  seitenResizeObserver.observe(el)
+  const h = el.getBoundingClientRect().height
+  if (h > 0) seitenHoehePx.value = h
+}
+
+watch(seitenFlaeche, (el) => seitenObserverAnbinden(el), { flush: 'post' })
 
 const anzeigeTitel = computed(
   () => info.value?.title || props.titel || 'Dokumentvorschau',
@@ -156,6 +194,21 @@ function bboxVon(antwort: StoredSolutionAnswer) {
   }
 }
 
+function antwortTextStyle(antwort: StoredSolutionAnswer) {
+  const box = bboxVon(antwort)
+  const fieldType = overlayFieldType({
+    fieldType: antwort.fieldType,
+    bboxH: box.h,
+    answer: antwort.answer,
+  })
+  const boxHeightPx = Math.max(8, box.h * (seitenHoehePx.value || 800))
+  const fontSize = overlayFontSizePx(boxHeightPx, fieldType)
+  return {
+    '--pdf-font-size': `${fontSize}px`,
+    '--pdf-line-gap': fieldType === 'freitext' ? '3px' : '2px',
+  }
+}
+
 function antwortBoxAktualisieren(
   id: string,
   bbox: { x: number; y: number; w: number; h: number },
@@ -168,6 +221,8 @@ function antwortBoxAktualisieren(
         ? {
             ...a,
             page: seite.value,
+            // Manuelle Position: Geometrie-Sync beim nächsten Öffnen nicht überschreiben.
+            blankIndex: null,
             bbox: {
               x: clamp01(bbox.x),
               y: clamp01(bbox.y),
@@ -247,7 +302,11 @@ async function speichern(reRender: boolean) {
 }
 
 onMounted(() => document.addEventListener('keydown', beiTaste))
-onBeforeUnmount(() => document.removeEventListener('keydown', beiTaste))
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', beiTaste)
+  seitenResizeObserver?.disconnect()
+  seitenResizeObserver = null
+})
 </script>
 
 <template>
@@ -357,14 +416,13 @@ onBeforeUnmount(() => document.removeEventListener('keydown', beiTaste))
                     top: `${bboxVon(antwort).y * 100}%`,
                     width: `${bboxVon(antwort).w * 100}%`,
                     height: `${bboxVon(antwort).h * 100}%`,
+                    ...antwortTextStyle(antwort),
                   }"
                   :title="antwort.label"
                   @click="antwortFokussieren(antwort.id)"
                   @pointerdown="dragStart($event, antwort, 'move')"
                 >
-                  <span class="pdf-antwort-box__text">
-                    {{ antwort.answer }}
-                  </span>
+                  <span class="pdf-antwort-box__text">{{ antwort.answer }}</span>
                   <span
                     v-if="darfBearbeiten"
                     class="pdf-antwort-box__griff"

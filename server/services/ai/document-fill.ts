@@ -605,7 +605,11 @@ export function blankRegionToBBox(
 }
 
 /**
- * Ergänzt fehlende bbox/fieldType aus erkannter Geometrie – für Persistenz und Nachbearbeitung.
+ * Ergänzt fieldType und bbox aus erkannter Geometrie – für Persistenz und Nachbearbeitung.
+ *
+ * Wichtig: Bei zugeordneter Lücke überschreibt die PDF-Geometrie eine Vision-bbox.
+ * Sonst zeigt der Browser-Editor andere Positionen als das gezeichnete Overlay-PDF
+ * (PDF bevorzugt Geometrie, die Vorschau zeigte bisher die Vision-Koordinaten).
  */
 export function enrichSolutionPlacements(
   solution: StructuredSolution,
@@ -623,10 +627,11 @@ export function enrichSolutionPlacements(
       Math.max(1, pageSizes.length),
     )
     const size = pageSizes[pageNumber - 1] ?? pageSizes[0]
-    let bbox = answer.bbox ?? null
-    if (!bbox && blank && size) {
-      bbox = blankRegionToBBox(blank, size.width, size.height)
-    }
+    // Geometrie hat Vorrang – analog zu resolvePlacements ohne preferBBox.
+    const bbox =
+      blank && size
+        ? blankRegionToBBox(blank, size.width, size.height)
+        : (answer.bbox ?? null)
     const fieldType = inferAnswerFieldType(answer, blank, size?.height)
     return {
       ...answer,

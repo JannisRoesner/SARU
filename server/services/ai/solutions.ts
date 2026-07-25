@@ -684,8 +684,15 @@ export async function updateSolutionStructure(
   let newStrategy = fillStrategy
 
   if (wantsRender && source && PDF_EXTENSIONS.has(source.extension)) {
-    // Nachbearbeitung: gespeicherte bbox/fieldType haben Vorrang.
-    structured = await enrichFromPdfBuffer(source.buffer, structured, [])
+    // Antworten mit blankIndex an Geometrie ausrichten; manuell verschobene
+    // (blankIndex = null) behalten ihre bbox. Anschließend preferBBox zeichnen.
+    let blanks: PdfBlankRegion[] = []
+    try {
+      blanks = await detectPdfBlankRegions(source.buffer)
+    } catch (error) {
+      log.warn('Lückenerkennung beim Neuzeichnen fehlgeschlagen', error)
+    }
+    structured = await enrichFromPdfBuffer(source.buffer, structured, blanks)
     const overlay = await overlayPdfAnswers(source.buffer, structured, { preferBBox: true })
     await replaceHauptAsset(
       material,
@@ -817,6 +824,41 @@ function normalizeStructuredSolution(raw: StructuredSolution): StructuredSolutio
     notesForTeacher: raw.notesForTeacher ? String(raw.notesForTeacher) : null,
     uncertainties: raw.uncertainties ? String(raw.uncertainties) : null,
   }
+}
+
+/**
+ * Liefert die strukturierte Lösung mit an PDF-Geometrie ausgerichteten bboxes
+ * für den Korrektur-Editor (Browser-Vorschau ≈ Overlay-PDF).
+ * Antworten ohne blankIndex (manuell verschoben) behalten ihre bbox.
+ */
+export async function prepareEditableSolutionStructure(
+  materialId: string,
+): Promise<StructuredSolution | null> {
+  const material = await getMaterialDetail(materialId)
+  if (!material?.aiMeta?.structuredSolution) return null
+
+  let structured = normalizeStructuredSolution(material.aiMeta.structuredSolution)
+  const meta = material.aiMeta
+  const sourceMaterialId = meta.sourceMaterialId
+  if (!sourceMaterialId) return structured
+
+  const sourceMaterial = await getMaterialDetail(sourceMaterialId)
+  if (!sourceMaterial) return structured
+
+  const sourceVariant =
+    sourceMaterial.variants.find((v) => v.id === meta.sourceVariantId) ??
+    sourceMaterial.variants.find((v) => v.isDefault) ??
+    sourceMaterial.variants[0]
+  const source = sourceVariant ? await loadPrimarySourceAsset(sourceVariant.id) : null
+  if (!source || !PDF_EXTENSIONS.has(source.extension)) return structured
+
+  try {
+    const blanks = await detectPdfBlankRegions(source.buffer)
+    structured = await enrichFromPdfBuffer(source.buffer, structured, blanks)
+  } catch (error) {
+    log.warn('Editor-Platzierungen konnten nicht an Geometrie ausgerichtet werden', error)
+  }
+  return structured
 }
 
 /** Markiert eine KI-Musterlösung als fachlich geprüft. */

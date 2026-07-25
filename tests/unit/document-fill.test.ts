@@ -3,8 +3,10 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import {
   alignAnswersToBlanks,
+  blankRegionToBBox,
   buildSolutionDocx,
   detectPdfBlankRegions,
+  enrichSolutionPlacements,
   fillDocxDocument,
   fillPdfAcroForm,
   formatBlankInventory,
@@ -16,6 +18,7 @@ import {
   topLeftNormToPdfBaseline,
   type PdfBlankRegion,
 } from '../../server/services/ai/document-fill'
+import { overlayFieldType, overlayFontSizePx } from '../../shared/utils/solution-overlay'
 
 function minimalDocxWithBody(bodyXml: string): Buffer {
   const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -174,6 +177,96 @@ describe('inferAnswerFieldType', () => {
         bbox: { x: 0.1, y: 0.1, w: 0.2, h: 0.02 },
       }),
     ).toBe('luecke')
+  })
+})
+
+describe('enrichSolutionPlacements', () => {
+  it('überschreibt Vision-bbox mit PDF-Geometrie bei blankIndex', () => {
+    const blank: PdfBlankRegion = {
+      pageIndex: 0,
+      blankIndex: 0,
+      x: 100,
+      y: 700,
+      width: 120,
+      height: 14,
+      kind: 'underscore',
+      leftText: 'Die',
+      rightText: 'ist',
+    }
+    const page = { width: 595.28, height: 841.89 }
+    const geo = blankRegionToBBox(blank, page.width, page.height)
+    const enriched = enrichSolutionPlacements(
+      {
+        summary: 'Test',
+        answers: [
+          {
+            id: '1',
+            label: '1',
+            answer: 'Antwort',
+            page: 1,
+            blankIndex: 0,
+            bbox: { x: 0.5, y: 0.85, w: 0.3, h: 0.03 },
+          },
+        ],
+        formFields: [],
+      },
+      [blank],
+      [page],
+    )
+    expect(enriched.answers[0]!.bbox).toEqual(geo)
+    expect(enriched.answers[0]!.bbox!.y).toBeLessThan(0.3)
+  })
+
+  it('lässt manuelle bbox ohne blankIndex unverändert', () => {
+    const manual = { x: 0.15, y: 0.22, w: 0.4, h: 0.03 }
+    const enriched = enrichSolutionPlacements(
+      {
+        summary: 'Test',
+        answers: [
+          {
+            id: '1',
+            label: '1',
+            answer: 'Manuell',
+            page: 1,
+            blankIndex: null,
+            bbox: manual,
+          },
+        ],
+        formFields: [],
+      },
+      [
+        {
+          pageIndex: 0,
+          blankIndex: 0,
+          x: 100,
+          y: 700,
+          width: 120,
+          height: 14,
+          kind: 'underscore',
+          leftText: '',
+          rightText: '',
+        },
+      ],
+      [{ width: 595.28, height: 841.89 }],
+    )
+    expect(enriched.answers[0]!.bbox).toEqual(manual)
+  })
+})
+
+describe('overlayFontSizePx', () => {
+  it('skaliert Lücken- und Freitextschrift analog zum PDF', () => {
+    expect(overlayFontSizePx(20, 'luecke')).toBe(Math.min(14, Math.max(8, 20 * 0.85)))
+    expect(overlayFontSizePx(80, 'freitext')).toBe(Math.min(11, Math.max(7, 80 * 0.2)))
+  })
+})
+
+describe('overlayFieldType', () => {
+  it('respektiert expliziten Typ und leitet hohe Boxen als Freitext ab', () => {
+    expect(overlayFieldType({ fieldType: 'luecke', bboxH: 0.2 })).toBe('luecke')
+    expect(overlayFieldType({ fieldType: 'freitext', bboxH: 0.02 })).toBe('freitext')
+    expect(overlayFieldType({ bboxH: 0.08, answer: 'kurz' })).toBe('freitext')
+    expect(overlayFieldType({ bboxH: 0.02, answer: 'kurz' })).toBe('luecke')
+    expect(overlayFieldType({ bboxH: 0.02, answer: 'a'.repeat(100) })).toBe('freitext')
   })
 })
 
