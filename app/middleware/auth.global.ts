@@ -10,6 +10,12 @@ export default defineNuxtRouteMiddleware(async (to) => {
 
   await laden()
 
+  // Layout muss hier gesetzt werden (vor dem Rendern). setPageLayout in der Page
+  // kommt zu spät und lässt Root-Klassen des default-Layouts stehen (lg:flex).
+  if (to.path === '/') {
+    setPageLayout(benutzer.value ? 'default' : 'landing')
+  }
+
   // Klassischer Login-Pfad → Landing mit Modal (einmalige Umleitung, kein Loop).
   if (!benutzer.value && to.path === '/anmelden') {
     return navigateTo({

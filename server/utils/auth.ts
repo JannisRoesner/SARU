@@ -23,11 +23,33 @@ export function toSafeUser(user: User): SafeUser {
   return rest
 }
 
+/**
+ * Secure-Cookies nur setzen, wenn die Verbindung wirklich TLS nutzt.
+ * Früher: in Production standardmäßig `true` – dadurch speichern Browser das
+ * Sitzungs-Cookie unter reinem HTTP (z. B. LAN-IP) nicht. Login wirkte in der
+ * UI erfolgreich (JSON-Antwort), API-Aufrufe scheiterten mit NICHT_ANGEMELDET.
+ */
 function isSecureRequest(event: H3Event): boolean {
   if (process.env.NODE_ENV !== 'production') return false
-  const proto = getRequestHeader(event, 'x-forwarded-proto')
-  if (process.env.NUXT_TRUST_PROXY === 'true' && proto) return proto.split(',')[0] === 'https'
-  return true
+
+  if (process.env.NUXT_TRUST_PROXY === 'true') {
+    const proto = getRequestHeader(event, 'x-forwarded-proto')?.split(',')[0]?.trim().toLowerCase()
+    if (proto === 'https') return true
+    if (proto === 'http') return false
+  }
+
+  const socket = event.node.req.socket as { encrypted?: boolean } | null | undefined
+  return Boolean(socket?.encrypted)
+}
+
+function sessionCookieOptions(event: H3Event, expires?: Date) {
+  return {
+    httpOnly: true,
+    sameSite: 'lax' as const,
+    secure: isSecureRequest(event),
+    path: '/',
+    ...(expires ? { expires } : {}),
+  }
 }
 
 export function clientIp(event: H3Event): string | undefined {
@@ -51,13 +73,7 @@ export async function createSession(event: H3Event, userId: string): Promise<str
     expiresAt,
   })
 
-  setCookie(event, SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: isSecureRequest(event),
-    path: '/',
-    expires: expiresAt,
-  })
+  setCookie(event, SESSION_COOKIE, token, sessionCookieOptions(event, expiresAt))
 
   return token
 }
@@ -67,7 +83,7 @@ export async function destroySession(event: H3Event): Promise<void> {
   if (token) {
     await useDatabase().delete(sessions).where(eq(sessions.tokenHash, hashToken(token)))
   }
-  deleteCookie(event, SESSION_COOKIE, { path: '/' })
+  deleteCookie(event, SESSION_COOKIE, sessionCookieOptions(event))
 }
 
 /** Meldet alle Sitzungen eines Benutzers ab, z. B. nach einem Passwortwechsel. */
@@ -106,13 +122,7 @@ export async function resolveUser(event: H3Event): Promise<SafeUser | null> {
       .update(sessions)
       .set({ lastSeenAt: new Date(), expiresAt })
       .where(eq(sessions.id, row.sessionId))
-    setCookie(event, SESSION_COOKIE, token, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: isSecureRequest(event),
-      path: '/',
-      expires: expiresAt,
-    })
+    setCookie(event, SESSION_COOKIE, token, sessionCookieOptions(event, expiresAt))
   }
 
   const safe = toSafeUser(row.user)

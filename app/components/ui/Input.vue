@@ -1,4 +1,6 @@
 <script setup lang="ts">
+defineOptions({ inheritAttrs: false })
+
 withDefaults(
   defineProps<{
     type?: string
@@ -13,6 +15,7 @@ withDefaults(
   { type: 'text' },
 )
 
+const attrs = useAttrs()
 const wert = defineModel<string | number | null>()
 const id = inject<string | undefined>('feld-id', undefined)
 </script>
@@ -27,6 +30,7 @@ const id = inject<string | undefined>('feld-id', undefined)
     <input
       :id="id"
       v-model="wert"
+      v-bind="attrs"
       :type="type"
       :placeholder="placeholder"
       :disabled="disabled"

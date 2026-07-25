@@ -35,19 +35,37 @@ export function useSitzung() {
   }
 
   async function anmelden(email: string, passwort: string) {
-    const antwort = await $fetch<{ user: SitzungsBenutzer }>('/api/auth/login', {
+    await $fetch<{ user: SitzungsBenutzer }>('/api/auth/login', {
       method: 'POST',
       body: { email, password: passwort },
     })
-    benutzer.value = antwort.user
+
+    // Cookie muss vom Browser angenommen worden sein – sonst wäre die UI
+    // „angemeldet“, API-Aufrufe scheiterten aber mit 401.
+    const sitzung = await $fetch<{ user: SitzungsBenutzer | null }>('/api/auth/session')
+    if (!sitzung.user) {
+      throw createError({
+        statusCode: 401,
+        statusMessage: 'NICHT_ANGEMELDET',
+        message:
+          'Die Anmeldung konnte nicht gespeichert werden. Bitte die Seite über HTTPS öffnen oder den Administrator kontaktieren.',
+        data: { code: 'NICHT_ANGEMELDET' },
+      })
+    }
+
+    benutzer.value = sitzung.user
     geladen.value = true
-    return antwort.user
+    // Layout vor dem Dashboard-Wechsel setzen, sonst thrashing (landing → default)
+    // und DOM-Fehler wie „Cannot read properties of null (reading 'parentNode')“.
+    if (import.meta.client) setPageLayout('default')
+    return sitzung.user
   }
 
   async function abmelden() {
     await $fetch('/api/auth/logout', { method: 'POST' }).catch(() => undefined)
     benutzer.value = null
     geladen.value = true
+    if (import.meta.client) setPageLayout('landing')
     await navigateTo('/anmelden')
   }
 

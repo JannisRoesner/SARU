@@ -1,11 +1,11 @@
 <script setup lang="ts">
+definePageMeta({
+  layout: 'landing',
+})
+
 const route = useRoute()
 const router = useRouter()
 const { angemeldet } = useSitzung()
-
-watchEffect(() => {
-  setPageLayout(angemeldet.value ? 'default' : 'landing')
-})
 
 useHead({
   title: () => (angemeldet.value ? 'Dashboard' : 'Unterrichtsarchiv'),
