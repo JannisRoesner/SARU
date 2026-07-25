@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { unzipSync } from 'fflate'
 import { createLogger } from '../utils/logger'
+import { loadPdfjs } from '../utils/pdfjs'
 import { extensionOf, resolveStoragePath } from './storage.service'
 
 const log = createLogger('extraction')
@@ -65,7 +66,7 @@ export async function extractText(buffer: Buffer, fileName: string): Promise<Ext
 
 async function extractPdf(buffer: Buffer): Promise<ExtractionResult> {
   // Der Legacy-Build von pdf.js kommt ohne Browser-APIs aus.
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
+  const pdfjs = await loadPdfjs()
 
   const task = pdfjs.getDocument({
     data: new Uint8Array(buffer),

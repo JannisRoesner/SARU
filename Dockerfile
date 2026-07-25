@@ -38,10 +38,13 @@ COPY --from=build /app/scripts ./scripts
 COPY --from=build /app/server/database/migrations ./server/database/migrations
 COPY docker/entrypoint.sh /entrypoint.sh
 
-# @napi-rs/canvas braucht libfontconfig zur Laufzeit; nativer Binding + pdfjs
-# müssen aus /app/node_modules auflösbar sein (nicht nur Nitro-Trace).
+# @napi-rs/canvas braucht libfontconfig zur Laufzeit; pdfjs Fake-Worker braucht
+# pdf.worker.mjs neben pdf.mjs (Nitro-NFT lässt den dynamischen Import oft weg).
 RUN chmod +x /entrypoint.sh \
   && mkdir -p /data/uploads \
+  && mkdir -p .output/server/node_modules \
+  && rm -rf .output/server/node_modules/pdfjs-dist \
+  && cp -a node_modules/pdfjs-dist .output/server/node_modules/pdfjs-dist \
   && chown -R postgres:postgres /var/lib/postgresql \
   && node scripts/check-canvas.mjs
 

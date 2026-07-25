@@ -1,3 +1,5 @@
+import { cpSync, existsSync } from 'node:fs'
+import { join } from 'node:path'
 import tailwindcss from '@tailwindcss/vite'
 
 export default defineNuxtConfig({
@@ -75,12 +77,25 @@ export default defineNuxtConfig({
         'pdfjs-dist',
         /^pdfjs-dist\/.*/,
       ],
+      // NFT folgt dem dynamischen Fake-Worker-Import nicht – explizit listen.
       traceInclude: [
-        'node_modules/@napi-rs/canvas/**',
-        'node_modules/@napi-rs/canvas-linux-x64-gnu/**',
-        'node_modules/@napi-rs/canvas-linux-arm64-gnu/**',
-        'node_modules/pdfjs-dist/**',
+        'node_modules/@napi-rs/canvas/package.json',
+        'node_modules/@napi-rs/canvas-linux-x64-gnu/package.json',
+        'node_modules/@napi-rs/canvas-linux-arm64-gnu/package.json',
+        'node_modules/pdfjs-dist/package.json',
+        'node_modules/pdfjs-dist/legacy/build/pdf.mjs',
+        'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs',
       ],
+    },
+    hooks: {
+      // Vollständiges pdfjs-dist (Worker, cmaps, Fonts, wasm) nach .output kopieren.
+      // Globs in traceInclude reichen bei NFT oft nicht für dynamische Imports.
+      compiled(nitro) {
+        const src = join(nitro.options.rootDir, 'node_modules/pdfjs-dist')
+        const dest = join(nitro.options.output.serverDir, 'node_modules/pdfjs-dist')
+        if (!existsSync(src)) return
+        cpSync(src, dest, { recursive: true })
+      },
     },
   },
 

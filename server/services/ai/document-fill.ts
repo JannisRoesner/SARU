@@ -1,6 +1,7 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib'
 import { createLogger } from '../../utils/logger'
+import { loadPdfjs } from '../../utils/pdfjs'
 
 const log = createLogger('ai:document-fill')
 
@@ -830,7 +831,7 @@ function detectGapBlanksOnLine(
  * große horizontale Lücken zwischen Textläufen derselben Zeile.
  */
 export async function detectPdfBlankRegions(source: Buffer): Promise<PdfBlankRegion[]> {
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
+  const pdfjs = await loadPdfjs()
   const task = pdfjs.getDocument({
     data: new Uint8Array(source),
     useSystemFonts: false,

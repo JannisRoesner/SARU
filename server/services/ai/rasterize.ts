@@ -1,27 +1,7 @@
-import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { createLogger } from '../../utils/logger'
+import { loadPdfjs, pdfjsAssetUrl } from '../../utils/pdfjs'
 
 const log = createLogger('ai:rasterize')
-
-/** Resolve über package-Name, nicht über gebündelte Chunk-URL (Nitro/Docker). */
-const require = createRequire(import.meta.url)
-
-function pdfjsPackageRoot(): string {
-  try {
-    return dirname(require.resolve('pdfjs-dist/package.json'))
-  } catch {
-    // Fallback: NODE_PATH=/app/node_modules im Produktionsimage
-    const fromNodePath = createRequire(join(process.cwd(), 'package.json'))
-    return dirname(fromNodePath.resolve('pdfjs-dist/package.json'))
-  }
-}
-
-function pdfjsAssetUrl(...segments: string[]): string {
-  // Trailing slash ist für pdf.js Pflicht (cMapUrl / standardFontDataUrl / wasmUrl).
-  return pathToFileURL(join(pdfjsPackageRoot(), ...segments) + '/').href
-}
 
 export interface RasterizedPage {
   pageNumber: number
@@ -54,7 +34,7 @@ export async function rasterizePdf(
     return []
   }
 
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
+  const pdfjs = await loadPdfjs()
   // In Node gibt es keine FontFace-API: disableFontFace:false lädt OTF via @font-face
   // und rendert Glyphs als □. Stattdessen den eingebauten Pfad-Renderer nutzen und
   // Standardschriften/CMaps aus dem pdfjs-dist-Paket laden.

@@ -489,7 +489,8 @@ describe('overlayPdfAnswers', () => {
     expect(result.usedGeometry).toBe(1)
     expect(result.usedBBox).toBe(0)
 
-    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
+    const { loadPdfjs } = await import('../../server/utils/pdfjs')
+    const pdfjs = await loadPdfjs()
     const doc = await pdfjs.getDocument({
       data: new Uint8Array(result.buffer),
       useSystemFonts: true,
