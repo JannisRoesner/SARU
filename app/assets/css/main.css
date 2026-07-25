@@ -1,0 +1,356 @@
+@import 'tailwindcss';
+
+/*
+ * Farbschema
+ * ----------
+ * Alle Farben laufen über semantische Variablen. Ein Farbdesign setzt lediglich
+ * `--palette-*` neu, der Hell-/Dunkelmodus die übrigen Flächen- und Textwerte.
+ * Komponenten verwenden ausschließlich die semantischen Namen, damit neue
+ * Designs ohne Änderungen an den Komponenten möglich sind.
+ */
+
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Source Serif 4', 'Iowan Old Style', 'Palatino Linotype', Palatino, serif;
+
+  --color-primary: var(--palette-primary);
+  --color-primary-soft: var(--palette-primary-soft);
+  --color-primary-strong: var(--palette-primary-strong);
+  --color-primary-contrast: var(--palette-primary-contrast);
+
+  --color-accent: var(--palette-accent);
+  --color-accent-soft: var(--palette-accent-soft);
+  --color-accent-strong: var(--palette-accent-strong);
+  --color-accent-contrast: var(--palette-accent-contrast);
+
+  --color-canvas: var(--surface-canvas);
+  --color-surface: var(--surface-base);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-hover: var(--surface-hover);
+
+  --color-line: var(--surface-line);
+  --color-line-strong: var(--surface-line-strong);
+
+  --color-ink: var(--text-strong);
+  --color-ink-muted: var(--text-muted);
+  --color-ink-subtle: var(--text-subtle);
+  --color-ink-inverse: var(--text-inverse);
+
+  --color-success: var(--state-success);
+  --color-success-soft: var(--state-success-soft);
+  --color-warning: var(--state-warning);
+  --color-warning-soft: var(--state-warning-soft);
+  --color-danger: var(--state-danger);
+  --color-danger-soft: var(--state-danger-soft);
+  --color-info: var(--state-info);
+  --color-info-soft: var(--state-info-soft);
+
+  --radius-card: 0.75rem;
+  --shadow-soft: 0 1px 2px rgb(15 23 42 / 0.03), 0 8px 24px -10px rgb(15 23 42 / 0.1);
+  --shadow-raised: 0 2px 6px rgb(15 23 42 / 0.04), 0 18px 40px -16px rgb(15 23 42 / 0.18);
+
+  --ease-smooth: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* --- Farbdesigns: primäre und sekundäre Akzentfarbe ---------------------- */
+
+:root,
+[data-palette='indigo'] {
+  --palette-primary: oklch(0.53 0.19 273);
+  --palette-primary-soft: oklch(0.95 0.03 273);
+  --palette-primary-strong: oklch(0.44 0.2 273);
+  --palette-primary-contrast: oklch(0.99 0 0);
+  --palette-accent: oklch(0.68 0.16 178);
+  --palette-accent-soft: oklch(0.95 0.04 178);
+  --palette-accent-strong: oklch(0.56 0.14 178);
+  --palette-accent-contrast: oklch(0.16 0.02 250);
+}
+
+[data-palette='smaragd'] {
+  --palette-primary: oklch(0.55 0.14 163);
+  --palette-primary-soft: oklch(0.95 0.03 163);
+  --palette-primary-strong: oklch(0.45 0.13 163);
+  --palette-primary-contrast: oklch(0.99 0 0);
+  --palette-accent: oklch(0.65 0.17 55);
+  --palette-accent-soft: oklch(0.95 0.04 55);
+  --palette-accent-strong: oklch(0.55 0.16 55);
+  --palette-accent-contrast: oklch(0.16 0.02 250);
+}
+
+[data-palette='bernstein'] {
+  --palette-primary: oklch(0.62 0.15 62);
+  --palette-primary-soft: oklch(0.95 0.04 62);
+  --palette-primary-strong: oklch(0.51 0.14 62);
+  --palette-primary-contrast: oklch(0.99 0 0);
+  --palette-accent: oklch(0.55 0.16 262);
+  --palette-accent-soft: oklch(0.95 0.03 262);
+  --palette-accent-strong: oklch(0.45 0.17 262);
+  --palette-accent-contrast: oklch(0.99 0 0);
+}
+
+[data-palette='rosenholz'] {
+  --palette-primary: oklch(0.55 0.18 12);
+  --palette-primary-soft: oklch(0.95 0.03 12);
+  --palette-primary-strong: oklch(0.46 0.19 12);
+  --palette-primary-contrast: oklch(0.99 0 0);
+  --palette-accent: oklch(0.6 0.13 215);
+  --palette-accent-soft: oklch(0.95 0.03 215);
+  --palette-accent-strong: oklch(0.5 0.13 215);
+  --palette-accent-contrast: oklch(0.99 0 0);
+}
+
+[data-palette='schiefer'] {
+  --palette-primary: oklch(0.45 0.05 250);
+  --palette-primary-soft: oklch(0.94 0.01 250);
+  --palette-primary-strong: oklch(0.36 0.05 250);
+  --palette-primary-contrast: oklch(0.99 0 0);
+  --palette-accent: oklch(0.6 0.14 195);
+  --palette-accent-soft: oklch(0.95 0.03 195);
+  --palette-accent-strong: oklch(0.5 0.13 195);
+  --palette-accent-contrast: oklch(0.99 0 0);
+}
+
+/* --- Hell- und Dunkelmodus ---------------------------------------------- */
+
+:root {
+  color-scheme: light;
+
+  /* Etwas wärmerer, ruhiger Canvas – weniger „Dashboard-Grau“. */
+  --surface-canvas: oklch(0.985 0.004 95);
+  --surface-base: oklch(0.995 0.002 95);
+  --surface-raised: oklch(1 0 0);
+  --surface-sunken: oklch(0.97 0.005 95);
+  --surface-hover: oklch(0.96 0.006 95);
+  --surface-line: oklch(0.915 0.006 250);
+  --surface-line-strong: oklch(0.84 0.01 250);
+
+  --text-strong: oklch(0.24 0.02 255);
+  --text-muted: oklch(0.46 0.015 255);
+  --text-subtle: oklch(0.6 0.012 255);
+  --text-inverse: oklch(0.99 0 0);
+
+  --state-success: oklch(0.55 0.13 155);
+  --state-success-soft: oklch(0.95 0.04 155);
+  --state-warning: oklch(0.63 0.14 75);
+  --state-warning-soft: oklch(0.96 0.05 85);
+  --state-danger: oklch(0.55 0.19 25);
+  --state-danger-soft: oklch(0.95 0.03 25);
+  --state-info: oklch(0.55 0.14 245);
+  --state-info-soft: oklch(0.95 0.03 245);
+}
+
+.dunkel {
+  color-scheme: dark;
+
+  --surface-canvas: oklch(0.17 0.012 255);
+  --surface-base: oklch(0.21 0.014 255);
+  --surface-raised: oklch(0.25 0.015 255);
+  --surface-sunken: oklch(0.19 0.013 255);
+  --surface-hover: oklch(0.28 0.016 255);
+  --surface-line: oklch(0.32 0.014 255);
+  --surface-line-strong: oklch(0.42 0.016 255);
+
+  --text-strong: oklch(0.96 0.004 255);
+  --text-muted: oklch(0.76 0.012 255);
+  --text-subtle: oklch(0.62 0.014 255);
+  --text-inverse: oklch(0.18 0.015 255);
+
+  --state-success: oklch(0.72 0.14 155);
+  --state-success-soft: oklch(0.3 0.06 155);
+  --state-warning: oklch(0.78 0.14 80);
+  --state-warning-soft: oklch(0.32 0.06 80);
+  --state-danger: oklch(0.7 0.17 25);
+  --state-danger-soft: oklch(0.3 0.07 25);
+  --state-info: oklch(0.72 0.13 245);
+  --state-info-soft: oklch(0.3 0.06 245);
+
+  /* Weiche Akzentflächen müssen im Dunkelmodus dunkel statt pastellig sein. */
+  --palette-primary-soft: color-mix(in oklab, var(--palette-primary) 22%, var(--surface-base));
+  --palette-accent-soft: color-mix(in oklab, var(--palette-accent) 22%, var(--surface-base));
+}
+
+/* --- Grundlayout --------------------------------------------------------- */
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-canvas text-ink antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'ss01';
+    letter-spacing: -0.011em;
+  }
+
+  h1,
+  h2,
+  .schrift-display {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+    font-weight: 600;
+  }
+
+  /* Sichtbarer Fokus nur bei Tastaturbedienung. */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-primary;
+  }
+
+  ::selection {
+    background: var(--palette-primary-soft);
+    color: var(--text-strong);
+  }
+
+  /* Dezente, aber gut greifbare Bildlaufleisten. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--surface-line-strong) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--surface-line-strong);
+    border: 3px solid transparent;
+    border-radius: 9999px;
+    background-clip: content-box;
+  }
+}
+
+@layer components {
+  /* Hervorhebungen aus ts_headline der Volltextsuche. */
+  .treffer mark {
+    @apply rounded bg-accent-soft px-0.5 font-semibold text-ink;
+  }
+
+  .karte {
+    @apply rounded-[--radius-card] border border-line bg-surface shadow-[--shadow-soft];
+    transition:
+      box-shadow 0.25s var(--ease-smooth),
+      border-color 0.2s var(--ease-smooth),
+      transform 0.25s var(--ease-smooth);
+  }
+
+  .karte:hover {
+    border-color: color-mix(in oklab, var(--surface-line-strong) 70%, var(--palette-primary) 30%);
+  }
+
+  /* Editorial section intro – Ruhe, klare Hierarchie, viel Luft. */
+  .seitenkopf {
+    @apply relative mb-8 max-w-3xl;
+  }
+
+  .seitenkopf::after {
+    content: '';
+    display: block;
+    width: 2.5rem;
+    height: 2px;
+    margin-top: 1.25rem;
+    border-radius: 9999px;
+    background: linear-gradient(
+      90deg,
+      var(--palette-primary),
+      color-mix(in oklab, var(--palette-accent) 70%, transparent)
+    );
+  }
+
+  .seitenkopf-kicker {
+    @apply mb-2 text-[0.7rem] font-semibold tracking-[0.14em] text-ink-subtle uppercase;
+  }
+
+  .filter-chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-xs font-medium text-ink-muted transition-colors;
+  }
+
+  .filter-chip:hover {
+    @apply border-line-strong bg-surface-hover text-ink;
+  }
+
+  .filter-chip-aktiv {
+    @apply border-primary/30 bg-primary-soft text-primary-strong;
+  }
+
+  .speicher-anzeige {
+    @apply inline-flex items-center gap-1.5 text-xs text-ink-subtle;
+  }
+}
+
+/* --- Übergänge ----------------------------------------------------------- */
+
+.page-enter-active,
+.page-leave-active {
+  transition:
+    opacity 0.2s var(--ease-smooth),
+    transform 0.2s var(--ease-smooth);
+}
+
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.page-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+.liste-move,
+.liste-enter-active,
+.liste-leave-active {
+  transition: all 0.22s var(--ease-smooth);
+}
+
+.liste-enter-from,
+.liste-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+.liste-leave-active {
+  position: absolute;
+  width: 100%;
+}
+
+/* Ziehen und Sortieren (sortablejs). */
+.sortier-geist {
+  @apply opacity-40;
+  background: var(--palette-primary-soft) !important;
+}
+
+.sortier-aktiv {
+  @apply shadow-[--shadow-raised];
+  cursor: grabbing;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* --- Druckausgabe (Verlaufsplan) ---------------------------------------- */
+
+@media print {
+  .kein-druck {
+    display: none !important;
+  }
+
+  body {
+    background: #fff;
+    color: #000;
+  }
+
+  .druck-seitenumbruch {
+    break-inside: avoid;
+  }
+
+  a[href]::after {
+    content: '';
+  }
+}

@@ -1,0 +1,62 @@
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
+
+const levelWeight: Record<LogLevel, number> = { debug: 10, info: 20, warn: 30, error: 40 }
+
+function currentLevel(): LogLevel {
+  const raw = (process.env.NUXT_LOG_LEVEL ?? process.env.LOG_LEVEL ?? 'info').toLowerCase()
+  return (['debug', 'info', 'warn', 'error'] as const).includes(raw as LogLevel)
+    ? (raw as LogLevel)
+    : 'info'
+}
+
+/** Feldnamen, deren Werte niemals im Log erscheinen dürfen. */
+const REDACTED_KEYS = /^(password|passwort|apikey|api_key|token|secret|authorization|passwordhash)$/i
+
+function redact(value: unknown, depth = 0): unknown {
+  if (depth > 4 || value == null) return value
+  if (Array.isArray(value)) return value.slice(0, 50).map((v) => redact(v, depth + 1))
+  if (value instanceof Error) return { name: value.name, message: value.message }
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = REDACTED_KEYS.test(key) ? '[entfernt]' : redact(val, depth + 1)
+    }
+    return out
+  }
+  return value
+}
+
+function emit(level: LogLevel, scope: string, message: string, context?: unknown) {
+  if (levelWeight[level] < levelWeight[currentLevel()]) return
+  const entry = {
+    zeit: new Date().toISOString(),
+    level,
+    scope,
+    message,
+    ...(context === undefined ? {} : { context: redact(context) }),
+  }
+  const line = JSON.stringify(entry)
+  if (level === 'error') console.error(line)
+  else if (level === 'warn') console.warn(line)
+  else console.log(line)
+}
+
+export interface Logger {
+  debug(message: string, context?: unknown): void
+  info(message: string, context?: unknown): void
+  warn(message: string, context?: unknown): void
+  error(message: string, context?: unknown): void
+  child(scope: string): Logger
+}
+
+export function createLogger(scope: string): Logger {
+  return {
+    debug: (m, c) => emit('debug', scope, m, c),
+    info: (m, c) => emit('info', scope, m, c),
+    warn: (m, c) => emit('warn', scope, m, c),
+    error: (m, c) => emit('error', scope, m, c),
+    child: (sub) => createLogger(`${scope}:${sub}`),
+  }
+}
+
+export const logger = createLogger('saru')
