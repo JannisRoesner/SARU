@@ -13,12 +13,13 @@ import {
   materials,
   type AiMeta,
 } from '../database/schema'
+import { oeffentlicheFehlermeldung } from '#shared/utils/public-error'
 import { conflict, invalidInput, notFound } from '../utils/errors'
 import { createLogger } from '../utils/logger'
 import { sanitizeText } from '../utils/validation'
 import { getMaterialDetail, type MaterialDetail } from '../repositories/material.repository'
 import { deleteFile, storeFile } from './storage.service'
-import { deleteThumbnail } from './thumbnail.service'
+import { deleteThumbnail, queueThumbnailGeneration } from './thumbnail.service'
 import { extractTextFromStorage, isExtractable } from './extraction.service'
 import { queueReindex, removeFromIndex } from './search/indexer'
 import { resolveCompetencyIds, resolveTagIds } from './taxonomy.service'
@@ -563,8 +564,9 @@ export async function addFileAsset(
     })
     .returning({ id: materialAssets.id })
 
-  // Textextraktion im Hintergrund – der Upload soll nicht darauf warten.
+  // Textextraktion und Miniatur im Hintergrund – der Upload soll nicht darauf warten.
   void extractAssetText(created!.id, variant.materialId)
+  queueThumbnailGeneration(created!.id, stored.mimeType, stored.fileName)
 
   return created!.id
 }
@@ -615,7 +617,10 @@ export async function extractAssetText(assetId: string, materialId?: string): Pr
       .update(materialAssets)
       .set({
         extractionStatus: 'fehlgeschlagen',
-        extractionError: error instanceof Error ? error.message : String(error),
+        extractionError: oeffentlicheFehlermeldung(
+          error,
+          'Der Text konnte nicht extrahiert werden.',
+        ),
       })
       .where(eq(materialAssets.id, assetId))
       .catch(() => {})

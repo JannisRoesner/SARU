@@ -1,14 +1,23 @@
+import { isError } from 'h3'
 import { z } from 'zod'
 import { recordAudit } from '../../services/audit.service'
 import { findUserByEmail, markLogin } from '../../services/user.service'
 import { clientIp, createSession, toSafeUser } from '../../utils/auth'
 import { verifyPassword } from '../../utils/crypto'
 import { appError } from '../../utils/errors'
+import { createLogger } from '../../utils/logger'
 import { checkRateLimit, resetRateLimit } from '../../utils/rate-limit'
+import { toPublicError } from '../../utils/sanitize-error'
 import { readValidatedBody } from '../../utils/validation'
 
+const log = createLogger('auth.login')
+
 const schema = z.object({
-  email: z.string().min(1, 'Bitte E-Mail-Adresse angeben.'),
+  email: z
+    .string()
+    .trim()
+    .min(1, 'Bitte E-Mail-Adresse angeben.')
+    .email('Bitte eine gültige E-Mail-Adresse angeben.'),
   password: z.string().min(1, 'Bitte Passwort angeben.'),
 })
 
@@ -25,7 +34,18 @@ export default defineEventHandler(async (event) => {
     message: 'Zu viele fehlgeschlagene Anmeldeversuche für dieses Konto. Bitte später erneut versuchen.',
   })
 
-  const user = await findUserByEmail(email)
+  let user
+  try {
+    user = await findUserByEmail(email)
+  } catch (error) {
+    if (isError(error) && error.statusCode) throw error
+    log.error({ err: error, email }, 'Anmeldung: Datenbankfehler')
+    throw toPublicError(
+      error,
+      'Die Anmeldung ist derzeit nicht möglich. Bitte später erneut versuchen oder die Administration kontaktieren.',
+    )
+  }
+
   const passwordOk = user ? await verifyPassword(password, user.passwordHash) : false
 
   if (!user || !passwordOk || !user.isActive) {

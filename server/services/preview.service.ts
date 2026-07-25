@@ -158,7 +158,7 @@ export async function getAssetPreviewInfo(
         ...base,
         mode: 'collabora',
         inlineUrl: null,
-        thumbnailUrl: null,
+        thumbnailUrl: thumb,
         collaboraUrl,
         hinweis: hinweise.length ? hinweise.join(' ') : null,
       }
@@ -168,7 +168,7 @@ export async function getAssetPreviewInfo(
       ...base,
       mode: 'download',
       inlineUrl: null,
-      thumbnailUrl: null,
+      thumbnailUrl: thumb,
       collaboraUrl: null,
       hinweis:
         process.env.NODE_ENV === 'production'
@@ -182,7 +182,7 @@ export async function getAssetPreviewInfo(
       ...base,
       mode: 'download',
       inlineUrl: null,
-      thumbnailUrl: null,
+      thumbnailUrl: thumb,
       collaboraUrl: null,
       hinweis:
         'Für Office-Dokumente kann unter Einstellungen → Office-Vorschau eine Collabora-Online-URL hinterlegt werden. Bis dahin steht nur der Download zur Verfügung.',

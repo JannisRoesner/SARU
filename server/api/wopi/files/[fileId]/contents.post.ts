@@ -6,7 +6,7 @@ import { verifyWopiAccessToken } from '../../../../services/collabora.service'
 import { extractAssetText } from '../../../../services/material.service'
 import { isExtractable } from '../../../../services/extraction.service'
 import { fileExists, overwriteFile } from '../../../../services/storage.service'
-import { deleteThumbnail } from '../../../../services/thumbnail.service'
+import { deleteThumbnail, queueThumbnailGeneration } from '../../../../services/thumbnail.service'
 import { appError, notFound } from '../../../../utils/errors'
 import { createLogger } from '../../../../utils/logger'
 import { parseOrThrow, uuidSchema } from '../../../../utils/validation'
@@ -59,7 +59,11 @@ export default defineEventHandler(async (event) => {
     })
     .where(eq(materialAssets.id, fileId))
 
-  void deleteThumbnail(fileId).catch(() => {})
+  void deleteThumbnail(fileId)
+    .catch(() => {})
+    .finally(() => {
+      queueThumbnailGeneration(fileId, asset.mimeType, asset.fileName)
+    })
   void extractAssetText(fileId)
 
   log.info('WOPI PutFile gespeichert', {

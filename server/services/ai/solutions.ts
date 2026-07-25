@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { eq } from 'drizzle-orm'
 import { useDatabase } from '../../database/client'
 import { aiJobs, materialAssets, materialVariants } from '../../database/schema'
+import { oeffentlicheFehlermeldung } from '#shared/utils/public-error'
 import { appError } from '../../utils/errors'
 import { createLogger } from '../../utils/logger'
 import { materialTypes, schoolForms } from '#shared/utils/labels'
@@ -419,7 +420,10 @@ export async function generateSolution(
       .update(aiJobs)
       .set({
         status: 'fehlgeschlagen',
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: oeffentlicheFehlermeldung(
+          error,
+          'Die KI-Musterlösung konnte nicht erzeugt werden.',
+        ),
         durationMs: Date.now() - startedAt,
         finishedAt: new Date(),
       })

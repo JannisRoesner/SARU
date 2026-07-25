@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { unzipSync } from 'fflate'
+import { oeffentlicheFehlermeldung } from '#shared/utils/public-error'
 import { createLogger } from '../utils/logger'
 import { loadPdfjs } from '../utils/pdfjs'
 import { extensionOf, resolveStoragePath } from './storage.service'
@@ -221,5 +222,5 @@ function truncate(text: string): string {
 }
 
 function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  return oeffentlicheFehlermeldung(error, 'Der Text konnte nicht extrahiert werden.')
 }

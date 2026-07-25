@@ -8,7 +8,10 @@ const router = useRouter()
 const { angemeldet } = useSitzung()
 
 useHead({
-  title: () => (angemeldet.value ? 'Dashboard' : 'Unterrichtsarchiv'),
+  title: () =>
+    angemeldet.value
+      ? 'Dashboard'
+      : 'SARU — System zur Archivierung von Reihen und Unterrichtsmaterialien',
 })
 
 const anmeldeOffen = ref(

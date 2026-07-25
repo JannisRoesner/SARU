@@ -1,37 +1,17 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { Agent, fetch as undiciFetch } from 'undici'
+import { isOfficeFile, OFFICE_FILE_EXTENSIONS } from '#shared/utils/office-files'
 import { createLogger } from '../utils/logger'
 import { getCollaboraSettings } from './settings.service'
 import { extensionOf } from './storage.service'
 
 const log = createLogger('collabora')
 
-/** Office-/OpenDocument-Formate, die Collabora Online typischerweise öffnen kann. */
-export const COLLABORA_EXTENSIONS = new Set([
-  'doc',
-  'docx',
-  'odt',
-  'rtf',
-  'ppt',
-  'pptx',
-  'odp',
-  'xls',
-  'xlsx',
-  'ods',
-  'csv',
-])
+/** @deprecated Nutze {@link OFFICE_FILE_EXTENSIONS} aus `#shared/utils/office-files`. */
+export const COLLABORA_EXTENSIONS = OFFICE_FILE_EXTENSIONS
 
 export function isCollaboraCandidate(fileName: string | null | undefined, mimeType?: string | null): boolean {
-  const ext = fileName ? extensionOf(fileName) : ''
-  if (ext && COLLABORA_EXTENSIONS.has(ext)) return true
-  if (!mimeType) return false
-  return (
-    mimeType.includes('officedocument') ||
-    mimeType.includes('msword') ||
-    mimeType.includes('ms-excel') ||
-    mimeType.includes('ms-powerpoint') ||
-    mimeType.includes('opendocument')
-  )
+  return isOfficeFile(fileName, mimeType)
 }
 
 function signingKey(): Buffer {

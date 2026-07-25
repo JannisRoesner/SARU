@@ -13,7 +13,7 @@ import { parseOrThrow, uuidSchema } from '../../../utils/validation'
 
 /**
  * Liefert eine zwischengespeicherte Dokument-Miniatur (PNG).
- * Wird bei Bedarf aus der ersten PDF-Seite bzw. dem Bild erzeugt.
+ * Wird bei Bedarf aus der ersten PDF-Seite, einem Bild oder einem Office-Dokument erzeugt.
  */
 export default defineEventHandler(async (event) => {
   await requireUser(event)

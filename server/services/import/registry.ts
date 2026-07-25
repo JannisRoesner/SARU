@@ -1,3 +1,4 @@
+import { oeffentlicheFehlermeldung } from '#shared/utils/public-error'
 import { appError } from '../../utils/errors'
 import { schulportalKursmappeAdapter } from './adapters/schulportal-kursmappe'
 import type { ImportAdapter, ImportSource } from './types'
@@ -39,7 +40,7 @@ export async function detectAdapters(source: ImportSource): Promise<AdapterMatch
       matches.push({
         adapter,
         confidence: 0,
-        reason: `Erkennung fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}`,
+        reason: oeffentlicheFehlermeldung(error, 'Erkennung fehlgeschlagen.'),
       })
     }
   }

@@ -2,6 +2,7 @@
 import { NuxtLink } from '#components'
 import { materialTypes, origins } from '#shared/utils/labels'
 import { istKiMusterloesung, kiAutorAnzeige } from '#shared/utils/ki'
+import { isThumbnailCandidate } from '#shared/utils/thumbnail-candidate'
 import type { MaterialSummary } from '~~/server/repositories/material.repository'
 
 const props = withDefaults(
@@ -33,13 +34,7 @@ const preview = computed(() => props.material.preview)
 const zeigtMiniatur = computed(() => {
   const p = preview.value
   if (!p || p.kind !== 'datei') return false
-  const mime = p.mimeType ?? ''
-  const name = (p.fileName ?? '').toLowerCase()
-  return (
-    mime === 'application/pdf' ||
-    name.endsWith('.pdf') ||
-    (mime.startsWith('image/') && mime !== 'image/svg+xml')
-  )
+  return isThumbnailCandidate(p.mimeType, p.fileName)
 })
 </script>
 

@@ -24,6 +24,9 @@ RUN apt-get update \
     gosu \
     gnupg \
     libfontconfig1 \
+    libreoffice-writer-nogui \
+    libreoffice-calc-nogui \
+    libreoffice-impress-nogui \
   && curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
   && apt-get install -y --no-install-recommends nodejs \
   && apt-get clean \

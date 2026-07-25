@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { isThumbnailCandidate } from '#shared/utils/thumbnail-candidate'
+
 /**
  * Papierähnliche Dokument-Miniatur (paperless-Stil).
  * Lädt die Miniatur per fetch (kein <img src> auf 404 → weniger Konsolen-Spam)
@@ -25,13 +27,7 @@ let objectUrl: string | null = null
 
 const hatMiniatur = computed(() => {
   if (!props.assetId) return false
-  const mime = props.mimeType ?? ''
-  const name = (props.fileName ?? '').toLowerCase()
-  return (
-    mime === 'application/pdf' ||
-    name.endsWith('.pdf') ||
-    (mime.startsWith('image/') && mime !== 'image/svg+xml')
-  )
+  return isThumbnailCandidate(props.mimeType, props.fileName)
 })
 
 const icon = computed(() => dateiIcon(props.fileName))

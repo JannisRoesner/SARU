@@ -1,10 +1,13 @@
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { eq } from 'drizzle-orm'
+import { isOfficeFile } from '#shared/utils/office-files'
+import { isThumbnailCandidate } from '#shared/utils/thumbnail-candidate'
 import { useDatabase } from '../database/client'
 import { materialAssets } from '../database/schema'
 import { createLogger } from '../utils/logger'
 import { rasterizePdf } from './ai/rasterize'
+import { convertOfficeFileToPdf } from './office-convert.service'
 import {
   deleteFile,
   fileExists,
@@ -38,7 +41,7 @@ function isRasterImage(mimeType: string | null): boolean {
 
 /**
  * Erzeugt bei Bedarf eine PNG-Miniatur und speichert sie unter `.thumbs/`.
- * Unterstützt PDF (erste Seite) und Rasterbilder; andere Typen liefern `null`.
+ * Unterstützt PDF (erste Seite), Rasterbilder und Office-Dateien (via LibreOffice → PDF).
  */
 export async function ensureThumbnail(assetId: string): Promise<string | null> {
   const key = thumbnailStorageKey(assetId)
@@ -70,6 +73,14 @@ export async function ensureThumbnail(assetId: string): Promise<string | null> {
     } else if (isRasterImage(asset.mimeType)) {
       const buffer = await readFile(resolveStoragePath(asset.storageKey))
       png = await resizeImageToThumb(buffer)
+    } else if (isOfficeFile(asset.fileName, asset.mimeType)) {
+      const sourcePath = resolveStoragePath(asset.storageKey)
+      const pdfBuffer = await convertOfficeFileToPdf(sourcePath)
+      if (!pdfBuffer) return null
+      const pages = await rasterizePdf(pdfBuffer, { maxPages: 1, scale: 0.55 })
+      const first = pages[0]
+      if (!first) return null
+      png = await fitPng(Buffer.from(first.base64, 'base64'))
     } else {
       return null
     }
@@ -86,9 +97,21 @@ export async function ensureThumbnail(assetId: string): Promise<string | null> {
   }
 }
 
-/** Prüft, ob für diesen Asset-Typ überhaupt eine Miniatur möglich ist. */
+/** Prüft, ob für diesen Asset-Typ überhaupt eine Miniatur angefordert werden kann. */
 export function canHaveThumbnail(mimeType: string | null, fileName: string | null): boolean {
-  return isPdf(mimeType, fileName) || isRasterImage(mimeType)
+  return isThumbnailCandidate(mimeType, fileName)
+}
+
+/** Erzeugt eine Miniatur im Hintergrund (Upload, WOPI-Speichern). */
+export function queueThumbnailGeneration(
+  assetId: string,
+  mimeType: string | null,
+  fileName: string | null,
+): void {
+  if (!canHaveThumbnail(mimeType, fileName)) return
+  void ensureThumbnail(assetId).catch((error) => {
+    log.warn('Hintergrund-Miniatur fehlgeschlagen', { assetId, error })
+  })
 }
 
 async function fitPng(pngBuffer: Buffer): Promise<Buffer | null> {

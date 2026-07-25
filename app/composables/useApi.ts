@@ -1,4 +1,5 @@
 import type { FetchError } from 'ofetch'
+import { istTechnischeMeldung } from '#shared/utils/public-error'
 
 /**
  * Übersetzt einen fehlgeschlagenen Aufruf in eine Meldung, die man Nutzenden
@@ -37,6 +38,7 @@ function lesbareNachricht(wert: string | undefined | null): string | undefined {
   if (!wert || istFehlercode(wert)) return undefined
   // ofetch-Format wie `[POST] "/api/...": 401 NICHT_ANGEMELDET`
   if (/^\[(GET|POST|PUT|PATCH|DELETE)\]\s+"/i.test(wert)) return undefined
+  if (istTechnischeMeldung(wert)) return undefined
   return wert
 }
 

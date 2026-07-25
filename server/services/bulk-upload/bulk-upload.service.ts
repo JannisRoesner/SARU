@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { desc, eq, ne, sql } from 'drizzle-orm'
+import { oeffentlicheFehlermeldung } from '#shared/utils/public-error'
 import { normalizeGradeLevel } from '#shared/utils/jahrgangsstufen'
 import type { MaterialType } from '#shared/types/domain'
 import { useDatabase } from '../../database/client'
@@ -417,7 +418,7 @@ export async function commitBulkUpload(
       await track(file.sourceRef, materialId, 'erstellt')
       await deleteFile(file.stagingPath)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = oeffentlicheFehlermeldung(error, 'Die Datei konnte nicht übernommen werden.')
       stats.fehlgeschlagen = (stats.fehlgeschlagen ?? 0) + 1
       errors.push({ sourceRef: file.sourceRef, message })
       await track(file.sourceRef, null, 'fehlgeschlagen', message)
@@ -479,9 +480,10 @@ export async function undoBulkUpload(runId: string): Promise<{ removed: BulkUplo
       await addLog(
         runId,
         'warnung',
-        `Material ${item.entityId} konnte nicht entfernt werden: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        `Material konnte nicht entfernt werden: ${oeffentlicheFehlermeldung(
+          error,
+          'Der Eintrag konnte nicht entfernt werden.',
+        )}`,
       )
     }
   }

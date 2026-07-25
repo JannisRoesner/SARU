@@ -1,4 +1,6 @@
 import { readFile } from 'node:fs/promises'
+import { isError } from 'h3'
+import { oeffentlicheFehlermeldung } from '#shared/utils/public-error'
 import { desc, eq, sql } from 'drizzle-orm'
 import { useDatabase } from '../../database/client'
 import {
@@ -112,9 +114,13 @@ export async function analyzeImport(
   try {
     parsed = await match.adapter.parse(source)
   } catch (error) {
+    if (isError(error) && error.statusCode) throw error
     throw appError(
       'IMPORT_FEHLER',
-      `Die Datei konnte nicht ausgewertet werden: ${error instanceof Error ? error.message : String(error)}`,
+      oeffentlicheFehlermeldung(
+        error,
+        'Die Datei konnte nicht ausgewertet werden. Bitte prüfen, ob es sich um eine gültige Kursmappe aus dem SchulPortal handelt.',
+      ),
       { cause: error },
     )
   }
@@ -544,7 +550,10 @@ export async function commitImport(
           await attachMaterial(lessonId, { materialId, usage: 'unterricht' })
         } catch (error) {
           // Eine fehlerhafte Anlage darf weder die Stunde noch den Import stoppen.
-          const message = error instanceof Error ? error.message : String(error)
+          const message = oeffentlicheFehlermeldung(
+            error,
+            'Die Anlage konnte nicht übernommen werden.',
+          )
           stats.fehlgeschlagen = (stats.fehlgeschlagen ?? 0) + 1
           errors.push({ sourceRef: attachment.path, message })
           await track(`${lesson.sourceRef}:${attachment.path}`, 'material', null, 'fehlgeschlagen', message)
@@ -552,7 +561,7 @@ export async function commitImport(
         }
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = oeffentlicheFehlermeldung(error, 'Der Termin konnte nicht importiert werden.')
       stats.fehlgeschlagen = (stats.fehlgeschlagen ?? 0) + 1
       errors.push({ sourceRef: lesson.sourceRef, message })
       await track(lesson.sourceRef, 'lesson', null, 'fehlgeschlagen', message)
@@ -635,9 +644,10 @@ export async function undoImport(runId: string): Promise<{ removed: ImportStats 
       await addLog(
         runId,
         'warnung',
-        `${item.entityType} ${item.entityId} konnte nicht entfernt werden: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        `${item.entityType} ${item.entityId} konnte nicht entfernt werden: ${oeffentlicheFehlermeldung(
+          error,
+          'Der Eintrag konnte nicht entfernt werden.',
+        )}`,
       )
     }
   }

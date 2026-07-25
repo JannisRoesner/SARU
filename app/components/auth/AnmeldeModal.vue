@@ -27,7 +27,9 @@ async function absenden() {
     offen.value = false
     await navigateTo(props.weiter || '/')
   } catch (error) {
-    fehler.value = toApiFehler(error).nachricht
+    const apiFehler = toApiFehler(error)
+    const feldMeldungen = Object.values(apiFehler.felder).flat()
+    fehler.value = feldMeldungen[0] ?? apiFehler.nachricht
   } finally {
     laeuft.value = false
   }

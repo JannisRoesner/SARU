@@ -1,3 +1,4 @@
+import { kiAnbieterFehlermeldung } from '#shared/utils/public-error'
 import { resolveEmbeddingModel } from '#shared/utils/embeddings'
 import { appError } from '../../utils/errors'
 import { createLogger } from '../../utils/logger'
@@ -260,7 +261,7 @@ async function request<T>(
       raw.slice(0, 300) ??
       response.statusText
     log.warn('KI-Anbieter hat einen Fehler gemeldet', { url, status: response.status, message })
-    throw appError('KI_FEHLER', `${what} wurde abgelehnt (${response.status}): ${message}`)
+    throw appError('KI_FEHLER', kiAnbieterFehlermeldung(response.status, what))
   }
 
   return parsed as T
