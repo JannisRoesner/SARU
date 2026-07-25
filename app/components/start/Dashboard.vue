@@ -19,14 +19,24 @@ interface Dashboard {
 
 const { benutzer, darfBearbeiten } = useSitzung()
 const { data, status, error, refresh } = await useFetch<Dashboard>('/api/dashboard')
+const jetzt = useJetzt()
 
 const begruessung = computed(() => {
-  const stunde = new Date().getHours()
+  const stunde = new Date(jetzt.value).getHours()
   if (stunde < 5) return 'Gute Nacht'
   if (stunde < 11) return 'Guten Morgen'
   if (stunde < 18) return 'Guten Tag'
   return 'Guten Abend'
 })
+
+const heutigesDatum = computed(() =>
+  new Date(jetzt.value).toLocaleDateString('de-DE', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }),
+)
 
 const vorname = computed(() => benutzer.value?.name?.split(' ')[0] ?? '')
 
@@ -55,9 +65,7 @@ const { favoritSetzen } = useMaterialAktionen(() => refresh())
     <LayoutSeitenkopf
       kicker="Übersicht"
       :titel="vorname ? `${begruessung}, ${vorname}` : begruessung"
-      :untertitel="new Date().toLocaleDateString('de-DE', {
-        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
-      })"
+      :untertitel="heutigesDatum"
     >
       <template v-if="darfBearbeiten" #aktionen>
         <UiButton

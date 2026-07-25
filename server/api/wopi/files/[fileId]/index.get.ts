@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm'
 import { useDatabase } from '../../../../database/client'
 import { materialAssets } from '../../../../database/schema'
 import { verifyWopiAccessToken } from '../../../../services/collabora.service'
-import { fileExists } from '../../../../services/storage.service'
+import { fileExists, fileModifiedAt } from '../../../../services/storage.service'
 import { appError, notFound } from '../../../../utils/errors'
 import { parseOrThrow, uuidSchema } from '../../../../utils/validation'
 
@@ -29,15 +29,19 @@ export default defineEventHandler(async (event) => {
   if (!asset || asset.kind !== 'datei' || !asset.storageKey) throw notFound('Die Datei')
   if (!(await fileExists(asset.storageKey))) throw notFound('Die Datei')
 
+  const modifiedAt =
+    (await fileModifiedAt(asset.storageKey)) ?? asset.createdAt ?? new Date()
+  const canWrite = claims.canWrite
+
   return {
     BaseFileName: asset.fileName ?? 'dokument',
     Size: asset.sizeBytes ?? 0,
     OwnerId: claims.userId,
     UserId: claims.userId,
     UserFriendlyName: claims.userName,
-    UserCanWrite: false,
+    UserCanWrite: canWrite,
     UserCanNotWriteRelative: true,
-    SupportsUpdate: false,
+    SupportsUpdate: canWrite,
     SupportsLocks: false,
     SupportsGetLock: false,
     SupportsExtendedLockLength: false,
@@ -46,6 +50,6 @@ export default defineEventHandler(async (event) => {
     DisableCopy: false,
     EnableOwnerTermination: false,
     PostMessageOrigin: getRequestURL(event).origin,
-    LastModifiedTime: asset.createdAt?.toISOString?.() ?? new Date().toISOString(),
+    LastModifiedTime: modifiedAt.toISOString(),
   }
 })

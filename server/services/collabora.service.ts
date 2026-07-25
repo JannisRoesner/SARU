@@ -43,6 +43,8 @@ export interface WopiTokenPayload {
   assetId: string
   userId: string
   userName: string
+  /** Ob Collabora Speichern/Bearbeiten erlauben darf (Lehrkraft/Admin). */
+  canWrite: boolean
   exp: number
 }
 
@@ -50,6 +52,7 @@ export interface WopiTokenPayload {
 export function createWopiAccessToken(payload: Omit<WopiTokenPayload, 'exp'>, ttlSeconds = 3600): string {
   const body: WopiTokenPayload = {
     ...payload,
+    canWrite: Boolean(payload.canWrite),
     exp: Math.floor(Date.now() / 1000) + ttlSeconds,
   }
   const encoded = Buffer.from(JSON.stringify(body), 'utf8').toString('base64url')
@@ -73,7 +76,10 @@ export function verifyWopiAccessToken(token: string | undefined): WopiTokenPaylo
     const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as WopiTokenPayload
     if (!payload.assetId || !payload.userId || !payload.exp) return null
     if (payload.exp < Math.floor(Date.now() / 1000)) return null
-    return payload
+    return {
+      ...payload,
+      canWrite: Boolean(payload.canWrite),
+    }
   } catch {
     return null
   }
@@ -127,8 +133,11 @@ export function rewriteToBaseOrigin(url: string, resolvedBaseUrl: string): strin
   try {
     const base = new URL(`${resolvedBaseUrl.replace(/\/+$/, '')}/`)
     const target = new URL(url, base)
+    // hostname+port getrennt setzen: `host=` allein lässt in Node oft den alten Port stehen
+    // (z. B. Discovery mit :9980 → öffentliche https://office…:9980).
     target.protocol = base.protocol
-    target.host = base.host
+    target.hostname = base.hostname
+    target.port = base.port
     return target.toString()
   } catch {
     return url
@@ -212,12 +221,35 @@ export async function probeCollaboraDiscovery(): Promise<{
   }
 }
 
+interface DiscoveryAction {
+  name: string
+  ext: string
+  urlsrc: string
+}
+
+/** Parst Collabora-Discovery-`<action>`-Einträge (Reihenfolge der Attribute variiert). */
+export function parseDiscoveryActions(xml: string): DiscoveryAction[] {
+  const actions: DiscoveryAction[] = []
+  const actionRegex = /<action\b([^>]*)\/?>/gi
+  let match: RegExpExecArray | null
+  while ((match = actionRegex.exec(xml))) {
+    const attrs = match[1] ?? ''
+    const name = /\bname=["']([^"']+)["']/i.exec(attrs)?.[1]?.toLowerCase() ?? ''
+    const ext = /\bext=["']([^"']+)["']/i.exec(attrs)?.[1]?.toLowerCase() ?? ''
+    const urlsrc = /\burlsrc=["']([^"']+)["']/i.exec(attrs)?.[1] ?? ''
+    if (ext && urlsrc) actions.push({ name, ext, urlsrc })
+  }
+  return actions
+}
+
 /**
  * Ermittelt die Editor-URL für eine Dateiendung aus der Collabora-Discovery.
+ * Bei Schreibrechten wird die `edit`-Action bevorzugt, sonst `view`.
  * Ohne erreichbare Discovery kein Fallback – sonst öffnet der iframe eine tote HTTP-URL.
  */
 export async function resolveCollaboraEditorUrl(
   extension: string,
+  preferEdit = false,
 ): Promise<{ urlsrc: string; baseUrl: string } | null> {
   const settings = await getCollaboraSettings()
   if (!settings.enabled || !settings.baseUrl) return null
@@ -226,17 +258,18 @@ export async function resolveCollaboraEditorUrl(
   const discovery = await loadDiscovery(settings.baseUrl)
   if (!discovery) return null
 
-  const actionRegex =
-    /<action\b[^>]*\bext=["']([^"']+)["'][^>]*\burlsrc=["']([^"']+)["'][^>]*\/?>|<action\b[^>]*\burlsrc=["']([^"']+)["'][^>]*\bext=["']([^"']+)["'][^>]*\/?>/gi
-  let match: RegExpExecArray | null
-  while ((match = actionRegex.exec(discovery.xml))) {
-    const foundExt = (match[1] ?? match[4] ?? '').toLowerCase()
-    const urlsrc = match[2] ?? match[3]
-    if (foundExt === ext && urlsrc) {
-      return {
-        urlsrc: absolutizeUrlsrc(discovery.baseUrl, urlsrc),
-        baseUrl: discovery.baseUrl,
-      }
+  const matching = parseDiscoveryActions(discovery.xml).filter((a) => a.ext === ext)
+  const preferredNames = preferEdit
+    ? ['edit', 'view', 'view_comment']
+    : ['view', 'view_comment', 'edit']
+  const chosen =
+    preferredNames.map((name) => matching.find((a) => a.name === name)).find(Boolean) ??
+    matching[0]
+
+  if (chosen) {
+    return {
+      urlsrc: absolutizeUrlsrc(discovery.baseUrl, chosen.urlsrc),
+      baseUrl: discovery.baseUrl,
     }
   }
 
@@ -269,9 +302,12 @@ export async function buildCollaboraIframeUrl(options: {
   fileName: string
   accessToken: string
   wopiHost: string
+  /** true → Bearbeiten/Speichern; false → reine Ansicht. */
+  canWrite?: boolean
 }): Promise<string | null> {
+  const canWrite = Boolean(options.canWrite)
   const ext = extensionOf(options.fileName)
-  const editor = await resolveCollaboraEditorUrl(ext || 'docx')
+  const editor = await resolveCollaboraEditorUrl(ext || 'docx', canWrite)
   if (!editor) return null
 
   const wopiSrc = `${options.wopiHost.replace(/\/+$/, '')}/api/wopi/files/${options.assetId}`
@@ -279,8 +315,8 @@ export async function buildCollaboraIframeUrl(options: {
   // Discovery-URLs enthalten Platzhalter wie `<WOPI_SOURCE>`; wir setzen Query-Parameter explizit.
   url.searchParams.set('WOPISrc', wopiSrc)
   url.searchParams.set('access_token', options.accessToken)
-  // view-Modus, falls vom Server unterstützt
-  if (!url.searchParams.has('permission')) url.searchParams.set('permission', 'readonly')
+  // Collabora: `edit` freischalten; Discovery-URLs setzen ggf. selbst `readonly`.
+  url.searchParams.set('permission', canWrite ? 'edit' : 'readonly')
   return rewriteToBaseOrigin(
     url.toString().replace(/<WOPI_SOURCE>/gi, encodeURIComponent(wopiSrc)),
     editor.baseUrl,

@@ -243,6 +243,46 @@ export async function fileExists(storageKey: string): Promise<boolean> {
   }
 }
 
+/** Datei-mtime (ISO), z. B. für WOPI LastModifiedTime. */
+export async function fileModifiedAt(storageKey: string): Promise<Date | null> {
+  try {
+    const info = await stat(resolveStoragePath(storageKey))
+    return info.isFile() ? info.mtime : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Überschreibt eine bestehende Datei (WOPI PutFile). Keine neue storageKey,
+ * Metadaten (Größe/Checksum) liefert der Rückgabewert.
+ */
+export async function overwriteFile(
+  storageKey: string,
+  buffer: Buffer,
+): Promise<{ sizeBytes: number; checksum: string; modifiedAt: Date }> {
+  if (buffer.length === 0) {
+    throw appError('UNGUELTIGE_EINGABE', 'Die Datei ist leer.')
+  }
+  const settings = await getUploadSettings()
+  if (buffer.length > settings.maxBytes) {
+    throw appError(
+      'DATEI_ZU_GROSS',
+      `Die Datei ist ${formatBytes(buffer.length)} groß. Erlaubt sind höchstens ${formatBytes(settings.maxBytes)}.`,
+    )
+  }
+  const target = resolveStoragePath(storageKey)
+  await mkdir(dirname(target), { recursive: true })
+  await writeFile(target, buffer, { mode: 0o640 })
+  const modifiedAt = (await stat(target)).mtime
+  log.debug('Datei überschrieben', { storageKey, sizeBytes: buffer.length })
+  return {
+    sizeBytes: buffer.length,
+    checksum: sha256(buffer),
+    modifiedAt,
+  }
+}
+
 export function readFileStream(storageKey: string) {
   return createReadStream(resolveStoragePath(storageKey))
 }

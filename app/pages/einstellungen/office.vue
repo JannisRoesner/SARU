@@ -1,5 +1,5 @@
 <script setup lang="ts">
-useHead({ title: 'Office-Vorschau' })
+useHead({ title: 'Office-Editor' })
 
 const { istAdmin } = useSitzung()
 if (!istAdmin.value) await navigateTo('/einstellungen')
@@ -53,20 +53,21 @@ async function speichern() {
 
     <LayoutSeitenkopf
       kicker="System"
-      titel="Office-Vorschau"
-      untertitel="Collabora Online für Word-, Excel- und PowerPoint-Dokumente."
+      titel="Office-Editor"
+      untertitel="Collabora Online zum Anzeigen und Bearbeiten von Word-, Excel- und PowerPoint-Dokumenten."
     />
 
     <UiCard titel="Collabora Online" icon="file-word">
       <p class="mb-4 text-sm text-ink-muted">
         PDF und Bilder werden in SARU direkt angezeigt. Für Word/Excel/PowerPoint kann optional ein
-        Collabora-Online-Container (CODE) angebunden werden. Ohne Konfiguration erscheint
-        „Vorschau nicht verfügbar“ mit Download-Hinweis. Textextraktion und Suche funktionieren
-        unabhängig von Collabora.
+        Collabora-Online-Container (CODE) angebunden werden. Lehrkräfte und Admins können Dokumente
+        dann im Browser bearbeiten und speichern; Leser erhalten eine schreibgeschützte Ansicht.
+        Ohne Konfiguration erscheint „Vorschau nicht verfügbar“ mit Download-Hinweis.
+        Textextraktion und Suche funktionieren unabhängig von Collabora.
       </p>
       <label class="mb-4 flex items-center gap-2 text-sm">
         <input v-model="collabora.enabled" type="checkbox" class="accent-[var(--color-primary)]">
-        Collabora-Vorschau aktivieren
+        Collabora Office-Editor aktivieren
       </label>
       <div class="grid gap-4">
         <UiField
@@ -108,17 +109,22 @@ async function speichern() {
         Collabora braucht
         <code class="rounded bg-surface-sunken px-1 py-0.5">aliasgroup1</code>
         mit der exakten WOPI-Host-URL
-        (<code class="rounded bg-surface-sunken px-1 py-0.5">{{ collabora.wopiHostUrl.trim() || 'http://192.168.x.x:3001' }}</code>).
-        Wichtig: Bei HTTPS-Collabora + HTTP-SARU blockiert CSP oft das Einbetten
-        (<code class="rounded bg-surface-sunken px-1 py-0.5">frame-ancestors host:*</code>
-        gilt nur für dasselbe Schema). Für LAN daher Collabora ohne SSL und SARU-Basis-URL mit
-        <code class="rounded bg-surface-sunken px-1 py-0.5">http://…:9980</code>:
+        (<code class="rounded bg-surface-sunken px-1 py-0.5">{{ collabora.wopiHostUrl.trim() || 'https://saru.roesner.family' }}</code>).
+        Produktion (HTTPS): Alias und
+        <code class="rounded bg-surface-sunken px-1 py-0.5">frame-ancestors</code>
+        müssen die SARU-Origin enthalten, z.&nbsp;B.
+        <code class="mt-1 block break-all rounded bg-surface-sunken px-1 py-0.5">aliasgroup1=https://saru.roesner.family</code>
+        und
+        <code class="mt-1 block break-all rounded bg-surface-sunken px-1 py-0.5">--o:net.content_security_policy=frame-ancestors https://saru.roesner.family;</code>
+        (ggf. plus Proxy-
+        <code class="rounded bg-surface-sunken px-1 py-0.5">ssl.termination=true</code>).
+        404er unter
+        <code class="rounded bg-surface-sunken px-1 py-0.5">/browser/.../extensions/</code>
+        oder
+        <code class="rounded bg-surface-sunken px-1 py-0.5">/images/</code>
+        kommen vom Collabora-/Proxy-Setup, nicht von SARU.
+        Dev ohne SSL:
         <code class="mt-1 block break-all rounded bg-surface-sunken px-1 py-0.5">docker run -t -d -p 9980:9980 -e "aliasgroup1=http://192.168.x.x:3001,http://localhost:3001" -e "extra_params=--o:ssl.enable=false --o:ssl.termination=false" collabora/code</code>
-        Mit SSL: in
-        <code class="rounded bg-surface-sunken px-1 py-0.5">extra_params</code>
-        zusätzlich
-        <code class="rounded bg-surface-sunken px-1 py-0.5">--o:net.content_security_policy=frame-ancestors http://192.168.x.x:3001 http://localhost:3001;</code>
-        setzen und cool.html-Header prüfen.
       </p>
       <div class="mt-4 flex justify-end">
         <UiButton variante="primaer" icon="floppy-disk" :laedt="laeuft" @click="speichern">

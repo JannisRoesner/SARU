@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { useDatabase } from '../database/client'
 import { materialAssets, type User } from '../database/schema'
+import { hasRole } from '../utils/auth'
 import {
   buildCollaboraIframeUrl,
   createWopiAccessToken,
@@ -27,6 +28,8 @@ export interface AssetPreviewInfo {
   thumbnailUrl: string | null
   /** Collabora iframe-URL, nur wenn konfiguriert und Dateityp geeignet. */
   collaboraUrl: string | null
+  /** true, wenn der aktuelle Nutzer Office-Dokumente bearbeiten darf. */
+  canWrite: boolean
   hinweis: string | null
 }
 
@@ -48,6 +51,7 @@ export async function getAssetPreviewInfo(
 
   const title = asset.title || asset.fileName || asset.url || 'Anhang'
   const downloadUrl = `/api/assets/${asset.id}/download`
+  const canWrite = hasRole(user, 'lehrkraft')
   const base: Omit<AssetPreviewInfo, 'mode' | 'inlineUrl' | 'collaboraUrl' | 'hinweis' | 'thumbnailUrl'> = {
     assetId: asset.id,
     title,
@@ -56,6 +60,7 @@ export async function getAssetPreviewInfo(
     kind: asset.kind,
     url: asset.url,
     downloadUrl,
+    canWrite,
   }
 
   if (asset.kind === 'link') {
@@ -116,12 +121,14 @@ export async function getAssetPreviewInfo(
       assetId: asset.id,
       userId: user.id,
       userName: user.name || user.email,
+      canWrite,
     })
     const collaboraUrl = await buildCollaboraIframeUrl({
       assetId: asset.id,
       fileName: asset.fileName ?? 'dokument.docx',
       accessToken,
       wopiHost,
+      canWrite,
     })
 
     if (collaboraUrl) {

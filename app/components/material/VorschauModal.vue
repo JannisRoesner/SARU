@@ -478,7 +478,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', beiTaste))
               <iframe
                 :src="info.collaboraUrl"
                 class="min-h-0 w-full flex-1 rounded-lg bg-white shadow-2xl"
-                title="Office-Vorschau (Collabora)"
+                :title="info.canWrite ? 'Office-Editor (Collabora)' : 'Office-Vorschau (Collabora)'"
                 allow="fullscreen"
               />
             </div>

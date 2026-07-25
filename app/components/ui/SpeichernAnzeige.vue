@@ -7,6 +7,8 @@ const props = defineProps<{
   zuletzt?: Date | null
 }>()
 
+const jetzt = useJetzt()
+
 const text = computed(() => {
   switch (props.zustand) {
     case 'geaendert':
@@ -15,7 +17,7 @@ const text = computed(() => {
       return 'Speichert …'
     case 'gespeichert':
       return props.zuletzt
-        ? `Gespeichert ${formatRelativ(props.zuletzt)}`
+        ? `Gespeichert ${formatRelativ(props.zuletzt, '–', jetzt.value)}`
         : 'Gespeichert'
     case 'fehler':
       return props.fehler ?? 'Speichern fehlgeschlagen'

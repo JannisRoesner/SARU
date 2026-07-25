@@ -227,8 +227,8 @@ export async function saveAppearanceSettings(patch: Partial<AppearanceSettings>,
 }
 
 /**
- * Optionale Anbindung an Collabora Online (CODE) für Office-Dokumente.
- * Ohne konfigurierte Basis-URL greift die Oberfläche auf Download / Hinweis zurück.
+ * Optionale Anbindung an Collabora Online (CODE) zum Anzeigen und Bearbeiten
+ * von Office-Dokumenten (WOPI). Ohne Basis-URL: Download / Hinweis.
  */
 export interface CollaboraSettings {
   enabled: boolean

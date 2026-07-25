@@ -7,10 +7,21 @@ export function leseEinklappZustand(id: string): boolean | null {
   return gespeichert === '1'
 }
 
-/** Merkt sich den Ein-/Ausklappzustand eines Abschnitts in localStorage (nur nach explizitem Toggle). */
+/**
+ * Merkt sich den Ein-/Ausklappzustand eines Abschnitts in localStorage
+ * (nur nach explizitem Toggle).
+ *
+ * Der Anfangszustand ist bewusst nur `standardOffen`: localStorage wird erst
+ * nach dem Mount gelesen, damit SSR und Client-Hydration übereinstimmen.
+ */
 export function useEinklappbar(id: string, standardOffen = true) {
-  const offen = ref(leseEinklappZustand(id) ?? standardOffen)
+  const offen = ref(standardOffen)
   const vomBenutzerGeaendert = ref(false)
+
+  onMounted(() => {
+    const gespeichert = leseEinklappZustand(id)
+    if (gespeichert !== null) offen.value = gespeichert
+  })
 
   watch(offen, (wert) => {
     if (!import.meta.client || !vomBenutzerGeaendert.value) return

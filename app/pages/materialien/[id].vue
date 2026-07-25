@@ -821,9 +821,8 @@ const loesungBearbeitbar = computed(
       v-model="loeschenOffen"
       gefahr
       titel="Material löschen?"
-      text="Das Material und alle Varianten sowie Anhänge werden unwiderruflich entfernt."
-      bestaetigen="Löschen"
-      tipp-bestaetigung="LÖSCHEN"
+      text="Das Material und alle Varianten sowie Anhänge werden unwiderruflich entfernt. Dieser Vorgang kann nicht rückgängig gemacht werden."
+      bestaetigen="Ja, ich will löschen"
       @bestaetigt="materialLoeschen"
     />
 

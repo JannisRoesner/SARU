@@ -28,6 +28,7 @@ const kiCredit = computed(() =>
     : null,
 )
 
+const jetzt = useJetzt()
 const preview = computed(() => props.material.preview)
 const zeigtMiniatur = computed(() => {
   const p = preview.value
@@ -189,7 +190,7 @@ const zeigtMiniatur = computed(() => {
         </span>
         <span class="flex items-center gap-1">
           <UiIcon name="clock-rotate-left" fest />
-          {{ formatRelativ(material.updatedAt) }}
+          {{ formatRelativ(material.updatedAt, '–', jetzt) }}
         </span>
       </div>
     </div>

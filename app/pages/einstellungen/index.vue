@@ -36,8 +36,8 @@ const eintraege = computed(() =>
     {
       to: '/einstellungen/office',
       icon: 'file-word',
-      titel: 'Office-Vorschau',
-      text: 'Collabora Online für Word, Excel und PowerPoint.',
+      titel: 'Office-Editor',
+      text: 'Collabora Online: Word, Excel und PowerPoint anzeigen und bearbeiten.',
       sichtbar: istAdmin.value,
     },
     {

@@ -43,17 +43,15 @@ const einklappLabel = computed(() =>
 
 const feldId = computed(() => `einklapp-${props.einklappId}`)
 
-/** Beim ersten Laden lange Inhalte einklappen, sofern der Nutzer noch keine Präferenz gespeichert hat. */
-watch(
-  () => wert.value,
-  (inhalt) => {
-    if (!import.meta.client) return
-    if (props.immerOffen) return
-    if (leseEinklappZustand(props.einklappId) !== null) return
-    if ((inhalt?.length ?? 0) > props.schwellwert) offen.value = false
-  },
-  { once: true, immediate: true },
-)
+/**
+ * Lange Inhalte nach dem Mount einklappen (wenn keine gespeicherte Präferenz).
+ * Nicht während setup/SSR – sonst weicht der Client vom Server-HTML ab.
+ */
+onMounted(() => {
+  if (props.immerOffen) return
+  if (leseEinklappZustand(props.einklappId) !== null) return
+  if ((wert.value?.length ?? 0) > props.schwellwert) offen.value = false
+})
 </script>
 
 <template>

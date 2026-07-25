@@ -24,12 +24,20 @@ export function formatDatumZeit(wert: string | Date | null | undefined, fallback
   return datum ? datumZeit.format(datum) : fallback
 }
 
-/** „vor 3 Tagen“, „gestern“, … – für Listen mit vielen Zeitangaben angenehmer zu lesen. */
-export function formatRelativ(wert: string | Date | null | undefined, fallback = '–'): string {
+/**
+ * „vor 3 Tagen“, „gestern“, … – für Listen mit vielen Zeitangaben angenehmer zu lesen.
+ * `jetzt` optional übergeben (z. B. aus `useJetzt()`), damit SSR und Hydration denselben
+ * Bezugspunkt nutzen und nicht an Minutengrenzen auseinanderlaufen.
+ */
+export function formatRelativ(
+  wert: string | Date | null | undefined,
+  fallback = '–',
+  jetzt: number = Date.now(),
+): string {
   const datum = alsDatum(wert)
   if (!datum) return fallback
 
-  const sekunden = (datum.getTime() - Date.now()) / 1000
+  const sekunden = (datum.getTime() - jetzt) / 1000
   const stufen: [Intl.RelativeTimeFormatUnit, number][] = [
     ['second', 60],
     ['minute', 60],
