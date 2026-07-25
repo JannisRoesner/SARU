@@ -240,26 +240,22 @@ async function loesungSpeichern(payload: {
   reRender: boolean
   reviewed: boolean
 }) {
-  const ergebnis = await aufruf<{
+  // Ohne Toast – Status zeigt SpeichernAnzeige im Vorschau-Modal.
+  const ergebnis = await $fetch<{
     reRendered: boolean
     material: MaterialDetail
   }>(`/api/materials/${id.value}/solution`, {
     method: 'PATCH',
     body: payload,
-    erfolgsmeldung: payload.reRender
-      ? 'Antworten gespeichert und PDF neu gezeichnet.'
-      : 'Antworten gespeichert.',
   })
-  if (ergebnis) {
-    await refresh()
-    if (ergebnis.material?.variants) {
-      const asset =
-        ergebnis.material.variants
-          .flatMap((v) => v.assets)
-          .find((a) => a.kind === 'datei' && a.role === 'haupt') ??
-        ergebnis.material.variants.flatMap((v) => v.assets).find((a) => a.kind === 'datei')
-      if (asset) vorschauAssetId.value = asset.id
-    }
+  await refresh()
+  if (ergebnis.material?.variants) {
+    const asset =
+      ergebnis.material.variants
+        .flatMap((v) => v.assets)
+        .find((a) => a.kind === 'datei' && a.role === 'haupt') ??
+      ergebnis.material.variants.flatMap((v) => v.assets).find((a) => a.kind === 'datei')
+    if (asset) vorschauAssetId.value = asset.id
   }
 }
 

@@ -42,7 +42,6 @@ const textFehler = ref(false)
 const lokalStruktur = ref<StoredStructuredSolution | null>(null)
 const aktiveAntwortId = ref<string | null>(null)
 const seite = ref(1)
-const speichernLaeuft = ref(false)
 const lokalGeprueft = ref(false)
 const drag = ref<{
   id: string
@@ -51,10 +50,53 @@ const drag = ref<{
   startY: number
   orig: { x: number; y: number; w: number; h: number }
 } | null>(null)
+/** Verhindert, dass ein eigener Speichervorgang die lokale Bearbeitung zurücksetzt. */
+const eigenesSpeichern = ref(false)
+/** Struktur wird gerade geladen – Autosave unterdrücken. */
+const strukturLaedt = ref(false)
 
 const seitenFlaeche = ref<HTMLElement | null>(null)
 const seitenHoehePx = ref(0)
 let seitenResizeObserver: ResizeObserver | null = null
+
+type LoesungAutosaveDaten = {
+  structuredSolution: StoredStructuredSolution | null
+  reviewed: boolean
+}
+
+const autosaveQuelle = computed<LoesungAutosaveDaten>(() => ({
+  structuredSolution: lokalStruktur.value,
+  reviewed: lokalGeprueft.value,
+}))
+
+const autosave = useAutosave(autosaveQuelle, {
+  verzoegerungMs: 1400,
+  gueltig: (daten) => {
+    if (!offen.value || !props.loesungBearbeiten || !props.darfBearbeiten) return false
+    if (!props.beiSpeichern || strukturLaedt.value) return false
+    const struktur = daten.structuredSolution
+    if (!struktur?.answers.length) return false
+    // Während des Ziehens speichert der Debounce erst nach dem Loslassen
+    // (jeder Move setzt den Timer zurück).
+    if (drag.value) return false
+    return struktur.answers.every((a) => a.answer.trim() && a.label.trim())
+  },
+  speichern: async (daten) => {
+    if (!daten.structuredSolution || !props.beiSpeichern) return
+    eigenesSpeichern.value = true
+    try {
+      await props.beiSpeichern({
+        structuredSolution: daten.structuredSolution,
+        reRender: true,
+        reviewed: daten.reviewed,
+      })
+    } finally {
+      // Parent-Refresh darf die lokale Struktur nicht überschreiben.
+      await nextTick()
+      eigenesSpeichern.value = false
+    }
+  },
+})
 
 async function laden() {
   if (!props.assetId) return
@@ -91,20 +133,27 @@ function strukturAusProps() {
 }
 
 async function strukturInitialisieren() {
-  strukturAusProps()
-  if (!props.loesungBearbeiten || !props.materialId || !props.struktur) return
+  strukturLaedt.value = true
   try {
-    const data = await $fetch<{ structuredSolution: StoredStructuredSolution }>(
-      `/api/materials/${props.materialId}/solution`,
-    )
-    if (!data?.structuredSolution?.answers || !offen.value) return
-    const aktive = aktiveAntwortId.value
-    lokalStruktur.value = data.structuredSolution
-    if (aktive && data.structuredSolution.answers.some((a) => a.id === aktive)) {
-      aktiveAntwortId.value = aktive
+    strukturAusProps()
+    if (!props.loesungBearbeiten || !props.materialId || !props.struktur) return
+    try {
+      const data = await $fetch<{ structuredSolution: StoredStructuredSolution }>(
+        `/api/materials/${props.materialId}/solution`,
+      )
+      if (!data?.structuredSolution?.answers || !offen.value) return
+      const aktive = aktiveAntwortId.value
+      lokalStruktur.value = data.structuredSolution
+      if (aktive && data.structuredSolution.answers.some((a) => a.id === aktive)) {
+        aktiveAntwortId.value = aktive
+      }
+    } catch {
+      // Fallback: props.struktur (Vision-bboxes) bleibt.
     }
-  } catch {
-    // Fallback: props.struktur (Vision-bboxes) bleibt.
+  } finally {
+    await nextTick()
+    autosave.alsGespeichertMarkieren()
+    strukturLaedt.value = false
   }
 }
 
@@ -125,7 +174,10 @@ watch(
 watch(
   () => props.struktur,
   () => {
-    if (offen.value) void strukturInitialisieren()
+    if (!offen.value || eigenesSpeichern.value) return
+    const zustand = autosave.zustand.value
+    if (zustand === 'geaendert' || zustand === 'speichert' || zustand === 'fehler') return
+    void strukturInitialisieren()
   },
 )
 
@@ -162,10 +214,6 @@ function herunterladen() {
   if (!props.assetId) return
   emit('herunterladen', props.assetId)
   window.open(`/api/assets/${props.assetId}/download`, '_blank')
-}
-
-function schliessen() {
-  offen.value = false
 }
 
 function beiTaste(event: KeyboardEvent) {
@@ -284,21 +332,40 @@ function dragMove(event: PointerEvent) {
 }
 
 function dragEnd() {
+  if (!drag.value) return
   drag.value = null
+  // Timer kann während des Ziehens verfallen sein (gueltig = false) –
+  // nach dem Loslassen erneut anstoßen.
+  if (autosave.zustand.value === 'geaendert' || autosave.zustand.value === 'fehler') {
+    void autosave.jetztSpeichern()
+  }
 }
 
-async function speichern(reRender: boolean) {
-  if (!lokalStruktur.value || !props.darfBearbeiten || !props.beiSpeichern) return
-  speichernLaeuft.value = true
-  try {
-    await props.beiSpeichern({
-      structuredSolution: lokalStruktur.value,
-      reRender,
-      reviewed: lokalGeprueft.value,
-    })
-  } finally {
-    speichernLaeuft.value = false
+async function aufSpeichernWarten() {
+  // Laufenden Speichervorgang abwarten (jetztSpeichern kehrt bei 'speichert' sofort zurück).
+  const start = Date.now()
+  while (autosave.zustand.value === 'speichert' && Date.now() - start < 120_000) {
+    await new Promise((r) => setTimeout(r, 50))
   }
+  await autosave.jetztSpeichern()
+  while (autosave.zustand.value === 'speichert' && Date.now() - start < 120_000) {
+    await new Promise((r) => setTimeout(r, 50))
+  }
+}
+
+async function schliessenMitSpeichern() {
+  if (props.loesungBearbeiten && props.darfBearbeiten) {
+    drag.value = null
+    await aufSpeichernWarten()
+    if (autosave.zustand.value === 'fehler' || autosave.zustand.value === 'geaendert') {
+      return
+    }
+  }
+  offen.value = false
+}
+
+function schliessen() {
+  void schliessenMitSpeichern()
 }
 
 onMounted(() => document.addEventListener('keydown', beiTaste))
@@ -306,6 +373,9 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', beiTaste)
   seitenResizeObserver?.disconnect()
   seitenResizeObserver = null
+  if (props.loesungBearbeiten && props.darfBearbeiten) {
+    void autosave.jetztSpeichern()
+  }
 })
 </script>
 
@@ -436,13 +506,15 @@ onBeforeUnmount(() => {
           <aside class="flex w-full shrink-0 flex-col border-t border-white/10 bg-surface lg:w-[22rem] lg:border-t-0 lg:border-l lg:border-line">
             <div class="border-b border-line px-3 py-2">
               <p class="text-sm font-semibold text-ink">Antworten korrigieren</p>
-              <p class="text-xs text-ink-muted">Änderungen gelten nach „Neu zeichnen“ im PDF.</p>
+              <p class="text-xs text-ink-muted">
+                Änderungen werden automatisch gespeichert und ins PDF übernommen.
+              </p>
             </div>
             <div class="min-h-0 flex-1 overflow-hidden p-3">
               <MaterialAntwortEditor
                 v-model="lokalStruktur"
                 :aktive-id="aktiveAntwortId"
-                :disabled="!darfBearbeiten || speichernLaeuft"
+                :disabled="!darfBearbeiten"
                 @update:aktive-id="(id) => id && antwortFokussieren(id)"
               />
             </div>
@@ -453,26 +525,13 @@ onBeforeUnmount(() => {
                 hinweis="Als kontrollierte Musterlösung markieren."
                 :disabled="!darfBearbeiten"
               />
-              <div class="flex flex-wrap gap-2">
-                <UiButton
-                  variante="sekundaer"
-                  groesse="sm"
-                  icon="floppy-disk"
-                  :disabled="!darfBearbeiten || speichernLaeuft"
-                  @click="speichern(false)"
-                >
-                  Nur speichern
-                </UiButton>
-                <UiButton
-                  variante="primaer"
-                  groesse="sm"
-                  icon="file-pdf"
-                  :disabled="!darfBearbeiten || speichernLaeuft"
-                  @click="speichern(true)"
-                >
-                  Neu zeichnen
-                </UiButton>
-              </div>
+              <UiSpeichernAnzeige
+                v-if="darfBearbeiten"
+                class="text-xs"
+                :zustand="autosave.zustand.value"
+                :fehler="autosave.letzterFehler.value"
+                :zuletzt="autosave.zuletztGespeichert.value"
+              />
             </div>
           </aside>
         </div>
