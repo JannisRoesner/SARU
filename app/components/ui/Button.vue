@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { NuxtLink } from '#components'
+
 const props = withDefaults(
   defineProps<{
     variante?: 'primaer' | 'sekundaer' | 'still' | 'gefahr' | 'akzent'
@@ -18,8 +20,8 @@ const props = withDefaults(
 
 const VARIANTEN = {
   primaer:
-    'bg-primary text-primary-contrast hover:bg-primary-strong shadow-sm disabled:hover:bg-primary',
-  akzent: 'bg-accent text-accent-contrast hover:bg-accent-strong shadow-sm',
+    'bg-primary-solid text-primary-contrast hover:brightness-110 shadow-sm disabled:hover:brightness-100',
+  akzent: 'bg-accent-solid text-accent-contrast hover:brightness-110 shadow-sm disabled:hover:brightness-100',
   sekundaer: 'bg-surface text-ink border border-line hover:bg-surface-hover hover:border-line-strong',
   still: 'text-ink-muted hover:bg-surface-hover hover:text-ink',
   gefahr: 'bg-danger text-white hover:brightness-110 shadow-sm',
@@ -43,7 +45,7 @@ const gesperrt = computed(() => props.disabled || props.laedt)
 
 <template>
   <component
-    :is="to ? resolveComponent('NuxtLink') : 'button'"
+    :is="to ? NuxtLink : 'button'"
     :to="to"
     :type="to ? undefined : type"
     :disabled="to ? undefined : gesperrt"

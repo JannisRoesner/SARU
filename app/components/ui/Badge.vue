@@ -16,10 +16,11 @@ const TOENE = {
   neutral: 'bg-surface-sunken text-ink-muted border-line',
   primary: 'bg-primary-soft text-primary-strong border-transparent',
   accent: 'bg-accent-soft text-accent-strong border-transparent',
-  gruen: 'bg-success-soft text-success border-transparent',
-  gelb: 'bg-warning-soft text-warning border-transparent',
-  rot: 'bg-danger-soft text-danger border-transparent',
-  violett: 'bg-info-soft text-info border-transparent',
+  gruen: 'bg-success-soft text-success-strong border-transparent',
+  gelb: 'bg-warning-soft text-warning-strong border-transparent',
+  rot: 'bg-danger-soft text-danger-strong border-transparent',
+  violett: 'bg-violett-soft text-violett-strong border-transparent',
+  ki: 'bg-ki-soft text-ki-strong border-transparent',
 } as const
 
 const eigeneFarbe = computed(() =>

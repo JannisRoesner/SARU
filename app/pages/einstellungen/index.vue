@@ -16,21 +16,28 @@ const eintraege = computed(() =>
       to: '/einstellungen/darstellung',
       icon: 'palette',
       titel: 'Darstellung',
-      text: 'Farbmodus und Farbdesign für diese Instanz.',
+      text: 'Farbmodus, Farbdesign und sichtbare Schulformen.',
       sichtbar: true,
     },
     {
       to: '/einstellungen/ki',
       icon: 'wand-magic-sparkles',
       titel: 'KI-Anbindung',
-      text: 'Anbieter, Modelle und Test der Verbindung.',
+      text: 'Modelle anbinden, Musterlösungen erzeugen, optional Hermes nutzen.',
       sichtbar: istAdmin.value,
     },
     {
       to: '/einstellungen/uploads',
       icon: 'cloud-arrow-up',
       titel: 'Uploads & Datenschutz',
-      text: 'Dateigrößen, erlaubte Formate und Aufbewahrung.',
+      text: 'Dateigrößen, erlaubte Endungen und Aufbewahrung.',
+      sichtbar: istAdmin.value,
+    },
+    {
+      to: '/einstellungen/office',
+      icon: 'file-word',
+      titel: 'Office-Vorschau',
+      text: 'Collabora Online für Word, Excel und PowerPoint.',
       sichtbar: istAdmin.value,
     },
     {
@@ -49,7 +56,7 @@ const eintraege = computed(() =>
     <LayoutSeitenkopf
       kicker="Verwaltung"
       titel="Einstellungen"
-      untertitel="Konto, Erscheinungsbild und – für Admins – Systemkonfiguration."
+      untertitel="Konto, Darstellung und Systemeinstellungen."
     />
 
     <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -57,9 +64,9 @@ const eintraege = computed(() =>
         v-for="eintrag in eintraege"
         :key="eintrag.to"
         :to="eintrag.to"
-        class="karte group flex gap-3 p-5 transition-shadow hover:shadow-md"
+        class="karte karte-klickbar group flex gap-3 p-5"
       >
-        <span class="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary">
+        <span class="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary-strong">
           <UiIcon :name="eintrag.icon" fest />
         </span>
         <span>

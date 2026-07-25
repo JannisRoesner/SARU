@@ -13,6 +13,7 @@ import {
 } from 'drizzle-orm/pg-core'
 import { users } from './auth'
 import { searchEntityTypeEnum } from './enums'
+import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
 
 /**
  * Feste Dimension des Vektorindex. Embedding-Modelle mit kleinerer Ausgabe werden
@@ -74,7 +75,7 @@ export interface SavedSearchFilters {
   tagIds?: string[]
   competencyIds?: string[]
   learningGroupIds?: string[]
-  gradeLevels?: number[]
+  gradeLevels?: GradeLevel[]
   materialTypes?: string[]
   fileTypes?: string[]
   entityTypes?: string[]

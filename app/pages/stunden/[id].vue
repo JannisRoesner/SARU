@@ -256,7 +256,7 @@ function phaseGeaendert(phase: LessonPhaseDetail) {
 
       <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
         <div class="space-y-5">
-          <UiCard titel="Rahmen" icon="sliders">
+          <UiCard titel="Rahmen" icon="sliders" einklappbar einklapp-id="stunde-rahmen" :standard-offen="true">
             <div class="grid gap-4 sm:grid-cols-2">
               <UiField label="Titel" pflicht class="sm:col-span-2">
                 <UiInput v-model="formular.title" :disabled="!darfBearbeiten" />
@@ -289,28 +289,52 @@ function phaseGeaendert(phase: LessonPhaseDetail) {
               <UiField label="Thema" class="sm:col-span-2">
                 <UiSelect v-model="formular.topicId" platzhalter="–" :disabled="!darfBearbeiten" :optionen="themenOptionen" />
               </UiField>
-              <UiField label="Methodenübersicht" class="sm:col-span-2">
-                <UiTextarea v-model="formular.methodSummary" :zeilen="2" :disabled="!darfBearbeiten" />
-              </UiField>
-              <UiField label="Hausaufgabe" class="sm:col-span-2">
-                <UiTextarea v-model="formular.homework" :zeilen="2" :disabled="!darfBearbeiten" />
-              </UiField>
+              <UiEinklappbaresFeld
+                v-model="formular.methodSummary"
+                label="Methodenübersicht"
+                :einklapp-id="`stunde-methoden-${id}`"
+                class="sm:col-span-2"
+                leer-vorschau="Keine Methodenübersicht"
+                placeholder="Überblick über Methoden und Sozialformen …"
+                :disabled="!darfBearbeiten"
+              />
+              <UiEinklappbaresFeld
+                v-model="formular.homework"
+                label="Hausaufgabe"
+                :einklapp-id="`stunde-hausaufgabe-${id}`"
+                class="sm:col-span-2"
+                leer-vorschau="Keine Hausaufgabe"
+                placeholder="Aufgabe für die nächste Stunde …"
+                :disabled="!darfBearbeiten"
+              />
               <UiField label="Lernziele" class="sm:col-span-2">
                 <UiTagInput v-model="formular.learningObjectives" :disabled="!darfBearbeiten" />
               </UiField>
               <UiField label="Schlagwörter" class="sm:col-span-2">
                 <UiTagInput v-model="formular.tagNames" :vorschlaege="schlagwortNamen" :disabled="!darfBearbeiten" />
               </UiField>
-              <UiField label="Notizen" class="sm:col-span-2">
-                <UiTextarea v-model="formular.notes" :zeilen="3" :disabled="!darfBearbeiten" />
-              </UiField>
-              <UiField label="Reflexion" class="sm:col-span-2">
-                <UiTextarea v-model="formular.reflection" :zeilen="3" :disabled="!darfBearbeiten" />
-              </UiField>
+              <UiEinklappbaresFeld
+                v-model="formular.notes"
+                label="Notizen"
+                :einklapp-id="`stunde-notizen-${id}`"
+                class="sm:col-span-2"
+                leer-vorschau="Keine Notizen"
+                placeholder="Planungshinweise, Materialien, Besonderheiten …"
+                :disabled="!darfBearbeiten"
+              />
+              <UiEinklappbaresFeld
+                v-model="formular.reflection"
+                label="Reflexion"
+                :einklapp-id="`stunde-reflexion-${id}`"
+                class="sm:col-span-2"
+                leer-vorschau="Keine Reflexion"
+                placeholder="Nachbereitung, was lief gut, was ändern …"
+                :disabled="!darfBearbeiten"
+              />
             </div>
           </UiCard>
 
-          <UiCard titel="Phasenverlauf" icon="list-ol">
+          <UiCard titel="Phasenverlauf" icon="list-ol" einklappbar einklapp-id="stunde-phasen" :standard-offen="false">
             <template #kopf>
               <div v-if="darfBearbeiten" class="flex flex-wrap gap-1">
                 <UiButton
@@ -382,14 +406,15 @@ function phaseGeaendert(phase: LessonPhaseDetail) {
                 </div>
 
                 <div class="grid gap-3 p-3 sm:grid-cols-2">
-                  <UiField label="Inhalt">
-                    <UiTextarea
-                      v-model="phase.content"
-                      :zeilen="3"
-                      :disabled="!darfBearbeiten"
-                      @update:model-value="phaseGeaendert(phase)"
-                    />
-                  </UiField>
+                  <UiEinklappbaresFeld
+                    v-model="phase.content"
+                    label="Inhalt"
+                    :einklapp-id="`stunde-phase-inhalt-${phase.id}`"
+                    leer-vorschau="Kein Inhalt"
+                    placeholder="Was passiert in dieser Phase …"
+                    :disabled="!darfBearbeiten"
+                    @update:model-value="phaseGeaendert(phase)"
+                  />
                   <UiField label="Methode">
                     <UiInput
                       v-model="phase.method"
@@ -471,17 +496,17 @@ function phaseGeaendert(phase: LessonPhaseDetail) {
         </div>
 
         <aside class="space-y-4">
-          <UiCard titel="Stundenmaterialien" icon="folder-open">
+          <UiCard titel="Stundenmaterialien" icon="folder-open" einklappbar einklapp-id="stunde-materialien" :standard-offen="false">
             <template #kopf>
               <UiButton
                 v-if="darfBearbeiten"
-                variante="still"
+                variante="sekundaer"
                 groesse="sm"
                 icon="plus"
+                nur-icon
+                title="Hinzufügen"
                 @click="phaseMaterialZiel = null; materialModal = true"
-              >
-                Hinzufügen
-              </UiButton>
+              />
             </template>
 
             <UiLeerzustand
@@ -531,7 +556,7 @@ function phaseGeaendert(phase: LessonPhaseDetail) {
             </div>
           </UiCard>
 
-          <UiCard v-if="data.series" titel="Reihe" icon="layer-group">
+          <UiCard v-if="data.series" titel="Reihe" icon="layer-group" einklappbar einklapp-id="stunde-reihe" :standard-offen="false">
             <NuxtLink :to="`/reihen/${data.series.id}`" class="text-sm font-medium hover:text-primary">
               {{ data.series.title }}
             </NuxtLink>

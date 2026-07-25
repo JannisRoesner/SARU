@@ -1,3 +1,4 @@
+import type { SchoolForm } from '#shared/types/domain'
 import { boolean, index, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 import { userRoleEnum } from './enums'
 
@@ -7,6 +8,8 @@ export interface UserPreferences {
   density?: 'komfortabel' | 'kompakt'
   defaultMaterialView?: 'raster' | 'liste' | 'tabelle'
   sidebarCollapsed?: boolean
+  /** Leer oder fehlend = alle Schulformen sichtbar. */
+  visibleSchoolForms?: SchoolForm[]
 }
 
 export const users = pgTable(

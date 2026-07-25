@@ -11,7 +11,7 @@ export default defineEventHandler(async (event) => {
   const db = useDatabase()
 
   const [recent, favorites, upcoming, activeSeries, counts] = await Promise.all([
-    listMaterials({ sort: 'datum_neu', pageSize: 6 }),
+    listMaterials({ sort: 'datum_neu', pageSize: 2 }),
     listMaterials({ filters: { onlyFavorites: true }, sort: 'zuletzt_verwendet', pageSize: 6 }),
     getUpcomingLessons(6),
     getActiveSeries(4),

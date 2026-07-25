@@ -87,6 +87,15 @@ function typUmschalten(typ: string) {
   }
 }
 
+function typAnzahl(typ: string): number | undefined {
+  const zaehler = data.value?.proTyp
+  if (!zaehler) return undefined
+  if (typ === 'material') return zaehler.material
+  if (typ === 'unterrichtsstunde') return zaehler.unterrichtsstunde
+  if (typ === 'reihe') return zaehler.reihe
+  return undefined
+}
+
 const chips = computed(() => {
   const liste: { key: string; label: string; clear: () => void }[] = []
   for (const typ of typen.value) {
@@ -140,7 +149,7 @@ const { favoritSetzen } = useMaterialAktionen(() => refresh())
     <LayoutSeitenkopf
       kicker="Finden"
       titel="Suche"
-      untertitel="Durchsuche Materialien, Stunden und Reihen – inkl. Text aus Anhängen."
+      untertitel="Materialien, Stunden und Reihen durchsuchen, auch Text in Anhängen."
     >
       <template #aktionen>
         <UiButton
@@ -174,7 +183,14 @@ const { favoritSetzen } = useMaterialAktionen(() => refresh())
         @click="typUmschalten(opt.value)"
       >
         <UiIcon v-if="opt.icon" :name="opt.icon" fest />
-        {{ opt.label }}
+        <span>{{ opt.label }}</span>
+        <span
+          v-if="suche.trim() && typAnzahl(opt.value) !== undefined"
+          class="filter-chip-count"
+          :aria-label="`${formatZahl(typAnzahl(opt.value)!)} Treffer`"
+        >
+          {{ formatZahl(typAnzahl(opt.value)!) }}
+        </span>
       </button>
     </div>
 
@@ -187,7 +203,7 @@ const { favoritSetzen } = useMaterialAktionen(() => refresh())
         class="filter-chip filter-chip-aktiv"
         @click="chip.clear()"
       >
-        {{ chip.label }}
+        <span>{{ chip.label }}</span>
         <UiIcon name="xmark" fest />
       </button>
     </div>
@@ -205,7 +221,7 @@ const { favoritSetzen } = useMaterialAktionen(() => refresh())
           @click="gespeicherteLaden(eintrag)"
         >
           <UiIcon name="bookmark" fest />
-          {{ eintrag.name }}
+          <span>{{ eintrag.name }}</span>
           <span
             class="ml-1 rounded p-0.5 opacity-0 hover:bg-danger-soft hover:text-danger group-hover:opacity-100"
             title="Löschen"
@@ -228,16 +244,11 @@ const { favoritSetzen } = useMaterialAktionen(() => refresh())
     </template>
 
     <template v-else>
-      <div class="mb-3 flex flex-wrap items-baseline justify-between gap-2 text-sm text-ink-muted">
+      <div class="mb-3 text-sm text-ink-muted">
         <p>
           <span class="font-medium text-ink">{{ formatZahl(data?.anzahl ?? 0) }}</span>
           Treffer
           <template v-if="data?.vektorsucheAktiv"> · inkl. Ähnlichkeitssuche</template>
-        </p>
-        <p v-if="data?.proTyp" class="text-xs">
-          {{ data.proTyp.material }} Mat. ·
-          {{ data.proTyp.unterrichtsstunde }} Std. ·
-          {{ data.proTyp.reihe }} Reihen
         </p>
       </div>
 

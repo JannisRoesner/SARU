@@ -25,6 +25,34 @@ import {
 } from './enums'
 import { competencies, learningGroups, subjects, tags, topics } from './taxonomy'
 
+/** Persistierte Antwortstruktur einer KI-Musterlösung (Nachbearbeitung / Re-Render). */
+export interface StoredSolutionBBox {
+  x: number
+  y: number
+  w?: number
+  h?: number
+}
+
+export interface StoredSolutionAnswer {
+  id: string
+  label: string
+  answer: string
+  page?: number | null
+  blankIndex?: number | null
+  leftContext?: string | null
+  rightContext?: string | null
+  bbox?: StoredSolutionBBox | null
+  fieldType?: 'luecke' | 'freitext' | null
+}
+
+export interface StoredStructuredSolution {
+  summary: string
+  answers: StoredSolutionAnswer[]
+  formFields: Array<{ name: string; value: string }>
+  notesForTeacher?: string | null
+  uncertainties?: string | null
+}
+
 export interface AiMeta {
   provider?: string
   model?: string
@@ -35,6 +63,18 @@ export interface AiMeta {
   reviewed?: boolean
   reviewedAt?: string
   reviewedBy?: string
+  /** Strategie der dokumentbasierten Musterlösung (docx_inplace, pdf_acroform, …). */
+  fillStrategy?: string
+  hermesUsed?: boolean
+  sourceFileName?: string
+  /** Volle strukturierte Lösung inkl. Positionen – für Korrektur und PDF-Neuzeichnung. */
+  structuredSolution?: StoredStructuredSolution | null
+  /** Varianten-ID der Quelldatei, aus der die Lösung erzeugt wurde. */
+  sourceVariantId?: string | null
+  /** Asset-ID der Quell-PDF (für visuelle Nachbearbeitung). */
+  sourceAssetId?: string | null
+  editedAt?: string
+  editedBy?: string
 }
 
 /**
@@ -49,8 +89,8 @@ export const materials = pgTable(
     title: text().notNull(),
     description: text(),
     /**
-     * Textinhalt für Materialien, die keine Datei brauchen (Notizen, KI-Musterlösungen).
-     * Wird als Markdown gespeichert und mitindiziert.
+     * Textinhalt für Materialien ohne Datei (Notizen) bzw. kurze Zusammenfassung
+     * bei dokumentbasierten KI-Musterlösungen. Wird als Markdown gespeichert und mitindiziert.
      */
     content: text(),
     materialType: materialTypeEnum().notNull().default('arbeitsblatt'),
@@ -226,7 +266,7 @@ export const materialGradeLevels = pgTable(
     materialId: uuid()
       .notNull()
       .references(() => materials.id, { onDelete: 'cascade' }),
-    gradeLevel: integer().notNull(),
+    gradeLevel: text().notNull(),
   },
   (t) => [
     primaryKey({ columns: [t.materialId, t.gradeLevel] }),

@@ -7,8 +7,8 @@ import { checkRateLimit } from '../../../utils/rate-limit'
 import { parseOrThrow, readValidatedBody, uuidSchema } from '../../../utils/validation'
 
 /**
- * Erzeugt per LLM eine Musterlösung zum Material. Das Ergebnis wird als eigenes,
- * als KI-Erzeugnis gekennzeichnetes Material angelegt und verknüpft.
+ * Erzeugt eine dokumentbasierte Musterlösung (DOCX-Lücken / PDF-AcroForm /
+ * PDF-Text-Overlay auf Originalseiten). Ergebnis = verknüpftes KI-Material mit Datei.
  */
 export default defineEventHandler(async (event) => {
   const user = await requireEditor(event)
@@ -37,7 +37,12 @@ export default defineEventHandler(async (event) => {
       action: 'ki.musterloesung_erzeugt',
       entityType: 'material',
       entityId: id,
-      details: { modell: result.model, loesung: result.solutionMaterialId },
+      details: {
+        modell: result.model,
+        loesung: result.solutionMaterialId,
+        strategie: result.fillStrategy,
+        hermes: result.hermesUsed,
+      },
     },
     event,
   )

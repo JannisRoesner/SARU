@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { FARBDESIGNS, type FarbdesignId, type Farbmodus } from '~/composables/useDarstellung'
+import type { SchoolForm } from '#shared/types/domain'
 
 useHead({ title: 'Darstellung' })
 
 const { modus, design, setzen } = useDarstellung()
 const { istAdmin } = useSitzung()
+const { alleOptionen, istSichtbar, sichtbarkeitSetzen, alleEinblenden } = useSchulformen()
 const { aufruf, laeuft } = useApi()
+
+const schulformenSpeichern = ref(false)
 
 const modi: { id: Farbmodus; label: string; icon: string }[] = [
   { id: 'hell', label: 'Hell', icon: 'sun' },
@@ -44,6 +48,15 @@ async function instanzSpeichern() {
     erfolgsmeldung: 'Instanzdarstellung gespeichert.',
   })
 }
+
+async function schulformUmschalten(form: SchoolForm, sichtbar: boolean) {
+  schulformenSpeichern.value = true
+  try {
+    await sichtbarkeitSetzen(form, sichtbar)
+  } finally {
+    schulformenSpeichern.value = false
+  }
+}
 </script>
 
 <template>
@@ -57,7 +70,7 @@ async function instanzSpeichern() {
     <LayoutSeitenkopf
       kicker="Persönlich"
       titel="Darstellung"
-      untertitel="Farbmodus und Palette gelten für dich – geräteübergreifend über dein Konto."
+      untertitel="Farbmodus, Palette und sichtbare Schulformen – alles geräteübergreifend über dein Konto."
     />
 
     <UiCard titel="Farbmodus" icon="circle-half-stroke" class="mb-5">
@@ -83,7 +96,7 @@ async function instanzSpeichern() {
           :key="d.id"
           type="button"
           class="flex items-center gap-3 rounded-xl border px-4 py-3 text-left transition-colors"
-          :class="design === d.id ? 'border-primary bg-primary-soft' : 'border-line hover:bg-surface-hover'"
+          :class="design === d.id ? 'border-primary bg-primary-soft text-primary-strong' : 'border-line hover:bg-surface-hover'"
           @click="setzen({ design: d.id })"
         >
           <span class="flex gap-1">
@@ -92,6 +105,34 @@ async function instanzSpeichern() {
           </span>
           <span class="text-sm font-medium text-ink">{{ d.name }}</span>
         </button>
+      </div>
+    </UiCard>
+
+    <UiCard titel="Schulformen" icon="school" class="mb-5">
+      <p class="mb-4 text-sm text-ink-muted">
+        Lege fest, welche Schulformen dir in Filtern, Formularen und bei der Jahrgangsstufen-Auswahl
+        angeboten werden. Ausgeblendete Schulformen werden nicht gelöscht – bestehende Einträge
+        bleiben sichtbar.
+      </p>
+      <div class="space-y-3">
+        <UiToggle
+          v-for="option in alleOptionen"
+          :key="option.value"
+          :model-value="istSichtbar(option.value)"
+          :label="option.label"
+          :disabled="schulformenSpeichern"
+          @update:model-value="schulformUmschalten(option.value, $event)"
+        />
+      </div>
+      <div class="mt-4 flex justify-end">
+        <UiButton
+          variante="still"
+          groesse="sm"
+          :disabled="schulformenSpeichern || alleOptionen.every((o) => istSichtbar(o.value))"
+          @click="alleEinblenden"
+        >
+          Alle einblenden
+        </UiButton>
       </div>
     </UiCard>
 

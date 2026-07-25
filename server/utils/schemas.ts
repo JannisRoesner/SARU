@@ -12,6 +12,7 @@ import {
   SOCIAL_FORMS,
   VARIANT_KINDS,
 } from '#shared/types/domain'
+import { type GradeLevel, normalizeGradeLevel } from '#shared/utils/jahrgangsstufen'
 import { booleanish, csvArray, paginationSchema, uuidSchema } from './validation'
 
 /** Leerstring aus Formularfeldern soll `null` bedeuten, nicht "leerer Text". */
@@ -30,12 +31,22 @@ const objectives = z.array(z.string().max(500)).max(50).optional()
 const nameList = z.array(z.string().min(1).max(120)).max(60).optional()
 const idList = z.array(uuidSchema).max(200).optional()
 
+const gradeLevelSchema = z
+  .union([
+    z.coerce.number().int().min(1).max(10),
+    z.enum(['E1', 'E2', 'Q1', 'Q2', 'Q3', 'Q4']),
+    z.coerce.number().int().min(11).max(13).transform(String),
+    z.enum(['11', '12', '13']),
+  ])
+  .transform((v) => normalizeGradeLevel(v)!)
+  .refine((v): v is GradeLevel => normalizeGradeLevel(v) !== null, 'Ungültige Jahrgangsstufe.')
+
 const taxonomyFields = {
   subjectIds: idList,
   topicIds: idList,
   competencyIds: idList,
   learningGroupIds: idList,
-  gradeLevels: z.array(z.coerce.number().int().min(1).max(13)).max(13).optional(),
+  gradeLevels: z.array(gradeLevelSchema).max(16).optional(),
   tagNames: nameList,
   competencyNames: nameList,
 }
@@ -70,7 +81,7 @@ export const materialListSchema = paginationSchema.extend({
   tagIds: csvArray(uuidSchema),
   competencyIds: csvArray(uuidSchema),
   learningGroupIds: csvArray(uuidSchema),
-  gradeLevels: csvArray(z.coerce.number().int().min(1).max(13)),
+  gradeLevels: csvArray(gradeLevelSchema),
   materialTypes: csvArray(z.enum(MATERIAL_TYPES)),
   schoolForms: csvArray(z.enum(SCHOOL_FORMS)),
   fileTypes: csvArray(z.string().max(10)),
@@ -231,7 +242,7 @@ export const savedSearchSchema = z.object({
       tagIds: idList,
       competencyIds: idList,
       learningGroupIds: idList,
-      gradeLevels: z.array(z.coerce.number().int().min(1).max(13)).max(13).optional(),
+      gradeLevels: z.array(gradeLevelSchema).max(16).optional(),
       materialTypes: z.array(z.enum(MATERIAL_TYPES)).optional(),
       fileTypes: z.array(z.string().max(10)).max(30).optional(),
       /** Bestimmt zugleich, auf welche Ansicht sich die Suche bezieht. */
@@ -293,7 +304,7 @@ export const importMappingSchema = z.object({
   subjectName: z.string().max(120).optional(),
   learningGroupId: uuidSchema.nullish(),
   learningGroupName: z.string().max(120).optional(),
-  gradeLevel: z.coerce.number().int().min(1).max(13).nullish(),
+  gradeLevel: gradeLevelSchema.nullish(),
   schoolYear: z.string().max(20).optional(),
   schoolForm: z.enum(SCHOOL_FORMS).nullish(),
   seriesMode: z.enum(['neu', 'bestehend', 'keine']).default('neu'),
@@ -383,3 +394,43 @@ export const appearanceSettingsSchema = z
     instanceName: z.string().min(1).max(120),
   })
   .partial()
+
+export const collaboraSettingsSchema = z
+  .object({
+    enabled: z.boolean(),
+    baseUrl: z
+      .string()
+      .max(500)
+      .refine((v) => !v || /^https?:\/\//i.test(v), {
+        message: 'Bitte eine http(s)-URL angeben.',
+      }),
+    wopiHostUrl: z
+      .string()
+      .max(500)
+      .refine((v) => !v || /^https?:\/\//i.test(v), {
+        message: 'Bitte eine http(s)-URL angeben.',
+      }),
+  })
+  .partial()
+  .refine((v) => !v.enabled || Boolean(v.baseUrl?.trim()), {
+    message: 'Bei aktivierter Collabora-Vorschau ist eine Basis-URL nötig.',
+    path: ['baseUrl'],
+  })
+
+export const hermesSettingsSchema = z
+  .object({
+    enabled: z.boolean(),
+    baseUrl: z
+      .string()
+      .max(500)
+      .refine((v) => !v || /^https?:\/\//i.test(v), {
+        message: 'Bitte eine http(s)-URL angeben.',
+      }),
+    apiKey: z.string().max(500).optional(),
+    timeoutMs: z.coerce.number().int().min(5000).max(900_000),
+  })
+  .partial()
+  .refine((v) => !v.enabled || Boolean(v.baseUrl?.trim()), {
+    message: 'Bei aktiviertem Hermes-Agent ist eine Basis-URL nötig.',
+    path: ['baseUrl'],
+  })

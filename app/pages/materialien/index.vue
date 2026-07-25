@@ -122,7 +122,7 @@ const aktiveFilter = computed(() => {
     <LayoutSeitenkopf
       kicker="Sammlung"
       titel="Materialien"
-      untertitel="Arbeitsblätter, Präsentationen und weitere Unterrichtsmaterialien – durchsuchbar, filterbar und wiederverwendbar."
+      untertitel="Arbeitsblätter, Präsentationen und anderes Unterrichtsmaterial. Suchen, filtern und wiederverwenden."
     >
       <template v-if="darfBearbeiten" #aktionen>
         <UiButton to="/materialien/neu" variante="primaer" icon="plus">

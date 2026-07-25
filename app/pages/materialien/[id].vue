@@ -1,18 +1,21 @@
 <script setup lang="ts">
 import {
   materialTypes,
-  schoolForms,
   origins,
   variantKinds,
   materialRelationTypes,
 } from '#shared/utils/labels'
+import { istKiMusterloesung, kiAutorAnzeige } from '#shared/utils/ki'
+import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
 import type { MaterialDetail } from '~~/server/repositories/material.repository'
+import type { StoredStructuredSolution } from '~~/server/database/schema/materials'
 
 const route = useRoute()
 const id = computed(() => String(route.params.id))
 const { darfBearbeiten } = useSitzung()
 const { aufruf, laeuft } = useApi()
 const { fachOptionen, schlagwortNamen } = useTaxonomie()
+const { optionenMitAktuell } = useSchulformen()
 const hinweise = useHinweise()
 
 const { data, status, error, refresh } = await useFetch<MaterialDetail>(
@@ -42,8 +45,12 @@ const formular = reactive({
   subjectIds: [] as string[],
   tagNames: [] as string[],
   learningObjectives: [] as string[],
-  gradeLevels: [] as number[],
+  gradeLevels: [] as GradeLevel[],
 })
+
+const schulformOptionen = computed(() =>
+  optionenMitAktuell(formular.schoolForm).map((o) => ({ value: o.value, label: o.label })),
+)
 
 const geladen = ref(false)
 
@@ -87,6 +94,9 @@ const varianteOffen = ref(false)
 const linkOffen = ref(false)
 const relationOffen = ref(false)
 const kiOffen = ref(false)
+const vorschauOffen = ref(false)
+const vorschauAssetId = ref<string | null>(null)
+const vorschauTitel = ref<string | null>(null)
 const aktiveVarianteId = ref<string | null>(null)
 
 const neueVariante = reactive({
@@ -177,19 +187,24 @@ async function relationLoeschen(relationId: string) {
 }
 
 async function kiLoesung() {
-  const ergebnis = await aufruf<{ solutionMaterialId: string }>(
-    `/api/materials/${id.value}/solution`,
-    {
-      method: 'POST',
-      body: { userInstructions: kiAnweisung.value || null },
-      erfolgsmeldung: 'Musterlösung erzeugt.',
-    },
-  )
+  const ergebnis = await aufruf<{
+    solutionMaterialId: string
+    fillStrategy?: string
+    hermesUsed?: boolean
+    fileName?: string | null
+  }>(`/api/materials/${id.value}/solution`, {
+    method: 'POST',
+    body: { userInstructions: kiAnweisung.value || null },
+    erfolgsmeldung: 'Musterlösung als Dokument erzeugt.',
+  })
   if (ergebnis) {
     kiOffen.value = false
     kiAnweisung.value = ''
     await refresh()
-    hinweise.erfolg('Lösung öffnen?', {
+    const strategie = ergebnis.fillStrategy
+      ? ` (${ergebnis.fillStrategy}${ergebnis.hermesUsed ? ', Hermes' : ''})`
+      : ''
+    hinweise.erfolg(`Dokument angelegt${strategie}. Öffnen?`, {
       text: 'Zur Lösung',
       ausfuehren: () => navigateTo(`/materialien/${ergebnis.solutionMaterialId}`),
     })
@@ -202,24 +217,103 @@ async function materialLoeschen() {
   if (ok) await navigateTo('/materialien')
 }
 
-function assetOeffnen(asset: { id: string; kind: string; url: string | null }) {
+function assetOeffnen(asset: {
+  id: string
+  kind: string
+  url: string | null
+  title?: string | null
+  fileName?: string | null
+  mimeType?: string | null
+}) {
   void alsVerwendetMerken(id.value)
   if (asset.kind === 'link' && asset.url) {
     window.open(asset.url, '_blank', 'noopener')
     return
   }
-  window.open(`/api/assets/${asset.id}/download`, '_blank')
+  vorschauAssetId.value = asset.id
+  vorschauTitel.value = asset.title || asset.fileName || null
+  vorschauOffen.value = true
 }
 
-const jahreText = computed({
-  get: () => formular.gradeLevels.join(', '),
-  set: (wert: string) => {
-    formular.gradeLevels = wert
-      .split(/[,;\s]+/)
-      .map((t) => Number(t.trim()))
-      .filter((n) => n >= 1 && n <= 13)
-  },
+async function loesungSpeichern(payload: {
+  structuredSolution: StoredStructuredSolution
+  reRender: boolean
+  reviewed: boolean
+}) {
+  const ergebnis = await aufruf<{
+    reRendered: boolean
+    material: MaterialDetail
+  }>(`/api/materials/${id.value}/solution`, {
+    method: 'PATCH',
+    body: payload,
+    erfolgsmeldung: payload.reRender
+      ? 'Antworten gespeichert und PDF neu gezeichnet.'
+      : 'Antworten gespeichert.',
+  })
+  if (ergebnis) {
+    await refresh()
+    if (ergebnis.material?.variants) {
+      const asset =
+        ergebnis.material.variants
+          .flatMap((v) => v.assets)
+          .find((a) => a.kind === 'datei' && a.role === 'haupt') ??
+        ergebnis.material.variants.flatMap((v) => v.assets).find((a) => a.kind === 'datei')
+      if (asset) vorschauAssetId.value = asset.id
+    }
+  }
+}
+
+async function geprueftUmschalten(wert: boolean) {
+  const ok = await aufruf(`/api/materials/${id.value}/reviewed`, {
+    method: 'PATCH',
+    body: { reviewed: wert },
+    erfolgsmeldung: wert ? 'Als geprüft markiert.' : 'Prüfstatus entfernt.',
+  })
+  if (ok !== null) await refresh()
+}
+
+function assetHerunterladen(assetId: string) {
+  void alsVerwendetMerken(id.value)
+  window.open(`/api/assets/${assetId}/download`, '_blank')
+}
+
+const hauptVorschau = computed(() => {
+  const varianten = data.value?.variants ?? []
+  for (const variante of [...varianten].sort(
+    (a, b) => Number(b.isDefault) - Number(a.isDefault) || a.sortOrder - b.sortOrder,
+  )) {
+    const asset = variante.assets.find((a) => a.kind === 'datei')
+    if (asset) return asset
+  }
+  return null
 })
+
+const kiLoesungAktiv = computed(() => (data.value ? istKiMusterloesung(data.value) : false))
+
+const kiCredit = computed(() =>
+  data.value
+    ? kiAutorAnzeige(data.value.aiMeta, data.value.author)
+    : null,
+)
+
+const loesungStruktur = computed<StoredStructuredSolution | null>(() => {
+  const raw = data.value?.aiMeta?.structuredSolution
+  if (!raw || !Array.isArray(raw.answers)) return null
+  return raw
+})
+
+const loesungBearbeitbar = computed(
+  () =>
+    Boolean(
+      kiLoesungAktiv.value &&
+        loesungStruktur.value &&
+        darfBearbeiten.value &&
+        (data.value?.aiMeta?.fillStrategy === 'pdf_overlay' ||
+          data.value?.aiMeta?.sourceAssetId ||
+          data.value?.aiMeta?.sourceMaterialId),
+    ),
+)
+
 </script>
 
 <template>
@@ -242,8 +336,26 @@ const jahreText = computed({
             <UiBadge :ton="materialTypes.tone(data.materialType)" :icon="materialTypes.icon(data.materialType)">
               {{ materialTypes.label(data.materialType) }}
             </UiBadge>
-            <UiBadge v-if="data.origin !== 'manuell'" :ton="origins.tone(data.origin)" :icon="origins.icon(data.origin)">
+            <UiBadge
+              v-if="kiCredit"
+              ton="ki"
+              icon="robot"
+            >
+              {{ kiCredit }}
+            </UiBadge>
+            <UiBadge
+              v-else-if="data.origin !== 'manuell'"
+              :ton="origins.tone(data.origin)"
+              :icon="origins.icon(data.origin)"
+            >
               {{ origins.label(data.origin) }}
+            </UiBadge>
+            <UiBadge
+              v-if="kiLoesungAktiv && data.aiMeta?.reviewed"
+              ton="gruen"
+              icon="circle-check"
+            >
+              Geprüft
             </UiBadge>
             <UiBadge v-for="fach in data.subjects" :key="fach.id" :farbe="fach.color ?? undefined">
               {{ fach.name }}
@@ -267,12 +379,20 @@ const jahreText = computed({
             @click="favoritSetzen(data.id, !data.isFavorite)"
           />
           <UiButton
-            v-if="darfBearbeiten"
+            v-if="darfBearbeiten && !kiLoesungAktiv"
             variante="sekundaer"
             icon="wand-magic-sparkles"
             @click="kiOffen = true"
           >
-            KI-Lösung
+            Musterlösung erstellen
+          </UiButton>
+          <UiButton
+            v-if="loesungBearbeitbar && hauptVorschau"
+            variante="sekundaer"
+            icon="pen-to-square"
+            @click="assetOeffnen(hauptVorschau)"
+          >
+            Antworten korrigieren
           </UiButton>
           <UiButton
             v-if="darfBearbeiten"
@@ -303,14 +423,78 @@ const jahreText = computed({
 
       <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
         <div class="space-y-5">
-          <UiCard titel="Angaben" icon="pen-to-square">
+          <UiCard
+            v-if="hauptVorschau"
+            titel="Dokumentvorschau"
+            icon="eye"
+            einklappbar
+            einklapp-id="material-vorschau"
+            :standard-offen="true"
+          >
+            <div class="flex flex-wrap items-start gap-4">
+              <MaterialVorschauMiniatur
+                :asset-id="hauptVorschau.id"
+                :file-name="hauptVorschau.fileName"
+                :mime-type="hauptVorschau.mimeType"
+                groesse="lg"
+                klickbar
+                @klick="assetOeffnen(hauptVorschau)"
+              />
+              <div class="min-w-0 flex-1 space-y-3">
+                <div>
+                  <p class="font-medium text-ink">
+                    {{ hauptVorschau.title || hauptVorschau.fileName }}
+                  </p>
+                  <p v-if="hauptVorschau.sizeBytes" class="text-sm text-ink-muted">
+                    {{ formatBytes(hauptVorschau.sizeBytes) }}
+                  </p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <UiButton
+                    variante="primaer"
+                    icon="eye"
+                    @click="assetOeffnen(hauptVorschau)"
+                  >
+                    {{ loesungBearbeitbar ? 'Vorschau & korrigieren' : 'Vorschau' }}
+                  </UiButton>
+                  <UiButton
+                    variante="sekundaer"
+                    icon="download"
+                    @click="assetHerunterladen(hauptVorschau.id)"
+                  >
+                    Download
+                  </UiButton>
+                </div>
+                <UiToggle
+                  v-if="kiLoesungAktiv && darfBearbeiten"
+                  :model-value="Boolean(data.aiMeta?.reviewed)"
+                  label="Fachlich geprüft"
+                  hinweis="Markiert die KI-Musterlösung als kontrolliert."
+                  @update:model-value="geprueftUmschalten($event)"
+                />
+              </div>
+            </div>
+          </UiCard>
+
+          <UiCard
+            titel="Angaben"
+            icon="pen-to-square"
+            einklappbar
+            einklapp-id="material-angaben"
+            :standard-offen="true"
+          >
             <div class="space-y-4">
               <UiField label="Titel" pflicht>
                 <UiInput v-model="formular.title" :disabled="!darfBearbeiten" />
               </UiField>
-              <UiField label="Beschreibung">
-                <UiTextarea v-model="formular.description" :zeilen="3" :disabled="!darfBearbeiten" />
-              </UiField>
+              <UiEinklappbaresFeld
+                v-model="formular.description"
+                label="Beschreibung"
+                :einklapp-id="`material-beschreibung-${id}`"
+                leer-vorschau="Keine Beschreibung"
+                placeholder="Kurzbeschreibung …"
+                :disabled="!darfBearbeiten"
+              />
               <div class="grid gap-4 sm:grid-cols-2">
                 <UiField label="Materialart">
                   <UiSelect
@@ -324,22 +508,43 @@ const jahreText = computed({
                     v-model="formular.schoolForm"
                     platzhalter="–"
                     :disabled="!darfBearbeiten"
-                    :optionen="schoolForms.options().map((o) => ({ value: o.value, label: o.label }))"
+                    :optionen="schulformOptionen"
                   />
                 </UiField>
               </div>
-              <UiField label="Inhalt / Textfassung">
-                <UiTextarea v-model="formular.content" :zeilen="6" :disabled="!darfBearbeiten" />
-              </UiField>
-              <UiField label="Notizen">
-                <UiTextarea v-model="formular.notes" :zeilen="3" :disabled="!darfBearbeiten" />
-              </UiField>
+              <MaterialInhaltFeld
+                v-model="formular.content"
+                :einklapp-id="`material-inhalt-${id}`"
+                :disabled="!darfBearbeiten"
+              />
+              <UiEinklappbaresFeld
+                v-model="formular.notes"
+                label="Notizen"
+                :einklapp-id="`material-notizen-${id}`"
+                leer-vorschau="Keine Notizen"
+                placeholder="Interne Notizen …"
+                :disabled="!darfBearbeiten"
+              />
               <div class="grid gap-4 sm:grid-cols-2">
                 <UiField label="Quelle">
                   <UiInput v-model="formular.source" :disabled="!darfBearbeiten" />
                 </UiField>
-                <UiField label="Autor">
-                  <UiInput v-model="formular.author" :disabled="!darfBearbeiten" />
+                <UiField
+                  label="Autor"
+                  :hinweis="kiLoesungAktiv ? 'Bei KI-Musterlösungen das verwendete Modell.' : undefined"
+                >
+                  <UiInput
+                    v-if="!kiLoesungAktiv"
+                    v-model="formular.author"
+                    :disabled="!darfBearbeiten"
+                  />
+                  <div
+                    v-else
+                    class="flex h-10 items-center gap-2 rounded-lg border border-line bg-surface-sunken px-3 text-sm text-ink"
+                  >
+                    <UiIcon name="robot" class="text-ki-strong" />
+                    <span>{{ kiCredit || formular.author || 'KI' }}</span>
+                  </div>
                 </UiField>
               </div>
               <UiField label="Schlagwörter">
@@ -356,8 +561,11 @@ const jahreText = computed({
                   platzhalter="Lernziel …"
                 />
               </UiField>
-              <UiField label="Jahrgangsstufen" hinweis="Kommagetrennt, z. B. 5, 6, 7">
-                <UiInput v-model="jahreText" :disabled="!darfBearbeiten" placeholder="5, 6, 7" />
+              <UiField label="Jahrgangsstufen">
+                <UiJahrgangsstufenAuswahl
+                  v-model="formular.gradeLevels"
+                  :disabled="!darfBearbeiten"
+                />
               </UiField>
               <UiField label="Fächer">
                 <select
@@ -375,7 +583,13 @@ const jahreText = computed({
             </div>
           </UiCard>
 
-          <UiCard titel="Varianten & Anhänge" icon="code-branch">
+          <UiCard
+            titel="Varianten & Anhänge"
+            icon="code-branch"
+            einklappbar
+            einklapp-id="material-varianten"
+            :standard-offen="false"
+          >
             <template #kopf>
               <UiButton
                 v-if="darfBearbeiten"
@@ -438,7 +652,21 @@ const jahreText = computed({
                     :key="asset.id"
                     class="flex items-center gap-2 rounded-lg bg-surface px-3 py-2 text-sm"
                   >
-                    <UiIcon :name="asset.kind === 'link' ? 'link' : dateiIcon(asset.fileName)" fest class="text-ink-subtle" />
+                    <MaterialVorschauMiniatur
+                      v-if="asset.kind === 'datei'"
+                      :asset-id="asset.id"
+                      :file-name="asset.fileName"
+                      :mime-type="asset.mimeType"
+                      groesse="sm"
+                      klickbar
+                      @klick="assetOeffnen(asset)"
+                    />
+                    <UiIcon
+                      v-else
+                      name="link"
+                      fest
+                      class="text-ink-subtle"
+                    />
                     <button
                       type="button"
                       class="min-w-0 flex-1 truncate text-left font-medium text-ink hover:text-primary"
@@ -449,6 +677,15 @@ const jahreText = computed({
                     <span v-if="asset.sizeBytes" class="text-xs text-ink-subtle">
                       {{ formatBytes(asset.sizeBytes) }}
                     </span>
+                    <UiButton
+                      v-if="asset.kind === 'datei'"
+                      variante="still"
+                      groesse="sm"
+                      icon="download"
+                      nur-icon
+                      title="Herunterladen"
+                      @click="assetHerunterladen(asset.id)"
+                    />
                     <UiButton
                       v-if="darfBearbeiten"
                       variante="still"
@@ -465,7 +702,13 @@ const jahreText = computed({
             </div>
           </UiCard>
 
-          <UiCard titel="Verknüpfungen" icon="link">
+          <UiCard
+            titel="Verknüpfungen"
+            icon="link"
+            einklappbar
+            einklapp-id="material-verknuepfungen"
+            :standard-offen="false"
+          >
             <template #kopf>
               <UiButton
                 v-if="darfBearbeiten"
@@ -515,7 +758,14 @@ const jahreText = computed({
         </div>
 
         <aside class="space-y-4">
-          <UiCard titel="Verwendung" icon="chalkboard-user" blank>
+          <UiCard
+            titel="Verwendung"
+            icon="chalkboard-user"
+            blank
+            einklappbar
+            einklapp-id="material-verwendung"
+            :standard-offen="false"
+          >
             <div class="p-4">
               <UiLeerzustand
                 v-if="!data.usages.length"
@@ -541,7 +791,13 @@ const jahreText = computed({
             </div>
           </UiCard>
 
-          <UiCard titel="Metadaten" icon="circle-info">
+          <UiCard
+            titel="Metadaten"
+            icon="circle-info"
+            einklappbar
+            einklapp-id="material-metadaten"
+            :standard-offen="false"
+          >
             <dl class="space-y-3 text-sm">
               <div>
                 <dt class="text-xs text-ink-subtle uppercase tracking-wide">Aktualisiert</dt>
@@ -641,23 +897,51 @@ const jahreText = computed({
       </template>
     </UiModal>
 
-    <UiModal v-model="kiOffen" titel="Musterlösung mit KI" icon="wand-magic-sparkles">
-      <p class="mb-4 text-sm text-ink-muted">
-        Es wird ein neues, als KI-Erzeugnis gekennzeichnetes Material angelegt und als Lösung verknüpft.
-      </p>
+    <UiModal v-model="kiOffen" titel="Musterlösung erstellen" icon="wand-magic-sparkles">
+      <div class="mb-4 space-y-2 text-sm text-ink-muted">
+        <p>
+          Die KI wertet die Quelldatei aus (Vision bei PDF/Bildern) und erzeugt ein
+          <strong class="font-medium text-ink">herunterladbares Dokument</strong> –
+          möglichst mit ausgefüllten Lücken bzw. Formularfeldern. Das Ergebnis wird als
+          KI-Musterlösung verknüpft.
+        </p>
+        <p>
+          Word-Dokumente können bei konfigurierter Collabora-Vorschau direkt geöffnet und
+          nachbearbeitet werden. Bei PDFs ohne Formularfelder schreibt die KI die Lösungen
+          als Text in die Lücken auf den Originalseiten (visuelles Overlay).
+        </p>
+        <p v-if="laeuft" class="rounded-lg bg-primary-soft px-3 py-2 text-primary-strong">
+          Musterlösung wird erzeugt – je nach Modell und Seitenzahl kann das einige Minuten dauern …
+        </p>
+      </div>
       <UiField label="Zusätzliche Anweisung">
         <UiTextarea
           v-model="kiAnweisung"
           :zeilen="4"
-          placeholder="z. B. Lösungsschritte ausführlich erklären …"
+          placeholder="z. B. Lücken knapp ausfüllen, Erwartungshorizont für offene Aufgaben …"
+          :disabled="laeuft"
         />
       </UiField>
       <template #aktionen>
-        <UiButton variante="sekundaer" @click="kiOffen = false">Abbrechen</UiButton>
+        <UiButton variante="sekundaer" :disabled="laeuft" @click="kiOffen = false">Abbrechen</UiButton>
         <UiButton variante="primaer" icon="wand-magic-sparkles" :laedt="laeuft" @click="kiLoesung">
-          Erzeugen
+          Musterlösung erstellen
         </UiButton>
       </template>
     </UiModal>
+
+    <MaterialVorschauModal
+      v-model="vorschauOffen"
+      :asset-id="vorschauAssetId"
+      :titel="vorschauTitel"
+      :loesung-bearbeiten="loesungBearbeitbar"
+      :struktur="loesungStruktur"
+      :quellen-asset-id="data?.aiMeta?.sourceAssetId ?? null"
+      :modell-credit="kiCredit"
+      :geprueft="Boolean(data?.aiMeta?.reviewed)"
+      :darf-bearbeiten="darfBearbeiten"
+      :bei-speichern="loesungSpeichern"
+      @herunterladen="assetHerunterladen"
+    />
   </div>
 </template>

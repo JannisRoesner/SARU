@@ -15,7 +15,7 @@ const an = defineModel<boolean>({ required: true })
       :aria-checked="an"
       :disabled="disabled"
       class="relative mt-0.5 h-6 w-11 shrink-0 rounded-full transition-colors duration-200 disabled:cursor-not-allowed"
-      :class="an ? 'bg-primary' : 'bg-line-strong'"
+      :class="an ? 'bg-primary-solid' : 'bg-line-strong'"
       @click="an = !an"
     >
       <span

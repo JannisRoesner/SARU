@@ -9,12 +9,12 @@ const zeitraum = computed(() => formatZeitraum(props.reihe.startDate, props.reih
 </script>
 
 <template>
-  <NuxtLink :to="`/reihen/${reihe.id}`" class="karte group flex flex-col p-4 transition-shadow hover:shadow-md">
+  <NuxtLink :to="`/reihen/${reihe.id}`" class="karte karte-klickbar group flex flex-col p-4">
     <div class="flex items-start gap-3">
       <span
         class="flex size-12 shrink-0 items-center justify-center rounded-xl text-lg"
         :style="fachfarbe ? { backgroundColor: `${fachfarbe}22`, color: fachfarbe } : undefined"
-        :class="!fachfarbe && 'bg-accent-soft text-accent'"
+        :class="!fachfarbe && 'bg-accent-soft text-accent-strong'"
       >
         <UiIcon name="layer-group" fest />
       </span>

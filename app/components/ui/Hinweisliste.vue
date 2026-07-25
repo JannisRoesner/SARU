@@ -2,10 +2,10 @@
 const { liste, schliessen } = useHinweise()
 
 const STIL = {
-  erfolg: { icon: 'circle-check', klasse: 'border-success/40 bg-success-soft text-success' },
-  fehler: { icon: 'circle-xmark', klasse: 'border-danger/40 bg-danger-soft text-danger' },
-  warnung: { icon: 'triangle-exclamation', klasse: 'border-warning/40 bg-warning-soft text-warning' },
-  info: { icon: 'circle-info', klasse: 'border-info/40 bg-info-soft text-info' },
+  erfolg: { icon: 'circle-check', klasse: 'border-success/40 bg-success-soft text-success-strong' },
+  fehler: { icon: 'circle-xmark', klasse: 'border-danger/40 bg-danger-soft text-danger-strong' },
+  warnung: { icon: 'triangle-exclamation', klasse: 'border-warning/40 bg-warning-soft text-warning-strong' },
+  info: { icon: 'circle-info', klasse: 'border-info/40 bg-info-soft text-info-strong' },
 } as const
 </script>
 

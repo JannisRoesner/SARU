@@ -1,11 +1,20 @@
 <script setup lang="ts">
-import { importStatuses, lessonStatuses, schoolForms } from '#shared/utils/labels'
+import {
+  jahrgangsstufenOptionen,
+  normalizeGradeLevel,
+  type GradeLevel,
+} from '#shared/utils/jahrgangsstufen'
+
+import { importStatuses, lessonStatuses } from '#shared/utils/labels'
 
 const route = useRoute()
 const runId = computed(() => String(route.params.runId))
 const { darfBearbeiten } = useSitzung()
 const { aufruf, laeuft } = useApi()
 const { fachOptionen, lerngruppenOptionen } = useTaxonomie()
+const { optionenMitAktuell } = useSchulformen()
+
+const jahrgangOptionen = jahrgangsstufenOptionen()
 
 if (!darfBearbeiten.value) await navigateTo('/')
 
@@ -39,7 +48,7 @@ interface RunOverview {
     subjectName?: string
     learningGroupId?: string | null
     learningGroupName?: string
-    gradeLevel?: number | null
+    gradeLevel?: GradeLevel | null
     schoolYear?: string
     schoolForm?: string | null
     seriesMode?: string
@@ -70,7 +79,7 @@ const mapping = reactive({
   subjectName: '',
   learningGroupId: null as string | null,
   learningGroupName: '',
-  gradeLevel: null as number | null,
+  gradeLevel: null as GradeLevel | null,
   schoolYear: '',
   schoolForm: null as string | null,
   seriesMode: 'neu',
@@ -78,11 +87,17 @@ const mapping = reactive({
   defaultLessonStatus: 'durchgefuehrt',
   createMaterials: true,
   linkDuplicates: true,
+  records: {} as Record<
+    string,
+    { include: boolean; title?: string; action: string; duplicateOfId?: string | null }
+  >,
 })
 
-const records = ref<
-  Record<string, { include: boolean; title?: string; action: string; duplicateOfId?: string | null }>
->({})
+const schulformOptionen = computed(() =>
+  optionenMitAktuell(mapping.schoolForm).map((o) => ({ value: o.value, label: o.label })),
+)
+
+const geladen = ref(false)
 
 watch(
   data,
@@ -93,7 +108,7 @@ watch(
     mapping.subjectName = m.subjectName ?? wert.course?.subjectName ?? ''
     mapping.learningGroupId = m.learningGroupId ?? null
     mapping.learningGroupName = m.learningGroupName ?? wert.course?.groupName ?? ''
-    mapping.gradeLevel = m.gradeLevel ?? wert.course?.gradeLevel ?? null
+    mapping.gradeLevel = normalizeGradeLevel(m.gradeLevel ?? wert.course?.gradeLevel) ?? null
     mapping.schoolYear = m.schoolYear ?? wert.course?.schoolYear ?? ''
     mapping.schoolForm = m.schoolForm ?? null
     mapping.seriesMode = m.seriesMode ?? 'neu'
@@ -101,10 +116,25 @@ watch(
     mapping.defaultLessonStatus = m.defaultLessonStatus ?? 'durchgefuehrt'
     mapping.createMaterials = m.createMaterials ?? true
     mapping.linkDuplicates = m.linkDuplicates ?? true
-    records.value = structuredClone(m.records ?? {})
+    mapping.records = structuredClone(m.records ?? {})
+    nextTick(() => {
+      geladen.value = true
+      autosave.alsGespeichertMarkieren()
+    })
   },
   { immediate: true },
 )
+
+const autosave = useAutosave(mapping, {
+  gueltig: () => geladen.value && Boolean(data.value?.canCommit),
+  speichern: async (daten) => {
+    const gradeLevel = normalizeGradeLevel(daten.gradeLevel)
+    await $fetch(`/api/imports/${runId.value}/mapping`, {
+      method: 'PATCH',
+      body: { ...daten, gradeLevel },
+    })
+  },
+})
 
 const schritt = computed(() => {
   const s = data.value?.status
@@ -114,16 +144,10 @@ const schritt = computed(() => {
   return 2
 })
 
-async function mappingSpeichern() {
-  return aufruf(`/api/imports/${runId.value}/mapping`, {
-    method: 'PATCH',
-    body: { ...mapping, records: records.value },
-    erfolgsmeldung: 'Zuordnung gespeichert.',
-  })
-}
-
 async function committen() {
-  await mappingSpeichern()
+  // Offene Änderungen sofort schreiben, bevor der Import die Zuordnung liest.
+  await autosave.jetztSpeichern()
+  if (autosave.zustand.value === 'fehler') return
   const ergebnis = await aufruf(`/api/imports/${runId.value}/commit`, {
     method: 'POST',
     erfolgsmeldung: 'Import abgeschlossen.',
@@ -227,7 +251,14 @@ watch(
 
       <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
         <div class="space-y-5">
-          <UiCard v-if="data.canCommit" titel="Zuordnung" icon="sliders">
+          <UiCard v-if="data.canCommit" titel="Zuordnung" icon="sliders" einklappbar einklapp-id="import-zuordnung">
+            <template #kopf>
+              <UiSpeichernAnzeige
+                :zustand="autosave.zustand.value"
+                :fehler="autosave.letzterFehler.value"
+                :zuletzt="autosave.zuletztGespeichert.value"
+              />
+            </template>
             <div class="grid gap-4 sm:grid-cols-2">
               <UiField label="Fach (bestehend)">
                 <UiSelect v-model="mapping.subjectId" platzhalter="Neu anlegen …" :optionen="fachOptionen" />
@@ -249,7 +280,11 @@ watch(
                 />
               </UiField>
               <UiField label="Jahrgang">
-                <UiInput v-model="mapping.gradeLevel" type="number" min="1" max="13" />
+                <UiSelect
+                  v-model="mapping.gradeLevel"
+                  platzhalter="Keiner"
+                  :optionen="jahrgangOptionen.map((o) => ({ value: o.value, label: o.label }))"
+                />
               </UiField>
               <UiField label="Schuljahr">
                 <UiInput v-model="mapping.schoolYear" />
@@ -258,7 +293,7 @@ watch(
                 <UiSelect
                   v-model="mapping.schoolForm"
                   platzhalter="–"
-                  :optionen="schoolForms.options().map((o) => ({ value: o.value, label: o.label }))"
+                  :optionen="schulformOptionen"
                 />
               </UiField>
               <UiField label="Stundenstatus">
@@ -281,14 +316,12 @@ watch(
                 Dubletten verknüpfen
               </label>
             </div>
-            <div class="mt-4 flex justify-end">
-              <UiButton variante="sekundaer" icon="floppy-disk" :laedt="laeuft" @click="mappingSpeichern">
-                Zuordnung speichern
-              </UiButton>
-            </div>
+            <p class="mt-3 text-xs text-ink-subtle">
+              Änderungen an der Zuordnung werden automatisch gespeichert.
+            </p>
           </UiCard>
 
-          <UiCard titel="Vorschau der Stunden" icon="eye">
+          <UiCard titel="Vorschau der Stunden" icon="eye" einklappbar einklapp-id="import-vorschau">
             <p class="mb-3 text-sm text-ink-muted">
               {{ data.lessons.length }} Stunden erkannt
               <template v-if="data.orphanFiles.length">
@@ -302,9 +335,9 @@ watch(
                 class="rounded-xl border border-line p-3"
               >
                 <div class="flex flex-wrap items-start gap-2">
-                  <label v-if="data.canCommit && records[lesson.sourceRef]" class="mt-1">
+                  <label v-if="data.canCommit && mapping.records[lesson.sourceRef]" class="mt-1">
                     <input
-                      v-model="records[lesson.sourceRef]!.include"
+                      v-model="mapping.records[lesson.sourceRef]!.include"
                       type="checkbox"
                       class="accent-[var(--color-primary)]"
                     >
@@ -327,7 +360,7 @@ watch(
         </div>
 
         <aside>
-          <UiCard titel="Protokoll" icon="list">
+          <UiCard titel="Protokoll" icon="list" einklappbar einklapp-id="import-protokoll">
             <ul class="max-h-[28rem] space-y-2 overflow-y-auto text-xs">
               <li
                 v-for="eintrag in logs"

@@ -1,6 +1,17 @@
+import { createRequire } from 'node:module'
+import { dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { createLogger } from '../../utils/logger'
 
 const log = createLogger('ai:rasterize')
+
+const require = createRequire(import.meta.url)
+
+function pdfjsAssetUrl(...segments: string[]): string {
+  const root = dirname(require.resolve('pdfjs-dist/package.json'))
+  // Trailing slash ist für pdf.js Pflicht (cMapUrl / standardFontDataUrl / wasmUrl).
+  return pathToFileURL(join(root, ...segments) + '/').href
+}
 
 export interface RasterizedPage {
   pageNumber: number
@@ -9,17 +20,21 @@ export interface RasterizedPage {
 }
 
 /**
- * Rendert die ersten Seiten eines PDFs als PNG.
- * Wird nur benötigt, wenn der KI-Anbieter keine PDFs direkt entgegennimmt
- * (z. B. lokale Ollama-Modelle). Schlägt das Rendern fehl, greift der Aufrufer
- * auf die reine Textextraktion zurück.
+ * Rendert PDF-Seiten als PNG.
+ * Wird u. a. für Vision-Prompts und die visuelle Nachbearbeitung von Overlay-Lösungen genutzt.
  */
 export async function rasterizePdf(
   buffer: Buffer,
-  options: { maxPages?: number; scale?: number } = {},
+  options: {
+    maxPages?: number
+    scale?: number
+    /** Nur diese 1-basierte Seite rendern. */
+    page?: number
+  } = {},
 ): Promise<RasterizedPage[]> {
   const maxPages = options.maxPages ?? 8
   const scale = options.scale ?? 1.6
+  const onlyPage = options.page && options.page > 0 ? Math.floor(options.page) : null
 
   let createCanvas: typeof import('@napi-rs/canvas').createCanvas
   try {
@@ -30,18 +45,32 @@ export async function rasterizePdf(
   }
 
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
+  // In Node gibt es keine FontFace-API: disableFontFace:false lädt OTF via @font-face
+  // und rendert Glyphs als □. Stattdessen den eingebauten Pfad-Renderer nutzen und
+  // Standardschriften/CMaps aus dem pdfjs-dist-Paket laden.
   const task = pdfjs.getDocument({
     data: new Uint8Array(buffer),
-    disableFontFace: false,
+    disableFontFace: true,
+    useSystemFonts: false,
+    standardFontDataUrl: pdfjsAssetUrl('standard_fonts'),
+    cMapUrl: pdfjsAssetUrl('cmaps'),
+    cMapPacked: true,
+    wasmUrl: pdfjsAssetUrl('wasm'),
     verbosity: 0,
   })
 
   try {
     const document = await task.promise
     const pages: RasterizedPage[] = []
-    const pageCount = Math.min(document.numPages, maxPages)
 
-    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
+    const start = onlyPage ?? 1
+    const end = onlyPage
+      ? Math.min(onlyPage, document.numPages)
+      : Math.min(document.numPages, maxPages)
+
+    if (onlyPage && onlyPage > document.numPages) return []
+
+    for (let pageNumber = start; pageNumber <= end; pageNumber++) {
       const page = await document.getPage(pageNumber)
       const viewport = page.getViewport({ scale })
       const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height))

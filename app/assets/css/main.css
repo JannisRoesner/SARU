@@ -7,18 +7,31 @@
  * `--palette-*` neu, der Hell-/Dunkelmodus die übrigen Flächen- und Textwerte.
  * Komponenten verwenden ausschließlich die semantischen Namen, damit neue
  * Designs ohne Änderungen an den Komponenten möglich sind.
+ *
+ * Palette-Semantik (pro Farbdesign):
+ *   primary-solid / accent-solid – gesättigte Markenfarbe für Vollflächen (Buttons, Logos)
+ *   primary / accent             – Akzent für Links, Icons und eigenständigen Text auf dem Canvas
+ *   primary-soft / accent-soft   – dezente Hintergrundtönung
+ *   primary-strong / accent-strong – Vordergrund auf *-soft (Badges, aktive Nav, Filter-Chips)
+ *   primary-contrast / accent-contrast – Text auf Vollflächen (primary-solid / accent-solid)
+ *
+ * Im Dunkelmodus werden soft/strong/primary per color-mix aus `--palette-*-base`
+ * abgeleitet. Die Basiswerte bleiben unverändert, damit Vollflächen (solid) und
+ * Farbdesign-Wechsel in beiden Modi zuverlässig funktionieren.
  */
 
 @theme {
   --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-display: 'Source Serif 4', 'Iowan Old Style', 'Palatino Linotype', Palatino, serif;
+  --font-display: var(--font-sans);
 
   --color-primary: var(--palette-primary);
+  --color-primary-solid: var(--palette-primary-solid);
   --color-primary-soft: var(--palette-primary-soft);
   --color-primary-strong: var(--palette-primary-strong);
   --color-primary-contrast: var(--palette-primary-contrast);
 
   --color-accent: var(--palette-accent);
+  --color-accent-solid: var(--palette-accent-solid);
   --color-accent-soft: var(--palette-accent-soft);
   --color-accent-strong: var(--palette-accent-strong);
   --color-accent-contrast: var(--palette-accent-contrast);
@@ -39,12 +52,24 @@
 
   --color-success: var(--state-success);
   --color-success-soft: var(--state-success-soft);
+  --color-success-strong: var(--state-success-strong);
   --color-warning: var(--state-warning);
   --color-warning-soft: var(--state-warning-soft);
+  --color-warning-strong: var(--state-warning-strong);
   --color-danger: var(--state-danger);
   --color-danger-soft: var(--state-danger-soft);
+  --color-danger-strong: var(--state-danger-strong);
   --color-info: var(--state-info);
   --color-info-soft: var(--state-info-soft);
+  --color-info-strong: var(--state-info-strong);
+
+  /* Badge-Töne: KI folgt der Palette-Akzentfarbe, Violett mischt Primär + Akzent. */
+  --color-ki: var(--badge-ki);
+  --color-ki-soft: var(--badge-ki-soft);
+  --color-ki-strong: var(--badge-ki-strong);
+  --color-violett: var(--badge-violett);
+  --color-violett-soft: var(--badge-violett-soft);
+  --color-violett-strong: var(--badge-violett-strong);
 
   --radius-card: 0.75rem;
   --shadow-soft: 0 1px 2px rgb(15 23 42 / 0.03), 0 8px 24px -10px rgb(15 23 42 / 0.1);
@@ -57,58 +82,79 @@
 
 :root,
 [data-palette='indigo'] {
-  --palette-primary: oklch(0.53 0.19 273);
+  --palette-primary-base: oklch(0.53 0.19 273);
+  --palette-accent-base: oklch(0.68 0.16 178);
+  --palette-primary: var(--palette-primary-base);
   --palette-primary-soft: oklch(0.95 0.03 273);
   --palette-primary-strong: oklch(0.44 0.2 273);
   --palette-primary-contrast: oklch(0.99 0 0);
-  --palette-accent: oklch(0.68 0.16 178);
+  --palette-accent: var(--palette-accent-base);
   --palette-accent-soft: oklch(0.95 0.04 178);
   --palette-accent-strong: oklch(0.56 0.14 178);
   --palette-accent-contrast: oklch(0.16 0.02 250);
 }
 
 [data-palette='smaragd'] {
-  --palette-primary: oklch(0.55 0.14 163);
+  --palette-primary-base: oklch(0.55 0.14 163);
+  --palette-accent-base: oklch(0.65 0.17 55);
+  --palette-primary: var(--palette-primary-base);
   --palette-primary-soft: oklch(0.95 0.03 163);
   --palette-primary-strong: oklch(0.45 0.13 163);
   --palette-primary-contrast: oklch(0.99 0 0);
-  --palette-accent: oklch(0.65 0.17 55);
+  --palette-accent: var(--palette-accent-base);
   --palette-accent-soft: oklch(0.95 0.04 55);
   --palette-accent-strong: oklch(0.55 0.16 55);
   --palette-accent-contrast: oklch(0.16 0.02 250);
 }
 
 [data-palette='bernstein'] {
-  --palette-primary: oklch(0.62 0.15 62);
+  --palette-primary-base: oklch(0.62 0.15 62);
+  --palette-accent-base: oklch(0.55 0.16 262);
+  --palette-primary: var(--palette-primary-base);
   --palette-primary-soft: oklch(0.95 0.04 62);
   --palette-primary-strong: oklch(0.51 0.14 62);
   --palette-primary-contrast: oklch(0.99 0 0);
-  --palette-accent: oklch(0.55 0.16 262);
+  --palette-accent: var(--palette-accent-base);
   --palette-accent-soft: oklch(0.95 0.03 262);
   --palette-accent-strong: oklch(0.45 0.17 262);
   --palette-accent-contrast: oklch(0.99 0 0);
 }
 
 [data-palette='rosenholz'] {
-  --palette-primary: oklch(0.55 0.18 12);
+  --palette-primary-base: oklch(0.55 0.18 12);
+  --palette-accent-base: oklch(0.6 0.13 215);
+  --palette-primary: var(--palette-primary-base);
   --palette-primary-soft: oklch(0.95 0.03 12);
   --palette-primary-strong: oklch(0.46 0.19 12);
   --palette-primary-contrast: oklch(0.99 0 0);
-  --palette-accent: oklch(0.6 0.13 215);
+  --palette-accent: var(--palette-accent-base);
   --palette-accent-soft: oklch(0.95 0.03 215);
   --palette-accent-strong: oklch(0.5 0.13 215);
   --palette-accent-contrast: oklch(0.99 0 0);
 }
 
 [data-palette='schiefer'] {
-  --palette-primary: oklch(0.45 0.05 250);
+  --palette-primary-base: oklch(0.45 0.05 250);
+  --palette-accent-base: oklch(0.6 0.14 195);
+  --palette-primary: var(--palette-primary-base);
   --palette-primary-soft: oklch(0.94 0.01 250);
   --palette-primary-strong: oklch(0.36 0.05 250);
   --palette-primary-contrast: oklch(0.99 0 0);
-  --palette-accent: oklch(0.6 0.14 195);
+  --palette-accent: var(--palette-accent-base);
   --palette-accent-soft: oklch(0.95 0.03 195);
   --palette-accent-strong: oklch(0.5 0.13 195);
   --palette-accent-contrast: oklch(0.99 0 0);
+}
+
+:root,
+[data-palette='indigo'],
+[data-palette='smaragd'],
+[data-palette='bernstein'],
+[data-palette='rosenholz'],
+[data-palette='schiefer'] {
+  /* Basiswerte bleiben im Dunkelmodus unverändert – solid verweist nie auf abgeleitete Töne. */
+  --palette-primary-solid: var(--palette-primary-base);
+  --palette-accent-solid: var(--palette-accent-base);
 }
 
 /* --- Hell- und Dunkelmodus ---------------------------------------------- */
@@ -132,12 +178,23 @@
 
   --state-success: oklch(0.55 0.13 155);
   --state-success-soft: oklch(0.95 0.04 155);
+  --state-success-strong: oklch(0.44 0.14 155);
   --state-warning: oklch(0.63 0.14 75);
   --state-warning-soft: oklch(0.96 0.05 85);
+  --state-warning-strong: oklch(0.5 0.15 75);
   --state-danger: oklch(0.55 0.19 25);
   --state-danger-soft: oklch(0.95 0.03 25);
+  --state-danger-strong: oklch(0.46 0.19 25);
   --state-info: oklch(0.55 0.14 245);
   --state-info-soft: oklch(0.95 0.03 245);
+  --state-info-strong: oklch(0.46 0.15 245);
+
+  --badge-ki: var(--palette-accent);
+  --badge-ki-soft: var(--palette-accent-soft);
+  --badge-ki-strong: var(--palette-accent-strong);
+  --badge-violett: color-mix(in oklab, var(--palette-primary-base) 52%, var(--palette-accent-base) 48%);
+  --badge-violett-soft: color-mix(in oklab, var(--badge-violett) 12%, var(--surface-base));
+  --badge-violett-strong: color-mix(in oklab, var(--badge-violett) 86%, var(--text-strong) 14%);
 }
 
 .dunkel {
@@ -153,21 +210,44 @@
 
   --text-strong: oklch(0.96 0.004 255);
   --text-muted: oklch(0.76 0.012 255);
-  --text-subtle: oklch(0.62 0.014 255);
+  --text-subtle: oklch(0.68 0.014 255);
   --text-inverse: oklch(0.18 0.015 255);
 
   --state-success: oklch(0.72 0.14 155);
-  --state-success-soft: oklch(0.3 0.06 155);
+  --state-success-soft: color-mix(in oklab, var(--state-success) 22%, var(--surface-base));
+  --state-success-strong: oklch(0.82 0.11 155);
   --state-warning: oklch(0.78 0.14 80);
-  --state-warning-soft: oklch(0.32 0.06 80);
+  --state-warning-soft: color-mix(in oklab, var(--state-warning) 22%, var(--surface-base));
+  --state-warning-strong: oklch(0.84 0.12 80);
   --state-danger: oklch(0.7 0.17 25);
-  --state-danger-soft: oklch(0.3 0.07 25);
+  --state-danger-soft: color-mix(in oklab, var(--state-danger) 22%, var(--surface-base));
+  --state-danger-strong: oklch(0.8 0.14 25);
   --state-info: oklch(0.72 0.13 245);
-  --state-info-soft: oklch(0.3 0.06 245);
+  --state-info-soft: color-mix(in oklab, var(--state-info) 22%, var(--surface-base));
+  --state-info-strong: oklch(0.82 0.11 245);
 
-  /* Weiche Akzentflächen müssen im Dunkelmodus dunkel statt pastellig sein. */
-  --palette-primary-soft: color-mix(in oklab, var(--palette-primary) 22%, var(--surface-base));
-  --palette-accent-soft: color-mix(in oklab, var(--palette-accent) 22%, var(--surface-base));
+  --badge-violett: color-mix(in oklab, var(--palette-primary-base) 52%, var(--palette-accent-base) 48%);
+
+  /*
+   * Ableitungen immer von -base/-solid, nie von --palette-primary:
+   * var()-Verweise auf primary würden sonst die aufgehellten Werte mitnehmen.
+   */
+  --palette-primary-soft: color-mix(in oklab, var(--palette-primary-base) 26%, var(--surface-base));
+  --palette-accent-soft: color-mix(in oklab, var(--palette-accent-base) 26%, var(--surface-base));
+
+  /* Links, Icons und eigenständiger Akzenttext auf dunklem Canvas. */
+  --palette-primary: color-mix(in oklab, var(--palette-primary-base) 62%, white 38%);
+  --palette-accent: color-mix(in oklab, var(--palette-accent-base) 62%, white 38%);
+
+  /* Vordergrund auf *-soft – hell genug für Kontrast, Farbe bleibt erkennbar. */
+  --palette-primary-strong: color-mix(in oklab, var(--palette-primary-base) 42%, white 58%);
+  --palette-accent-strong: color-mix(in oklab, var(--palette-accent-base) 42%, white 58%);
+
+  --badge-ki: var(--palette-accent);
+  --badge-ki-soft: var(--palette-accent-soft);
+  --badge-ki-strong: var(--palette-accent-strong);
+  --badge-violett-soft: color-mix(in oklab, var(--badge-violett) 26%, var(--surface-base));
+  --badge-violett-strong: color-mix(in oklab, var(--badge-violett) 42%, white 58%);
 }
 
 /* --- Grundlayout --------------------------------------------------------- */
@@ -178,7 +258,7 @@
   }
 
   body {
-    @apply bg-canvas text-ink antialiased;
+    @apply bg-canvas font-sans text-ink antialiased;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'ss01';
     letter-spacing: -0.011em;
   }
@@ -198,7 +278,7 @@
 
   ::selection {
     background: var(--palette-primary-soft);
-    color: var(--text-strong);
+    color: var(--palette-primary-strong);
   }
 
   /* Dezente, aber gut greifbare Bildlaufleisten. */
@@ -234,27 +314,25 @@
       transform 0.25s var(--ease-smooth);
   }
 
-  .karte:hover {
+  /* Klickbare Karten: Lift, Schatten und Rand – nicht auf statische Container anwenden. */
+  .karte-klickbar {
+    cursor: pointer;
+  }
+
+  .karte-klickbar:hover {
+    transform: translateY(-2px);
     border-color: color-mix(in oklab, var(--surface-line-strong) 70%, var(--palette-primary) 30%);
+    box-shadow: var(--shadow-raised);
+  }
+
+  .karte-klickbar:focus-visible {
+    outline: 2px solid color-mix(in oklab, var(--palette-primary) 45%, transparent);
+    outline-offset: 2px;
   }
 
   /* Editorial section intro – Ruhe, klare Hierarchie, viel Luft. */
   .seitenkopf {
-    @apply relative mb-8 max-w-3xl;
-  }
-
-  .seitenkopf::after {
-    content: '';
-    display: block;
-    width: 2.5rem;
-    height: 2px;
-    margin-top: 1.25rem;
-    border-radius: 9999px;
-    background: linear-gradient(
-      90deg,
-      var(--palette-primary),
-      color-mix(in oklab, var(--palette-accent) 70%, transparent)
-    );
+    @apply mb-8 max-w-3xl;
   }
 
   .seitenkopf-kicker {
@@ -262,7 +340,17 @@
   }
 
   .filter-chip {
-    @apply inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-xs font-medium text-ink-muted transition-colors;
+    @apply inline-flex min-h-[1.75rem] items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-xs font-medium leading-none text-ink-muted transition-colors;
+  }
+
+  .filter-chip svg {
+    @apply shrink-0;
+    width: 0.8125rem;
+    height: 0.8125rem;
+  }
+
+  .filter-chip-count {
+    @apply inline-flex min-w-[1.125rem] items-center justify-center rounded-full bg-surface-sunken px-1.5 py-0.5 text-[0.625rem] font-bold tabular-nums leading-none text-ink;
   }
 
   .filter-chip:hover {
@@ -273,8 +361,46 @@
     @apply border-primary/30 bg-primary-soft text-primary-strong;
   }
 
+  .filter-chip-aktiv .filter-chip-count {
+    @apply bg-primary/20 text-primary-strong;
+  }
+
   .speicher-anzeige {
     @apply inline-flex items-center gap-1.5 text-xs text-ink-subtle;
+  }
+
+  /*
+   * Antwort-Overlays im KI-Musterlösungs-Editor: liegen auf weißem PDF-Raster.
+   * Palette-*-base bleibt im Dunkelmodus unverändert – keine text-ink / *-strong-Tokens.
+   */
+  .pdf-overlay-canvas {
+    color-scheme: light;
+  }
+
+  .pdf-antwort-box {
+    @apply absolute rounded border-2 text-left transition;
+    border-color: color-mix(in oklab, var(--palette-accent-base) 68%, white 32%);
+    background: color-mix(in oklab, var(--palette-accent-base) 16%, white 84%);
+  }
+
+  .pdf-antwort-box:hover {
+    border-color: var(--palette-primary-base);
+  }
+
+  .pdf-antwort-box--aktiv {
+    border-color: var(--palette-primary-base);
+    background: color-mix(in oklab, var(--palette-primary-base) 20%, white 80%);
+    box-shadow: 0 4px 12px rgb(15 23 42 / 0.12);
+  }
+
+  .pdf-antwort-box__text {
+    @apply block truncate px-1 text-[0.65rem] font-medium;
+    color: color-mix(in oklab, var(--palette-primary-base) 82%, black 18%);
+  }
+
+  .pdf-antwort-box__griff {
+    @apply absolute right-0 bottom-0 size-3 cursor-se-resize rounded-sm;
+    background: var(--palette-primary-base);
   }
 }
 
@@ -282,19 +408,12 @@
 
 .page-enter-active,
 .page-leave-active {
-  transition:
-    opacity 0.2s var(--ease-smooth),
-    transform 0.2s var(--ease-smooth);
+  transition: opacity 0.2s var(--ease-smooth);
 }
 
-.page-enter-from {
-  opacity: 0;
-  transform: translateY(6px);
-}
-
+.page-enter-from,
 .page-leave-to {
   opacity: 0;
-  transform: translateY(-4px);
 }
 
 .liste-move,

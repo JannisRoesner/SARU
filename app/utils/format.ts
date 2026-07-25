@@ -81,8 +81,12 @@ export function formatZahl(wert: number | null | undefined): string {
   return (wert ?? 0).toLocaleString('de-DE')
 }
 
-/** Jahrgangsstufen kompakt: [5,6,7,9] → „5–7, 9“ */
-export function formatJahrgaenge(stufen: number[] | null | undefined): string {
+/** @deprecated Import aus `#shared/utils/jahrgangsstufen` bevorzugen. */
+export { formatJahrgaenge } from '#shared/utils/jahrgangsstufen'
+export type { GradeLevel } from '#shared/utils/jahrgangsstufen'
+
+/** Jahrgangsstufen kompakt – siehe `formatJahrgaenge` in shared/utils/jahrgangsstufen. */
+export function formatJahrgaengeLegacy(stufen: number[] | null | undefined): string {
   if (!stufen?.length) return '–'
   const sortiert = [...new Set(stufen)].sort((a, b) => a - b)
   const gruppen: string[] = []

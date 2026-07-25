@@ -66,10 +66,10 @@ async function analysieren() {
     <LayoutSeitenkopf
       kicker="Werkzeuge"
       titel="Import"
-      untertitel="Übernehme Kursmappen aus dem SchulPortal – kontrolliert, mit Vorschau und Rückgängig."
+      untertitel="Kursmappen aus dem SchulPortal importieren."
     />
 
-    <UiCard titel="Neue Datei hochladen" icon="file-import" class="mb-8">
+    <UiCard titel="Neue Datei hochladen" icon="file-import" class="mb-8" einklappbar einklapp-id="import-upload">
       <div
         class="rounded-xl border-2 border-dashed px-6 py-12 text-center transition-colors"
         :class="ziehe ? 'border-primary bg-primary-soft/40' : 'border-line bg-surface-sunken/40'"
@@ -128,9 +128,9 @@ async function analysieren() {
         <li v-for="lauf in laeufe" :key="lauf.id">
           <NuxtLink
             :to="`/import/${lauf.id}`"
-            class="karte flex flex-wrap items-center gap-3 p-4 transition-shadow hover:shadow-md"
+            class="karte karte-klickbar flex flex-wrap items-center gap-3 p-4"
           >
-            <span class="flex size-10 items-center justify-center rounded-xl bg-primary-soft text-primary">
+            <span class="flex size-10 items-center justify-center rounded-xl bg-primary-soft text-primary-strong">
               <UiIcon name="file-zipper" fest />
             </span>
             <span class="min-w-0 flex-1">

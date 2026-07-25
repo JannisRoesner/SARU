@@ -19,8 +19,8 @@ export interface LabelDefinition {
   label: string
   /** FontAwesome-Icon ohne Präfix, z. B. `file-lines`. */
   icon?: string
-  /** Tailwind-Klassen für farbige Badges. */
-  tone?: 'neutral' | 'primary' | 'accent' | 'gruen' | 'gelb' | 'rot' | 'violett'
+  /** Semantischer Badge-Ton – Farben kommen aus CSS-Variablen (palette- und modusabhängig). */
+  tone?: 'neutral' | 'primary' | 'accent' | 'gruen' | 'gelb' | 'rot' | 'violett' | 'ki'
   description?: string
 }
 
@@ -76,7 +76,7 @@ export const schoolForms = definitions<SchoolForm>({
 
 export const origins = definitions<Origin>({
   manuell: { label: 'Selbst erstellt', icon: 'user-pen', tone: 'neutral' },
-  ki: { label: 'KI-generiert', icon: 'wand-magic-sparkles', tone: 'violett' },
+  ki: { label: 'KI-generiert', icon: 'wand-magic-sparkles', tone: 'ki' },
   import: { label: 'Importiert', icon: 'file-import', tone: 'primary' },
 })
 

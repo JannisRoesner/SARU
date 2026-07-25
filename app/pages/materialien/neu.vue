@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { materialTypes, schoolForms } from '#shared/utils/labels'
+import { materialTypes } from '#shared/utils/labels'
+import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
 import type { MaterialDetail } from '~~/server/repositories/material.repository'
 
 definePageMeta({ middleware: [] })
@@ -8,6 +9,7 @@ useHead({ title: 'Material anlegen' })
 const { darfBearbeiten } = useSitzung()
 const { aufruf, laeuft } = useApi()
 const { fachOptionen, lerngruppenOptionen, themenOptionen, schlagwortNamen } = useTaxonomie()
+const { optionen: schulformOptionen } = useSchulformen()
 
 if (!darfBearbeiten.value) {
   await navigateTo('/materialien')
@@ -21,21 +23,11 @@ const formular = reactive({
   subjectIds: [] as string[],
   topicIds: [] as string[],
   learningGroupIds: [] as string[],
-  gradeLevels: [] as number[],
+  gradeLevels: [] as GradeLevel[],
   tagNames: [] as string[],
   learningObjectives: [] as string[],
   source: '',
   author: '',
-})
-
-const jahre = Array.from({ length: 13 }, (_, i) => ({
-  value: String(i + 1),
-  label: `${i + 1}. Klasse`,
-}))
-const gewaehlteJahre = ref<string[]>([])
-
-watch(gewaehlteJahre, (werte) => {
-  formular.gradeLevels = werte.map(Number).filter((n) => n >= 1 && n <= 13)
 })
 
 async function anlegen() {
@@ -59,7 +51,7 @@ async function anlegen() {
     <LayoutSeitenkopf
       kicker="Neu"
       titel="Material anlegen"
-      untertitel="Titel und Typ reichen für den Anfang – Dateien und Varianten ergänzt du danach."
+      untertitel="Titel und Typ genügen zum Start. Dateien und Varianten kannst du später ergänzen."
     >
       <template #aktionen>
         <UiButton to="/materialien" variante="still" icon="arrow-left">Zurück</UiButton>
@@ -67,14 +59,19 @@ async function anlegen() {
     </LayoutSeitenkopf>
 
     <form class="space-y-5" @submit.prevent="anlegen">
-      <UiCard titel="Grundangaben" icon="file-lines">
+      <UiCard titel="Grundangaben" icon="file-lines" einklappbar einklapp-id="material-neu-grundangaben">
         <div class="space-y-4">
           <UiField label="Titel" pflicht>
             <UiInput v-model="formular.title" placeholder="z. B. AB 1 – Photosynthese" />
           </UiField>
-          <UiField label="Kurzbeschreibung">
-            <UiTextarea v-model="formular.description" :zeilen="3" placeholder="Worum geht es?" />
-          </UiField>
+          <UiEinklappbaresFeld
+            v-model="formular.description"
+            label="Kurzbeschreibung"
+            einklapp-id="material-neu-beschreibung"
+            leer-vorschau="Keine Beschreibung"
+            placeholder="Worum geht es?"
+            immer-offen
+          />
           <div class="grid gap-4 sm:grid-cols-2">
             <UiField label="Materialart" pflicht>
               <UiSelect
@@ -86,14 +83,14 @@ async function anlegen() {
               <UiSelect
                 v-model="formular.schoolForm"
                 platzhalter="Optional"
-                :optionen="schoolForms.options().map((o) => ({ value: o.value, label: o.label }))"
+                :optionen="schulformOptionen.map((o) => ({ value: o.value, label: o.label }))"
               />
             </UiField>
           </div>
         </div>
       </UiCard>
 
-      <UiCard titel="Einordnung" icon="sitemap">
+      <UiCard titel="Einordnung" icon="sitemap" einklappbar einklapp-id="material-neu-einordnung">
         <div class="space-y-4">
           <UiField label="Fächer">
             <select
@@ -108,13 +105,7 @@ async function anlegen() {
             </select>
           </UiField>
           <UiField label="Jahrgangsstufen">
-            <select
-              v-model="gewaehlteJahre"
-              multiple
-              class="min-h-28 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm"
-            >
-              <option v-for="j in jahre" :key="j.value" :value="j.value">{{ j.label }}</option>
-            </select>
+            <UiJahrgangsstufenAuswahl v-model="formular.gradeLevels" />
           </UiField>
           <UiField label="Schlagwörter">
             <UiTagInput v-model="formular.tagNames" :vorschlaege="schlagwortNamen" />

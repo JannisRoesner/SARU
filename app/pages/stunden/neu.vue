@@ -24,6 +24,8 @@ const formular = reactive({
   learningObjectives: [] as string[],
   methodSummary: '',
   homework: '',
+  notes: '',
+  reflection: '',
 })
 
 async function anlegen() {
@@ -34,6 +36,8 @@ async function anlegen() {
       scheduleNote: formular.scheduleNote || null,
       methodSummary: formular.methodSummary || null,
       homework: formular.homework || null,
+      notes: formular.notes || null,
+      reflection: formular.reflection || null,
       date: formular.date || null,
     },
     erfolgsmeldung: 'Stunde angelegt.',
@@ -47,7 +51,7 @@ async function anlegen() {
     <LayoutSeitenkopf
       kicker="Neu"
       titel="Stunde planen"
-      untertitel="Lege den Rahmen fest – Phasen und Materialien ergänzt du im Editor."
+      untertitel="Rahmen festlegen. Phasen und Materialien ergänzt du im Editor."
     >
       <template #aktionen>
         <UiButton to="/stunden" variante="still" icon="arrow-left">Zurück</UiButton>
@@ -55,7 +59,7 @@ async function anlegen() {
     </LayoutSeitenkopf>
 
     <form class="space-y-5" @submit.prevent="anlegen">
-      <UiCard titel="Rahmen" icon="chalkboard-user">
+      <UiCard titel="Rahmen" icon="chalkboard-user" einklappbar einklapp-id="stunde-neu-rahmen">
         <div class="space-y-4">
           <UiField label="Titel" pflicht>
             <UiInput v-model="formular.title" placeholder="z. B. Einstieg Photosynthese" />
@@ -90,6 +94,38 @@ async function anlegen() {
           <UiField label="Thema">
             <UiSelect v-model="formular.topicId" platzhalter="–" :optionen="themenOptionen" />
           </UiField>
+          <UiEinklappbaresFeld
+            v-model="formular.methodSummary"
+            label="Methodenübersicht"
+            einklapp-id="stunde-neu-methoden"
+            leer-vorschau="Keine Methodenübersicht"
+            placeholder="Überblick über Methoden und Sozialformen …"
+            immer-offen
+          />
+          <UiEinklappbaresFeld
+            v-model="formular.homework"
+            label="Hausaufgabe"
+            einklapp-id="stunde-neu-hausaufgabe"
+            leer-vorschau="Keine Hausaufgabe"
+            placeholder="Aufgabe für die nächste Stunde …"
+            immer-offen
+          />
+          <UiEinklappbaresFeld
+            v-model="formular.notes"
+            label="Notizen"
+            einklapp-id="stunde-neu-notizen"
+            leer-vorschau="Keine Notizen"
+            placeholder="Planungshinweise, Materialien, Besonderheiten …"
+            immer-offen
+          />
+          <UiEinklappbaresFeld
+            v-model="formular.reflection"
+            label="Reflexion"
+            einklapp-id="stunde-neu-reflexion"
+            leer-vorschau="Keine Reflexion"
+            placeholder="Nachbereitung, was lief gut, was ändern …"
+            immer-offen
+          />
         </div>
       </UiCard>
 

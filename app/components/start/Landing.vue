@@ -15,7 +15,7 @@ const features = [
   {
     icon: 'chalkboard-user',
     titel: 'Stunden planen',
-    text: 'Verlaufspläne mit Phasen, Sozialformen und zugeordneten Materialien – per Drag-and-drop sortierbar.',
+    text: 'Verlaufspläne mit Phasen, Sozialformen und Materialien. Phasen per Drag-and-drop sortieren.',
   },
   {
     icon: 'layer-group',
@@ -25,7 +25,7 @@ const features = [
   {
     icon: 'file-import',
     titel: 'SchulPortal importieren',
-    text: 'Kursmappen analysieren, Dubletten erkennen, zuordnen und kontrolliert übernehmen – inkl. Rückgängig.',
+    text: 'Kursmappen analysieren, Dubletten erkennen und zuordnen. Vor dem Übernehmen prüfen, bei Bedarf rückgängig machen.',
   },
   {
     icon: 'wand-magic-sparkles',
@@ -36,14 +36,14 @@ const features = [
 
 const schritte = [
   { nr: '01', titel: 'Sammeln', text: 'Materialien anlegen oder aus dem SchulPortal importieren.' },
-  { nr: '02', titel: 'Ordnen', text: 'Nach Fach, Thema und Lerngruppe einordnen – wiederauffindbar.' },
+  { nr: '02', titel: 'Ordnen', text: 'Nach Fach, Thema und Lerngruppe einordnen, damit du alles wiederfindest.' },
   { nr: '03', titel: 'Planen', text: 'Stunden und Reihen mit Phasen und Materialien aufbauen.' },
   { nr: '04', titel: 'Unterrichten', text: 'Schnell finden, wiederverwenden, Fortschritt im Blick behalten.' },
 ]
 
 const mehr = [
-  { icon: 'users', titel: 'Rollen & Rechte', text: 'Admin, Lehrkraft und Leserecht – klar getrennt.' },
-  { icon: 'palette', titel: 'Erscheinungsbild', text: 'Hell, Dunkel oder System plus ruhige Farbpaletten.' },
+  { icon: 'users', titel: 'Rollen & Rechte', text: 'Admin, Lehrkraft und Leserecht sind klar getrennt.' },
+  { icon: 'palette', titel: 'Darstellung', text: 'Hell, Dunkel oder System plus ruhige Farbpaletten.' },
   { icon: 'server', titel: 'Self-Hosted', text: 'Deine Daten bleiben in deiner Instanz.' },
   { icon: 'print', titel: 'Druckansicht', text: 'Verlaufspläne sauber für die Mappe exportieren.' },
 ]
@@ -54,7 +54,7 @@ const mehr = [
     <header class="landing-nav kein-druck">
       <div class="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
         <a href="#oben" class="flex items-center gap-2.5 font-semibold tracking-tight">
-          <span class="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-contrast">
+          <span class="flex size-9 items-center justify-center rounded-xl bg-primary-solid text-primary-contrast">
             <UiIcon name="graduation-cap" />
           </span>
           <span>
@@ -84,8 +84,8 @@ const mehr = [
             Dein Archiv für Materialien, Stunden und Reihen
           </h1>
           <p class="mt-5 max-w-xl text-base leading-relaxed text-ink-muted sm:text-lg animate-landing-in animate-landing-delay-2">
-            SARU hält Unterrichtsmaterialien, Verlaufspläne und Reihen an einem Ort –
-            durchsuchbar, importierbar und für den Alltag an der Schule gemacht.
+            SARU bündelt Unterrichtsmaterialien, Verlaufspläne und Reihen an einem Ort.
+            Suchen, importieren und im Schulalltag nutzen.
           </p>
           <div class="mt-8 flex flex-wrap gap-3 animate-landing-in animate-landing-delay-3">
             <UiButton variante="primaer" groesse="lg" icon="right-to-bracket" @click="emit('anmelden')">
@@ -107,7 +107,7 @@ const mehr = [
           <div class="seitenkopf mb-12 !max-w-2xl">
             <p class="seitenkopf-kicker">Funktionen</p>
             <h2 class="text-3xl tracking-tight text-ink sm:text-4xl">
-              Alles für die Vorbereitung – ruhig und klar
+              Für die Vorbereitung, ruhig und übersichtlich
             </h2>
             <p class="mt-3 text-sm leading-relaxed text-ink-muted sm:text-base">
               Wenige Oberflächen, starke Typografie, kurze Wege. Vom Material bis zur Reihe.
@@ -121,7 +121,7 @@ const mehr = [
               class="landing-card group"
               :style="{ animationDelay: `${i * 40}ms` }"
             >
-              <span class="mb-4 flex size-11 items-center justify-center rounded-xl bg-primary-soft text-primary transition-transform duration-300 group-hover:scale-105">
+              <span class="mb-4 flex size-11 items-center justify-center rounded-xl bg-primary-soft text-primary-strong transition-transform duration-300 group-hover:scale-105">
                 <UiIcon :name="f.icon" fest />
               </span>
               <h3 class="text-lg font-semibold tracking-tight text-ink">{{ f.titel }}</h3>
@@ -139,7 +139,7 @@ const mehr = [
               Vom Fundstück zum Unterricht
             </h2>
             <p class="mt-3 text-sm leading-relaxed text-ink-muted sm:text-base">
-              Vier Schritte – nachvollziehbar und ohne Ballast.
+              Vier Schritte, nachvollziehbar und ohne Umwege.
             </p>
           </div>
 

@@ -3,14 +3,15 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { SCHULPORTAL_EXPORT_NAME, schulportalExport } from '../fixtures'
 import { closeConnections, createTestUser, resetDatabase, withTempUploadDir } from './helpers'
 
-const { analyzeImport, commitImport, undoImport } = await import(
+const { analyzeImport, commitImport, undoImport, updateMapping } = await import(
   '../../server/services/import/importer'
 )
 const { useDatabase } = await import('../../server/database/client')
-const { listMaterials } = await import('../../server/repositories/material.repository')
+const { getMaterialDetail, listMaterials } = await import(
+  '../../server/repositories/material.repository'
+)
 const { listLessons } = await import('../../server/repositories/lesson.repository')
-const { listSeries } = await import('../../server/repositories/series.repository')
-const { getSeriesDetail } = await import('../../server/repositories/series.repository')
+const { listSeries, getSeriesDetail } = await import('../../server/repositories/series.repository')
 
 let userId: string
 let archive: Buffer
@@ -146,6 +147,75 @@ describe('Importassistent für das Schulportal Hessen', () => {
       expect((row as unknown as { count: number }).count).toBeGreaterThan(10)
     })
   }, 40_000)
+
+  it('übernimmt Schulform und Jahrgangsstufe auf importierte Materialien', async () => {
+    await withTempUploadDir(async () => {
+      const analysis = await analyzeImport({ buffer: archive, fileName: FILE_NAME }, userId)
+
+      const mapping = structuredClone(analysis.suggestedMapping)
+      mapping.schoolForm = 'gesamtschule'
+      mapping.gradeLevel = 9
+      // Nur einen Termin mit Anhängen importieren, damit der Test schnell bleibt.
+      const withFiles = analysis.lessons.find((l) => l.attachments.length > 0)!
+      for (const ref of Object.keys(mapping.records!)) {
+        mapping.records![ref]!.include = ref === withFiles.sourceRef
+      }
+
+      await updateMapping(analysis.runId, mapping)
+      // Wie der Assistent: Commit ohne Override, gespeicherte Zuordnung muss greifen.
+      const result = await commitImport(analysis.runId, userId)
+
+      expect(result.status).toBe('importiert')
+      expect(result.stats.materialien).toBeGreaterThan(0)
+
+      const materials = await listMaterials({ pageSize: 100 })
+      expect(materials.total).toBeGreaterThan(0)
+      for (const item of materials.items) {
+        const detail = await getMaterialDetail(item.id)
+        expect(detail!.schoolForm).toBe('gesamtschule')
+        expect(detail!.gradeLevels).toEqual([9])
+      }
+
+      const db = useDatabase()
+      const [group] = (await db.execute<{
+        grade_level: number | null
+        school_form: string | null
+      }>(
+        sql`select grade_level, school_form::text from learning_groups limit 1`,
+      )) as unknown as { grade_level: number | null; school_form: string | null }[]
+      expect(group!.grade_level).toBe(9)
+      expect(group!.school_form).toBe('gesamtschule')
+    })
+  })
+
+  it('behält Zuordnungsfelder, wenn Commit nur Teilwerte überschreibt', async () => {
+    await withTempUploadDir(async () => {
+      const analysis = await analyzeImport({ buffer: archive, fileName: FILE_NAME }, userId)
+      const mapping = structuredClone(analysis.suggestedMapping)
+      mapping.schoolForm = 'gymnasium'
+      mapping.gradeLevel = 10
+      const withFiles = analysis.lessons.find((l) => l.attachments.length > 0)!
+      for (const ref of Object.keys(mapping.records!)) {
+        mapping.records![ref]!.include = ref === withFiles.sourceRef
+      }
+      await updateMapping(analysis.runId, mapping)
+
+      // Simuliert einen spärlichen Override (früher Zod-Defaults ohne Schulform/Jahrgang).
+      await commitImport(analysis.runId, userId, {
+        seriesMode: 'neu',
+        createMaterials: true,
+        linkDuplicates: true,
+        defaultLessonStatus: 'durchgefuehrt',
+        records: mapping.records,
+      })
+
+      const materials = await listMaterials({ pageSize: 100 })
+      expect(materials.total).toBeGreaterThan(0)
+      const detail = await getMaterialDetail(materials.items[0]!.id)
+      expect(detail!.schoolForm).toBe('gymnasium')
+      expect(detail!.gradeLevels).toEqual([10])
+    })
+  })
 
   it('überspringt abgewählte Termine', async () => {
     await withTempUploadDir(async () => {

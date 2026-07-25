@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { NuxtLink } from '#components'
 import { materialTypes, origins } from '#shared/utils/labels'
+import { istKiMusterloesung, kiAutorAnzeige } from '#shared/utils/ki'
 import type { MaterialSummary } from '~~/server/repositories/material.repository'
 
 const props = withDefaults(
@@ -21,15 +22,34 @@ const emit = defineEmits<{
 
 const icon = computed(() => materialTypes.icon(props.material.materialType) ?? 'file')
 const fachfarbe = computed(() => props.material.subjects[0]?.color ?? null)
+const kiCredit = computed(() =>
+  istKiMusterloesung(props.material)
+    ? kiAutorAnzeige(props.material.aiMeta, props.material.author)
+    : null,
+)
+
+const preview = computed(() => props.material.preview)
+const zeigtMiniatur = computed(() => {
+  const p = preview.value
+  if (!p || p.kind !== 'datei') return false
+  const mime = p.mimeType ?? ''
+  const name = (p.fileName ?? '').toLowerCase()
+  return (
+    mime === 'application/pdf' ||
+    name.endsWith('.pdf') ||
+    (mime.startsWith('image/') && mime !== 'image/svg+xml')
+  )
+})
 </script>
 
 <template>
   <component
     :is="auswaehlbar ? 'div' : NuxtLink"
     :to="auswaehlbar ? undefined : `/materialien/${material.id}`"
-    class="karte group relative flex gap-3 p-4 transition-shadow hover:shadow-md"
+    class="karte group relative flex gap-3"
     :class="[
-      kompakt ? 'items-center' : 'flex-col sm:flex-row',
+      !auswaehlbar && 'karte-klickbar',
+      kompakt ? 'items-center p-3' : 'flex-col p-4 sm:flex-row',
       ausgewaehlt && 'ring-2 ring-primary',
       material.isArchived && 'opacity-60',
     ]"
@@ -48,7 +68,15 @@ const fachfarbe = computed(() => props.material.subjects[0]?.color ?? null)
       >
     </label>
 
+    <MaterialVorschauMiniatur
+      v-if="zeigtMiniatur && preview?.assetId"
+      :asset-id="preview.assetId"
+      :file-name="preview.fileName"
+      :mime-type="preview.mimeType"
+      :groesse="kompakt ? 'sm' : 'md'"
+    />
     <span
+      v-else
       class="flex shrink-0 items-center justify-center rounded-xl"
       :class="kompakt ? 'size-10 text-base' : 'size-12 text-lg'"
       :style="fachfarbe
@@ -96,7 +124,7 @@ const fachfarbe = computed(() => props.material.subjects[0]?.color ?? null)
           {{ materialTypes.label(material.materialType) }}
         </UiBadge>
         <UiBadge
-          v-for="fach in material.subjects.slice(0, 2)"
+          v-for="fach in material.subjects.slice(0, kompakt ? 1 : 2)"
           :key="fach.id"
           groesse="sm"
           :farbe="fach.color"
@@ -106,34 +134,58 @@ const fachfarbe = computed(() => props.material.subjects[0]?.color ?? null)
         <UiBadge v-if="material.gradeLevels.length" groesse="sm">
           {{ formatJahrgaenge(material.gradeLevels) }}
         </UiBadge>
-        <UiBadge
-          v-if="material.origin !== 'manuell'"
-          groesse="sm"
-          :ton="origins.tone(material.origin)"
-          :icon="origins.icon(material.origin)"
-        >
-          {{ origins.label(material.origin) }}
-        </UiBadge>
+        <template v-if="!kompakt">
+          <UiBadge
+            v-if="kiCredit"
+            groesse="sm"
+            ton="ki"
+            icon="robot"
+          >
+            {{ kiCredit }}
+          </UiBadge>
+          <UiBadge
+            v-else-if="material.origin !== 'manuell'"
+            groesse="sm"
+            :ton="origins.tone(material.origin)"
+            :icon="origins.icon(material.origin)"
+          >
+            {{ origins.label(material.origin) }}
+          </UiBadge>
+          <UiBadge
+            v-if="kiCredit && material.aiMeta?.reviewed"
+            groesse="sm"
+            ton="gruen"
+            icon="circle-check"
+          >
+            Geprüft
+          </UiBadge>
+        </template>
         <UiBadge v-if="material.isArchived" groesse="sm" icon="box-archive">Archiviert</UiBadge>
       </div>
 
       <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-subtle">
-        <span v-if="material.variantCount > 1" class="flex items-center gap-1">
-          <UiIcon name="code-branch" fest />
-          {{ material.variantCount }} Varianten
-        </span>
-        <span v-if="material.assetCount" class="flex items-center gap-1">
+        <template v-if="!kompakt">
+          <span v-if="material.variantCount > 1" class="flex items-center gap-1">
+            <UiIcon name="code-branch" fest />
+            {{ material.variantCount }} Varianten
+          </span>
+          <span v-if="material.assetCount" class="flex items-center gap-1">
+            <UiIcon name="paperclip" fest />
+            {{ material.assetCount }}
+            {{ material.assetCount === 1 ? 'Anhang' : 'Anhänge' }}
+          </span>
+          <span v-if="material.hasSolution" class="flex items-center gap-1 text-success-strong">
+            <UiIcon name="circle-check" fest />
+            Lösung vorhanden
+          </span>
+          <span v-if="material.usageCount" class="flex items-center gap-1">
+            <UiIcon name="link" fest />
+            {{ material.usageCount }}× verwendet
+          </span>
+        </template>
+        <span v-else-if="material.assetCount" class="flex items-center gap-1">
           <UiIcon name="paperclip" fest />
           {{ material.assetCount }}
-          {{ material.assetCount === 1 ? 'Anhang' : 'Anhänge' }}
-        </span>
-        <span v-if="material.hasSolution" class="flex items-center gap-1 text-success">
-          <UiIcon name="circle-check" fest />
-          Lösung vorhanden
-        </span>
-        <span v-if="material.usageCount" class="flex items-center gap-1">
-          <UiIcon name="link" fest />
-          {{ material.usageCount }}× verwendet
         </span>
         <span class="flex items-center gap-1">
           <UiIcon name="clock-rotate-left" fest />

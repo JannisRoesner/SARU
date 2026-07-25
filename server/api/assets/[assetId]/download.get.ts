@@ -43,7 +43,12 @@ export default defineEventHandler(async (event) => {
   if (asset.sizeBytes) setResponseHeader(event, 'content-length', asset.sizeBytes)
   setResponseHeader(event, 'cache-control', 'private, max-age=300')
   setResponseHeader(event, 'x-content-type-options', 'nosniff')
-  setResponseHeader(event, 'content-security-policy', "default-src 'none'; object-src 'none'; sandbox")
+  // Bei Inline-Anzeige kein `sandbox`: sonst blockiert der Browser die PDF-/Bildvorschau im iframe.
+  if (!showInline) {
+    setResponseHeader(event, 'content-security-policy', "default-src 'none'; object-src 'none'; sandbox")
+  } else {
+    setResponseHeader(event, 'content-security-policy', "default-src 'none'; object-src 'self'; frame-ancestors 'self'")
+  }
 
   return sendStream(event, readFileStream(asset.storageKey))
 })

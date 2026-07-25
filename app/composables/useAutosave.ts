@@ -40,7 +40,7 @@ export function useAutosave<T extends object>(quelle: Ref<T>, optionen: Autosave
       return
     }
 
-    const daten = toRaw(quelle.value)
+    const daten = toRaw(unref(quelle)) as T
     if (gueltig && !gueltig(daten)) return
 
     aktiv = true

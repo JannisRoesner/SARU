@@ -275,6 +275,8 @@ function buildSeriesTitle(parsed: ParsedExport): string {
   return parts.join(' · ')
 }
 
+import { normalizeGradeLevel } from '#shared/utils/jahrgangsstufen'
+
 async function findExistingLearningGroupId(
   name: string | null,
   schoolYear: string | null,
@@ -327,8 +329,13 @@ export async function commitImport(
     throw appError('IMPORT_FEHLER', 'Die hochgeladene Datei ist nicht mehr verfügbar. Bitte erneut hochladen.')
   }
 
-  const mapping: ImportMapping = mappingOverride ?? run.mapping ?? {}
-  if (mappingOverride) await updateMapping(runId, mappingOverride)
+  // Override ergänzt die gespeicherte Zuordnung; so gehen Felder wie Schulform
+  // und Jahrgang nicht verloren, wenn der Client nur Teilwerte mitschickt.
+  const mapping: ImportMapping = {
+    ...(run.mapping ?? {}),
+    ...(mappingOverride ?? {}),
+  }
+  if (mappingOverride) await updateMapping(runId, mapping)
 
   await db.update(importRuns).set({ status: 'laeuft' }).where(eq(importRuns.id, runId))
 
@@ -379,12 +386,14 @@ export async function commitImport(
     await track('kurs:fach', 'subject', subjectId, 'erstellt', `Fach „${mapping.subjectName}“`)
   }
 
+  const mappedGradeLevel = normalizeGradeLevel(mapping.gradeLevel)
+
   let learningGroupId: string | null = mapping.learningGroupId ?? null
   if (!learningGroupId && mapping.learningGroupName) {
     learningGroupId = await getOrCreateLearningGroup({
       name: mapping.learningGroupName,
       subjectId,
-      gradeLevel: mapping.gradeLevel ?? null,
+      gradeLevel: mappedGradeLevel,
       schoolYear: mapping.schoolYear ?? null,
       schoolForm: mapping.schoolForm ?? null,
     })
@@ -505,10 +514,11 @@ export async function commitImport(
                 description: `Aus dem Schulportal importiert (Termin ${lesson.date ?? 'ohne Datum'}).`,
                 materialType: guessMaterialType(attachment.fileName),
                 origin: 'import',
+                schoolForm: mapping.schoolForm ?? null,
                 subjectIds: subjectId ? [subjectId] : [],
                 topicIds: topicId ? [topicId] : [],
                 learningGroupIds: learningGroupId ? [learningGroupId] : [],
-                gradeLevels: mapping.gradeLevel ? [mapping.gradeLevel] : [],
+                gradeLevels: mappedGradeLevel ? [mappedGradeLevel] : [],
               },
               userId,
             )

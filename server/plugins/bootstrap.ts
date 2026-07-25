@@ -1,5 +1,6 @@
 import { countUsers, createUser } from '../services/user.service'
 import { ensureUploadRoot } from '../services/storage.service'
+import { ensureThumbRoot } from '../services/thumbnail.service'
 import { createLogger } from '../utils/logger'
 import { pruneRateLimits } from '../utils/rate-limit'
 import { purgeExpiredSessions } from '../utils/auth'
@@ -16,6 +17,7 @@ export default defineNitroPlugin(async () => {
 
   try {
     await ensureUploadRoot()
+    await ensureThumbRoot()
   } catch (error) {
     log.error('Upload-Verzeichnis konnte nicht angelegt werden', error)
   }

@@ -57,7 +57,7 @@ watch(page, syncQuery)
     <LayoutSeitenkopf
       kicker="Struktur"
       titel="Unterrichtsreihen"
-      untertitel="Themenbögen über mehrere Stunden – mit Fortschritt, Materialien und Druckansicht."
+      untertitel="Mehrere Stunden zu einer Reihe bündeln."
     >
       <template v-if="darfBearbeiten" #aktionen>
         <UiButton to="/reihen/neu" variante="primaer" icon="plus">Reihe starten</UiButton>

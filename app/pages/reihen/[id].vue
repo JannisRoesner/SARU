@@ -206,14 +206,20 @@ async function reiheLoeschen() {
 
       <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
         <div class="space-y-5">
-          <UiCard titel="Angaben" icon="pen-to-square">
+          <UiCard titel="Angaben" icon="pen-to-square" einklappbar einklapp-id="reihe-angaben" :standard-offen="true">
             <div class="grid gap-4 sm:grid-cols-2">
               <UiField label="Titel" pflicht class="sm:col-span-2">
                 <UiInput v-model="formular.title" :disabled="!darfBearbeiten" />
               </UiField>
-              <UiField label="Beschreibung" class="sm:col-span-2">
-                <UiTextarea v-model="formular.description" :zeilen="3" :disabled="!darfBearbeiten" />
-              </UiField>
+              <UiEinklappbaresFeld
+                v-model="formular.description"
+                label="Beschreibung"
+                :einklapp-id="`reihe-beschreibung-${id}`"
+                class="sm:col-span-2"
+                leer-vorschau="Keine Beschreibung"
+                placeholder="Worum geht es in dieser Reihe …"
+                :disabled="!darfBearbeiten"
+              />
               <UiField label="Status">
                 <UiSelect
                   v-model="formular.status"
@@ -245,13 +251,19 @@ async function reiheLoeschen() {
               <UiField label="Schlagwörter" class="sm:col-span-2">
                 <UiTagInput v-model="formular.tagNames" :vorschlaege="schlagwortNamen" :disabled="!darfBearbeiten" />
               </UiField>
-              <UiField label="Notizen" class="sm:col-span-2">
-                <UiTextarea v-model="formular.notes" :zeilen="3" :disabled="!darfBearbeiten" />
-              </UiField>
+              <UiEinklappbaresFeld
+                v-model="formular.notes"
+                label="Notizen"
+                :einklapp-id="`reihe-notizen-${id}`"
+                class="sm:col-span-2"
+                leer-vorschau="Keine Notizen"
+                placeholder="Interne Notizen zur Reihe …"
+                :disabled="!darfBearbeiten"
+              />
             </div>
           </UiCard>
 
-          <UiCard titel="Stundenverlauf" icon="timeline">
+          <UiCard titel="Stundenverlauf" icon="timeline" einklappbar einklapp-id="reihe-stundenverlauf" :standard-offen="false">
             <template #kopf>
               <UiButton
                 v-if="darfBearbeiten"
@@ -318,17 +330,17 @@ async function reiheLoeschen() {
         </div>
 
         <aside class="space-y-4">
-          <UiCard titel="Reihenmaterialien" icon="folder-open">
+          <UiCard titel="Reihenmaterialien" icon="folder-open" einklappbar einklapp-id="reihe-materialien" :standard-offen="false">
             <template #kopf>
               <UiButton
                 v-if="darfBearbeiten"
-                variante="still"
+                variante="sekundaer"
                 groesse="sm"
                 icon="plus"
+                nur-icon
+                title="Hinzufügen"
                 @click="materialModal = true"
-              >
-                Hinzufügen
-              </UiButton>
+              />
             </template>
             <UiLeerzustand
               v-if="!data.materials.length"
@@ -378,7 +390,7 @@ async function reiheLoeschen() {
           klein
           icon="calendar-xmark"
           titel="Keine freien Stunden"
-          text="Alle Stunden sind bereits einer Reihe zugeordnet – oder es gibt noch keine."
+          text="Alle Stunden sind bereits einer Reihe zugeordnet, oder es gibt noch keine."
         >
           <UiButton to="/stunden/neu" variante="sekundaer" icon="plus">Stunde anlegen</UiButton>
         </UiLeerzustand>
@@ -386,7 +398,7 @@ async function reiheLoeschen() {
           v-for="stunde in freieStunden?.items ?? []"
           :key="stunde.id"
           type="button"
-          class="karte flex w-full gap-3 p-3 text-left hover:shadow-md"
+          class="karte karte-klickbar flex w-full gap-3 p-3 text-left"
           @click="stundeZuordnen(stunde.id)"
         >
           <span class="font-medium text-ink">{{ stunde.title }}</span>

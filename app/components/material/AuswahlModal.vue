@@ -66,10 +66,10 @@ function waehlen(material: MaterialSummary) {
         v-for="material in eintraege"
         :key="material.id"
         type="button"
-        class="karte flex w-full items-start gap-3 p-3 text-left transition-shadow hover:shadow-md"
+        class="karte karte-klickbar flex w-full items-start gap-3 p-3 text-left"
         @click="waehlen(material)"
       >
-        <span class="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">
+        <span class="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary-strong">
           <UiIcon name="file-lines" fest />
         </span>
         <span class="min-w-0">

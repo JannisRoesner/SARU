@@ -1,4 +1,5 @@
 import { eq } from 'drizzle-orm'
+import { OLLAMA_EMBEDDING_MODEL } from '#shared/utils/embeddings'
 import { useDatabase } from '../database/client'
 import { appSettings } from '../database/schema'
 import { decryptSecret, encryptSecret, maskSecret } from '../utils/crypto'
@@ -11,6 +12,8 @@ export const SETTING_KEYS = {
   uploads: 'dateien.regeln',
   privacy: 'datenschutz',
   appearance: 'darstellung.standard',
+  collabora: 'vorschau.collabora',
+  hermes: 'ki.hermes',
 } as const
 
 export type AiProviderId = 'openai' | 'ollama' | 'openrouter'
@@ -43,19 +46,45 @@ export const DEFAULT_BASE_URLS: Record<AiProviderId, string> = {
   openrouter: 'https://openrouter.ai/api/v1',
 }
 
+/** Empfohlene Modellnamen für die Einstellungs-UI (Platzhalter / Schnellwahl). */
+export const PROVIDER_MODEL_HINTS: Record<
+  AiProviderId,
+  { chatModel: string; visionModel: string; embeddingModel: string; useVision: boolean }
+> = {
+  openai: {
+    chatModel: 'gpt-4o-mini',
+    visionModel: 'gpt-4o-mini',
+    embeddingModel: 'text-embedding-3-small',
+    useVision: true,
+  },
+  // Multimodale lokale Modelle: Vision ist der Hauptpfad für Arbeitsblätter/PDFs.
+  ollama: {
+    chatModel: 'gemma4:e4b-it-qat',
+    visionModel: 'gemma4:e4b-it-qat',
+    embeddingModel: OLLAMA_EMBEDDING_MODEL,
+    useVision: true,
+  },
+  openrouter: {
+    chatModel: 'openai/gpt-4o-mini',
+    visionModel: 'openai/gpt-4o-mini',
+    embeddingModel: 'openai/text-embedding-3-small',
+    useVision: true,
+  },
+}
+
 export const defaultAiSettings: AiSettings = {
   enabled: false,
-  provider: 'openai',
+  provider: 'ollama',
   baseUrl: '',
   apiKey: '',
-  chatModel: 'gpt-4o-mini',
-  visionModel: '',
+  chatModel: PROVIDER_MODEL_HINTS.ollama.chatModel,
+  visionModel: PROVIDER_MODEL_HINTS.ollama.visionModel,
   useVision: true,
   embeddingsEnabled: false,
-  embeddingModel: 'text-embedding-3-small',
+  embeddingModel: PROVIDER_MODEL_HINTS.ollama.embeddingModel,
   temperature: 0.2,
   maxOutputTokens: 4000,
-  timeoutMs: 120_000,
+  timeoutMs: 180_000,
   refererUrl: '',
   appTitle: 'SARU',
 }
@@ -195,4 +224,102 @@ export async function getAppearanceSettings(): Promise<AppearanceSettings> {
 
 export async function saveAppearanceSettings(patch: Partial<AppearanceSettings>, userId?: string) {
   await writeRaw(SETTING_KEYS.appearance, { ...(await getAppearanceSettings()), ...patch }, userId)
+}
+
+/**
+ * Optionale Anbindung an Collabora Online (CODE) für Office-Dokumente.
+ * Ohne konfigurierte Basis-URL greift die Oberfläche auf Download / Hinweis zurück.
+ */
+export interface CollaboraSettings {
+  enabled: boolean
+  /** Öffentliche Basis-URL des Collabora-Containers, z. B. http://localhost:9980 */
+  baseUrl: string
+  /**
+   * URL, unter der Collabora SARU erreichen kann (WOPI-Rückruf).
+   * Leer = Origin der aktuellen Anfrage; in Docker oft z. B. http://host.docker.internal:3000
+   */
+  wopiHostUrl: string
+}
+
+export const defaultCollaboraSettings: CollaboraSettings = {
+  enabled: false,
+  baseUrl: '',
+  wopiHostUrl: '',
+}
+
+export async function getCollaboraSettings(): Promise<CollaboraSettings> {
+  return {
+    ...defaultCollaboraSettings,
+    ...((await readRaw<CollaboraSettings>(SETTING_KEYS.collabora)) ?? {}),
+  }
+}
+
+export async function saveCollaboraSettings(patch: Partial<CollaboraSettings>, userId?: string) {
+  const next = { ...(await getCollaboraSettings()), ...patch }
+  // Trailing Slash entfernen – Discovery und Editor-URLs werden konsistent gebaut.
+  if (typeof next.baseUrl === 'string') next.baseUrl = next.baseUrl.replace(/\/+$/, '')
+  if (typeof next.wopiHostUrl === 'string') next.wopiHostUrl = next.wopiHostUrl.replace(/\/+$/, '')
+  await writeRaw(SETTING_KEYS.collabora, next, userId)
+  log.info('Collabora-Einstellungen aktualisiert', {
+    enabled: next.enabled,
+    configured: Boolean(next.baseUrl),
+  })
+}
+
+/**
+ * Optionaler Hermes-Agent-Container für agentische Dokumentfüllung.
+ * Analog zu Ollama/Collabora: Basis-URL (+ optional API-Schlüssel).
+ */
+export interface HermesSettings {
+  enabled: boolean
+  /** z. B. http://localhost:8642 oder http://hermes:8642 */
+  baseUrl: string
+  /** Optional; wird verschlüsselt gespeichert. */
+  apiKey: string
+  timeoutMs: number
+}
+
+export const defaultHermesSettings: HermesSettings = {
+  enabled: false,
+  baseUrl: '',
+  apiKey: '',
+  timeoutMs: 300_000,
+}
+
+export async function getHermesSettings(): Promise<HermesSettings> {
+  const stored = (await readRaw<HermesSettings>(SETTING_KEYS.hermes)) ?? {}
+  const merged = { ...defaultHermesSettings, ...stored }
+  if (merged.apiKey) {
+    try {
+      merged.apiKey = decryptSecret(merged.apiKey)
+    } catch (error) {
+      log.error('Hermes-API-Schlüssel konnte nicht entschlüsselt werden.', error)
+      merged.apiKey = ''
+    }
+  }
+  return merged
+}
+
+export async function saveHermesSettings(
+  patch: Partial<HermesSettings> & { apiKey?: string | null },
+  userId?: string,
+): Promise<void> {
+  const stored = (await readRaw<HermesSettings>(SETTING_KEYS.hermes)) ?? {}
+  const next: Record<string, unknown> = { ...defaultHermesSettings, ...stored, ...patch }
+
+  if (patch.apiKey === undefined) {
+    next.apiKey = stored.apiKey ?? ''
+  } else if (!patch.apiKey) {
+    next.apiKey = ''
+  } else {
+    next.apiKey = encryptSecret(patch.apiKey)
+  }
+
+  if (typeof next.baseUrl === 'string') next.baseUrl = next.baseUrl.replace(/\/+$/, '')
+
+  await writeRaw(SETTING_KEYS.hermes, next, userId)
+  log.info('Hermes-Einstellungen aktualisiert', {
+    enabled: next.enabled,
+    configured: Boolean(next.baseUrl),
+  })
 }

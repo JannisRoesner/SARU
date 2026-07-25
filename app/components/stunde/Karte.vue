@@ -19,12 +19,12 @@ const stunden = computed(() => formatSchulstunden(props.stunde.periodFrom, props
 <template>
   <NuxtLink
     :to="`/stunden/${stunde.id}`"
-    class="karte group flex gap-3 p-4 transition-shadow hover:shadow-md"
+    class="karte karte-klickbar group flex gap-3 p-4"
   >
     <span
       class="flex size-12 shrink-0 flex-col items-center justify-center rounded-xl text-center leading-none"
       :style="fachfarbe ? { backgroundColor: `${fachfarbe}22`, color: fachfarbe } : undefined"
-      :class="!fachfarbe && 'bg-primary-soft text-primary'"
+      :class="!fachfarbe && 'bg-primary-soft text-primary-strong'"
     >
       <template v-if="stunde.date">
         <span class="text-lg font-semibold">{{ new Date(stunde.date).getDate() }}</span>

@@ -18,9 +18,15 @@ import { createLogger } from '../utils/logger'
 import { sanitizeText } from '../utils/validation'
 import { getMaterialDetail, type MaterialDetail } from '../repositories/material.repository'
 import { deleteFile, storeFile } from './storage.service'
+import { deleteThumbnail } from './thumbnail.service'
 import { extractTextFromStorage, isExtractable } from './extraction.service'
 import { queueReindex, removeFromIndex } from './search/indexer'
 import { resolveCompetencyIds, resolveTagIds } from './taxonomy.service'
+import {
+  type GradeLevel,
+  gradeLevelToStorage,
+  normalizeGradeLevels,
+} from '#shared/utils/jahrgangsstufen'
 
 const log = createLogger('materials')
 
@@ -29,7 +35,7 @@ export interface MaterialTaxonomyInput {
   topicIds?: string[]
   competencyIds?: string[]
   learningGroupIds?: string[]
-  gradeLevels?: number[]
+  gradeLevels?: GradeLevel[]
   /** Freitext-Schlagwörter; fehlende werden automatisch angelegt. */
   tagNames?: string[]
   /** Freitext-Kompetenzen; fehlende werden automatisch angelegt. */
@@ -86,11 +92,11 @@ async function applyTaxonomy(
 
   if (input.gradeLevels !== undefined) {
     await db.delete(materialGradeLevels).where(eq(materialGradeLevels.materialId, materialId))
-    const levels = [...new Set(input.gradeLevels)].filter((l) => l >= 1 && l <= 13)
+    const levels = normalizeGradeLevels(input.gradeLevels)
     if (levels.length) {
       await db
         .insert(materialGradeLevels)
-        .values(levels.map((gradeLevel) => ({ materialId, gradeLevel })))
+        .values(levels.map((gradeLevel) => ({ materialId, gradeLevel: gradeLevelToStorage(gradeLevel) })))
         .onConflictDoNothing()
     }
   }
@@ -679,6 +685,7 @@ export async function deleteAsset(assetId: string, db: Database = useDatabase())
 
   await db.delete(materialAssets).where(eq(materialAssets.id, assetId))
 
+  await deleteThumbnail(assetId)
   if (asset.storageKey && !(await isStorageKeyInUse(asset.storageKey, db))) {
     await deleteFile(asset.storageKey)
   }

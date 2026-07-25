@@ -52,14 +52,19 @@ async function anlegen() {
     </LayoutSeitenkopf>
 
     <form class="space-y-5" @submit.prevent="anlegen">
-      <UiCard titel="Rahmen" icon="layer-group">
+      <UiCard titel="Rahmen" icon="layer-group" einklappbar einklapp-id="reihe-neu-rahmen">
         <div class="space-y-4">
           <UiField label="Titel" pflicht>
             <UiInput v-model="formular.title" placeholder="z. B. Evolution – 9b" />
           </UiField>
-          <UiField label="Beschreibung">
-            <UiTextarea v-model="formular.description" :zeilen="3" />
-          </UiField>
+          <UiEinklappbaresFeld
+            v-model="formular.description"
+            label="Beschreibung"
+            einklapp-id="reihe-neu-beschreibung"
+            leer-vorschau="Keine Beschreibung"
+            placeholder="Worum geht es in dieser Reihe …"
+            immer-offen
+          />
           <div class="grid gap-4 sm:grid-cols-2">
             <UiField label="Status">
               <UiSelect

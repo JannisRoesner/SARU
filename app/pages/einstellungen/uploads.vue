@@ -86,7 +86,7 @@ async function privacySpeichern() {
     <LayoutSeitenkopf
       kicker="System"
       titel="Uploads & Datenschutz"
-      untertitel="Grenzen für Dateien und Aufbewahrungsfristen für Protokolle."
+      untertitel="Grenzen für Dateien und Aufbewahrungsfristen."
     />
 
     <UiCard titel="Uploads" icon="cloud-arrow-up">

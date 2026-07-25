@@ -1,6 +1,7 @@
 import { bigint, index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 import { users } from './auth'
 import { importItemActionEnum, importLogLevelEnum, importStatusEnum } from './enums'
+import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
 
 export type ImportStats = {
   reihen?: number
@@ -21,7 +22,7 @@ export interface ImportMapping {
   subjectName?: string
   learningGroupId?: string | null
   learningGroupName?: string
-  gradeLevel?: number | null
+  gradeLevel?: GradeLevel | null
   schoolYear?: string
   schoolForm?: string | null
   /** Pro Quell-Datensatz: übernehmen, überspringen oder mit vorhandenem verknüpfen. */

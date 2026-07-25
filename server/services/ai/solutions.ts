@@ -1,21 +1,48 @@
 import { readFile } from 'node:fs/promises'
 import { eq } from 'drizzle-orm'
 import { useDatabase } from '../../database/client'
-import { aiJobs, materialAssets } from '../../database/schema'
+import { aiJobs, materialAssets, materialVariants } from '../../database/schema'
 import { appError } from '../../utils/errors'
 import { createLogger } from '../../utils/logger'
 import { materialTypes, schoolForms } from '#shared/utils/labels'
 import { getMaterialDetail } from '../../repositories/material.repository'
 import {
+  addFileAsset,
   addRelation,
   createMaterial,
+  deleteAsset,
   updateMaterial,
 } from '../material.service'
-import { resolveStoragePath } from '../storage.service'
-import { getAiSettings, getPrivacySettings } from '../settings.service'
+import { extensionOf, resolveStoragePath } from '../storage.service'
+import {
+  getAiSettings,
+  getHermesSettings,
+  getPrivacySettings,
+  type AiSettings,
+} from '../settings.service'
 import { chatCompletion, supportsNativePdf, type ChatPart } from './client'
+import { PDFDocument } from 'pdf-lib'
+import {
+  alignAnswersToBlanks,
+  buildSolutionDocx,
+  detectPdfBlankRegions,
+  enrichSolutionPlacements,
+  fillDocxDocument,
+  fillPdfAcroForm,
+  formatBlankInventory,
+  overlayPdfAnswers,
+  parseStructuredSolution,
+  solutionFileName,
+  solutionToMarkdown,
+  type FilledDocument,
+  type PdfBlankRegion,
+  type StructuredSolution,
+} from './document-fill'
+import { kiAutorAnzeige } from '#shared/utils/ki'
+import { tryHermesDocumentFill } from './hermes'
 import {
   AI_CONTENT_NOTICE,
+  AI_CONTENT_NOTICE_MD,
   SOLUTION_PROMPT_VERSION,
   SOLUTION_SYSTEM_PROMPT,
   buildSolutionPrompt,
@@ -27,6 +54,9 @@ const log = createLogger('ai:solutions')
 /** Obergrenze für an das Modell übergebene Dateien – schützt vor sehr großen Anhängen. */
 const MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024
 const MAX_VISION_PAGES = 8
+
+const OFFICE_EXTENSIONS = new Set(['docx', 'odt', 'doc', 'rtf'])
+const PDF_EXTENSIONS = new Set(['pdf'])
 
 export interface GenerateSolutionOptions {
   /** Nur diese Variante berücksichtigen; sonst die Standardfassung. */
@@ -43,11 +73,24 @@ export interface GenerateSolutionResult {
   model: string
   attachments: number
   usedVision: boolean
+  fillStrategy: string
+  hermesUsed: boolean
+  fileName: string | null
+}
+
+interface SourceAsset {
+  id: string
+  fileName: string
+  mimeType: string
+  storageKey: string
+  sizeBytes: number | null
+  buffer: Buffer
+  extension: string
 }
 
 /**
- * Erzeugt eine Musterlösung zu einem Material und legt sie als eigenständiges,
- * deutlich als KI-Erzeugnis gekennzeichnetes Material an.
+ * Erzeugt eine dokumentbasierte Musterlösung: Kopie des Originals mit
+ * ausgefüllten Lücken/Feldern bzw. visuellem Text-Overlay auf PDF-Seiten.
  */
 export async function generateSolution(
   materialId: string,
@@ -56,8 +99,9 @@ export async function generateSolution(
 ): Promise<GenerateSolutionResult> {
   const db = useDatabase()
   const settings = await getAiSettings()
+  const hermes = await getHermesSettings()
 
-  if (!settings.enabled) {
+  if (!settings.enabled && !(hermes.enabled && hermes.baseUrl.trim())) {
     throw appError(
       'KI_NICHT_KONFIGURIERT',
       'Die KI-Unterstützung ist nicht aktiviert. Bitte in den Einstellungen einrichten.',
@@ -72,10 +116,15 @@ export async function generateSolution(
     material.variants.find((v) => v.isDefault) ??
     material.variants[0]
 
-  const useVision = options.useVision ?? settings.useVision
-  const model = options.model || settings.visionModel || settings.chatModel
+  const source = variant ? await loadPrimarySourceAsset(variant.id) : null
 
-  // Bereits extrahierten Text als verlässliche Textgrundlage nutzen.
+  // PDF-Arbeitsblätter brauchen Seitenbilder für Lückenpositionen (bbox).
+  const forceVisionForPdf = Boolean(source && PDF_EXTENSIONS.has(source.extension))
+  const useVision = options.useVision ?? (settings.useVision || forceVisionForPdf)
+  const model = pickSolutionModel(settings, options.model, useVision, {
+    allowEmpty: hermes.enabled && Boolean(hermes.baseUrl.trim()),
+  })
+
   const documentText = variant
     ? (
         await db
@@ -88,6 +137,24 @@ export async function generateSolution(
         .join('\n\n---\n\n')
         .slice(0, 60_000)
     : ''
+
+  // PDF: Lücken + Kontext vor dem Modellaufruf erkennen, damit blankIndex nicht geraten wird.
+  let detectedBlanks: PdfBlankRegion[] = []
+  if (source && PDF_EXTENSIONS.has(source.extension)) {
+    try {
+      detectedBlanks = await detectPdfBlankRegions(source.buffer)
+      log.info('PDF-Lücken für Prompt erkannt', {
+        count: detectedBlanks.length,
+        sample: detectedBlanks.slice(0, 3).map((b) => ({
+          i: b.blankIndex,
+          left: b.leftText,
+          right: b.rightText,
+        })),
+      })
+    } catch (error) {
+      log.warn('PDF-Lückenerkennung vor Prompt fehlgeschlagen', error)
+    }
+  }
 
   const prompt = buildSolutionPrompt({
     title: material.title,
@@ -102,26 +169,16 @@ export async function generateSolution(
     pages: material.pages,
     documentText: documentText || null,
     userInstructions: options.userInstructions,
+    sourceFileName: source?.fileName ?? null,
+    sourceMimeType: source?.mimeType ?? null,
+    blankInventory: detectedBlanks.length ? formatBlankInventory(detectedBlanks) : null,
+    detectedBlankCount: detectedBlanks.length || null,
   })
 
-  const parts: ChatPart[] = [{ type: 'text', text: prompt }]
-  let attachments = 0
-  let visionUsed = false
-
-  if (useVision && variant) {
-    const media = await collectVisionParts(variant.id, settings.provider)
-    parts.push(...media.parts)
-    attachments = media.parts.length
-    visionUsed = media.parts.length > 0
-    if (media.skipped.length) {
-      log.info('Einige Anhänge wurden nicht an das Modell übergeben', { skipped: media.skipped })
-    }
-  }
-
-  if (!documentText && !visionUsed) {
+  if (!documentText && !source && !material.content?.trim()) {
     throw appError(
       'KI_FEHLER',
-      'Zu diesem Material liegt weder auslesbarer Text noch eine übertragbare Datei vor. Bitte eine Datei hinterlegen oder den Inhalt im Feld „Inhalt“ erfassen.',
+      'Zu diesem Material liegt weder eine Datei noch auslesbarer Text vor. Bitte eine Datei hinterlegen.',
     )
   }
 
@@ -134,6 +191,7 @@ export async function generateSolution(
       userId,
       materialId,
       kind: 'musterloesung',
+      // Enum kennt nur OpenAI-kompatible Anbieter; Hermes wird in aiMeta vermerkt.
       provider: settings.provider,
       model,
       status: 'laeuft',
@@ -144,35 +202,161 @@ export async function generateSolution(
   const jobId = job!.id
 
   try {
-    const completion = await chatCompletion(
-      settings,
-      [
-        { role: 'system', parts: [{ type: 'text', text: SOLUTION_SYSTEM_PROMPT }] },
-        { role: 'user', parts },
-      ],
-      { model, maxOutputTokens: settings.maxOutputTokens },
-    )
+    let filled: FilledDocument | null = null
+    let hermesUsed = false
+    let attachments = 0
+    let visionUsed = false
+    let usedModel = model
+    let structured: StructuredSolution | null = null
 
-    const body = `${AI_CONTENT_NOTICE}\n\n${completion.text.trim()}`
+    // 1) Optional: Hermes document-fill (agentisch, ausgefülltes Dokument zurück).
+    if (source && hermes.enabled && hermes.baseUrl.trim()) {
+      const hermesResult = await tryHermesDocumentFill(hermes, {
+        task: 'fill_solution',
+        instructions: [
+          prompt,
+          options.userInstructions?.trim() ? `\nHinweise: ${options.userInstructions.trim()}` : '',
+        ].join(''),
+        fileName: source.fileName,
+        mimeType: source.mimeType,
+        documentBase64: source.buffer.toString('base64'),
+        meta: {
+          title: material.title,
+          materialId,
+          subjects: material.subjects.map((s) => s.name),
+          gradeLevels: material.gradeLevels,
+        },
+      })
+
+      if (hermesResult) {
+        hermesUsed = true
+        usedModel = hermesResult.model
+        filled = {
+          buffer: hermesResult.buffer,
+          fileName: hermesResult.fileName || solutionFileName(source.fileName, extensionOf(hermesResult.fileName || source.fileName)),
+          mimeType: hermesResult.mimeType,
+          strategy: 'hermes',
+          summary: hermesResult.summary,
+        }
+      }
+    }
+
+    // 2) Lokaler Pfad: multimodales Modell → strukturierte Antworten → Dokument füllen.
+    if (!filled) {
+      if (!settings.enabled) {
+        throw appError(
+          'KI_NICHT_KONFIGURIERT',
+          hermes.enabled
+            ? 'Hermes konnte kein Dokument liefern und die lokale KI ist nicht aktiviert.'
+            : 'Die KI-Unterstützung ist nicht aktiviert. Bitte in den Einstellungen einrichten.',
+        )
+      }
+
+      const parts: ChatPart[] = [{ type: 'text', text: prompt }]
+      if (useVision && variant) {
+        const media = await collectVisionParts(variant.id, settings.provider)
+        parts.push(...media.parts)
+        attachments = media.parts.length
+        visionUsed = media.parts.length > 0
+        if (media.skipped.length) {
+          log.info('Einige Anhänge wurden nicht an das Modell übergeben', {
+            skipped: media.skipped,
+          })
+        }
+      }
+
+      // Textinhalt als zusätzliche Grundlage, falls keine Vision/Datei.
+      if (!documentText && !visionUsed && material.content?.trim()) {
+        parts.push({
+          type: 'text',
+          text: `\n\n## Manueller Inhalt\n\n${material.content.trim().slice(0, 40_000)}`,
+        })
+      }
+
+      if (!documentText && !visionUsed && !material.content?.trim() && !source) {
+        throw appError(
+          'KI_FEHLER',
+          'Zu diesem Material liegt weder auslesbarer Text noch eine übertragbare Datei vor.',
+        )
+      }
+
+      const completion = await chatCompletion(
+        settings,
+        [
+          { role: 'system', parts: [{ type: 'text', text: SOLUTION_SYSTEM_PROMPT }] },
+          { role: 'user', parts },
+        ],
+        { model, maxOutputTokens: settings.maxOutputTokens },
+      )
+
+      usedModel = completion.model
+      structured = parseStructuredSolution(completion.text)
+      if (detectedBlanks.length > 0) {
+        structured = alignAnswersToBlanks(structured, detectedBlanks)
+        log.info('Antworten an erkannte Lücken ausgerichtet', {
+          answers: structured.answers.length,
+          blanks: detectedBlanks.length,
+          blankIndexes: structured.answers.map((a) => a.blankIndex),
+        })
+      }
+      if (source && PDF_EXTENSIONS.has(source.extension)) {
+        structured = await enrichFromPdfBuffer(source.buffer, structured, detectedBlanks)
+      } else {
+        structured = {
+          ...structured,
+          answers: structured.answers.map((a) => ({
+            ...a,
+            fieldType: a.fieldType ?? (a.answer.length > 90 || /\n/.test(a.answer) ? 'freitext' : 'luecke'),
+          })),
+        }
+      }
+      filled = await buildFilledDocument(source, structured, material.title)
+    }
+
+    if (!filled) {
+      throw appError('KI_FEHLER', 'Es konnte kein Lösungsdokument erzeugt werden.')
+    }
+
+    const summaryMd = [
+      AI_CONTENT_NOTICE_MD,
+      '',
+      filled.summary,
+      structured ? `\n${solutionToMarkdown(structured)}` : '',
+      '',
+      `_Erzeugt als Dokument (${filled.strategy})._`,
+    ]
+      .filter(Boolean)
+      .join('\n')
+      .slice(0, 20_000)
+
+    const authorCredit =
+      kiAutorAnzeige({ model: usedModel, provider: hermesUsed ? 'hermes' : settings.provider }) ??
+      `KI · ${usedModel}`
 
     const solutionMaterialId = await createMaterial(
       {
         title: `Musterlösung – ${material.title}`,
         description: `Automatisch erstellte Musterlösung zum Material „${material.title}“.`,
-        content: body,
+        content: summaryMd,
         materialType: 'musterloesung',
         schoolForm: material.schoolForm,
         pages: material.pages,
+        author: authorCredit,
         origin: 'ki',
         aiMeta: {
-          provider: settings.provider,
-          model: completion.model,
+          provider: hermesUsed ? 'hermes' : settings.provider,
+          model: usedModel,
           generatedAt: new Date().toISOString(),
           sourceMaterialId: materialId,
+          sourceVariantId: variant?.id ?? null,
+          sourceAssetId: source?.id ?? null,
           promptVersion: SOLUTION_PROMPT_VERSION,
           reviewed: false,
+          fillStrategy: filled.strategy,
+          hermesUsed,
+          sourceFileName: source?.fileName,
+          structuredSolution: structured,
         },
-        // Fachliche Zuordnung vom Ausgangsmaterial übernehmen.
         subjectIds: material.subjects.map((s) => s.id),
         topicIds: material.topics.map((t) => t.id),
         competencyIds: material.competencies.map((c) => c.id),
@@ -184,29 +368,51 @@ export async function generateSolution(
       db,
     )
 
+    const [solutionVariant] = await db
+      .select({ id: materialVariants.id })
+      .from(materialVariants)
+      .where(eq(materialVariants.materialId, solutionMaterialId))
+      .limit(1)
+
+    if (solutionVariant) {
+      await addFileAsset(
+        solutionVariant.id,
+        { buffer: filled.buffer, fileName: filled.fileName },
+        { role: 'haupt', title: 'Musterlösung (Dokument)' },
+        db,
+      )
+    }
+
     await addRelation(materialId, solutionMaterialId, 'musterloesung', 'Automatisch erstellt', db)
 
     await db
       .update(aiJobs)
       .set({
         status: 'erfolgreich',
-        result: completion.text.slice(0, 200_000),
+        result: filled.summary.slice(0, 200_000),
         resultMaterialId: solutionMaterialId,
-        inputTokens: completion.inputTokens ?? null,
-        outputTokens: completion.outputTokens ?? null,
         durationMs: Date.now() - startedAt,
         finishedAt: new Date(),
       })
       .where(eq(aiJobs.id, jobId))
 
-    log.info('Musterlösung erzeugt', { materialId, solutionMaterialId, model: completion.model })
+    log.info('Musterlösung erzeugt', {
+      materialId,
+      solutionMaterialId,
+      model: usedModel,
+      strategy: filled.strategy,
+      hermesUsed,
+    })
 
     return {
       jobId,
       solutionMaterialId,
-      model: completion.model,
+      model: usedModel,
       attachments,
       usedVision: visionUsed,
+      fillStrategy: filled.strategy,
+      hermesUsed,
+      fileName: filled.fileName,
     }
   } catch (error) {
     await db
@@ -222,10 +428,126 @@ export async function generateSolution(
   }
 }
 
+function pickSolutionModel(
+  settings: AiSettings,
+  override: string | undefined,
+  useVision: boolean,
+  options: { allowEmpty?: boolean } = {},
+): string {
+  if (override?.trim()) return override.trim()
+  if (useVision && settings.visionModel?.trim()) return settings.visionModel.trim()
+  if (settings.chatModel?.trim()) return settings.chatModel.trim()
+  if (options.allowEmpty) return 'hermes-agent'
+  throw appError('KI_NICHT_KONFIGURIERT', 'Es ist kein Sprach-/Vision-Modell konfiguriert.')
+}
+
+async function loadPrimarySourceAsset(variantId: string): Promise<SourceAsset | null> {
+  const db = useDatabase()
+  const assets = await db
+    .select()
+    .from(materialAssets)
+    .where(eq(materialAssets.variantId, variantId))
+
+  const file =
+    assets.find((a) => a.kind === 'datei' && a.role === 'haupt' && a.storageKey) ??
+    assets.find((a) => a.kind === 'datei' && a.storageKey)
+
+  if (!file?.storageKey || !file.fileName || !file.mimeType) return null
+  if ((file.sizeBytes ?? 0) > MAX_ATTACHMENT_BYTES) {
+    log.warn('Quelldatei zu groß für Dokumentfüllung', { assetId: file.id })
+    return null
+  }
+
+  const buffer = await readFile(resolveStoragePath(file.storageKey))
+  return {
+    id: file.id,
+    fileName: file.fileName,
+    mimeType: file.mimeType,
+    storageKey: file.storageKey,
+    sizeBytes: file.sizeBytes,
+    buffer,
+    extension: extensionOf(file.fileName),
+  }
+}
+
+async function buildFilledDocument(
+  source: SourceAsset | null,
+  solution: StructuredSolution,
+  materialTitle: string,
+): Promise<FilledDocument> {
+  const title = `Musterlösung – ${materialTitle}`
+
+  if (source && OFFICE_EXTENSIONS.has(source.extension)) {
+    // ODT/DOC: als DOCX-Lösung mit Anhang oder – bei DOCX – In-Place-Füllung.
+    if (source.extension === 'docx') {
+      const result = fillDocxDocument(source.buffer, solution, {
+        title,
+        notice: AI_CONTENT_NOTICE,
+      })
+      return {
+        buffer: result.buffer,
+        fileName: solutionFileName(source.fileName, 'docx'),
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        strategy: result.strategy,
+        summary: solution.summary,
+      }
+    }
+
+    // Andere Office-Formate: neues DOCX mit Lösungen (Collabora kann es öffnen).
+    const buffer = buildSolutionDocx(title, solution, { notice: AI_CONTENT_NOTICE })
+    return {
+      buffer,
+      fileName: solutionFileName(source.fileName, 'docx'),
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      strategy: 'docx_from_structure',
+      summary: solution.summary,
+    }
+  }
+
+  if (source && PDF_EXTENSIONS.has(source.extension)) {
+    const acro = await fillPdfAcroForm(source.buffer, solution)
+    if (acro) {
+      return {
+        buffer: acro.buffer,
+        fileName: solutionFileName(source.fileName, 'pdf'),
+        mimeType: 'application/pdf',
+        strategy: 'pdf_acroform',
+        summary: solution.summary,
+      }
+    }
+
+    // PDFs ohne AcroForm: Originalseiten behalten und Lösungen als Text-Overlay einzeichnen.
+    const overlay = await overlayPdfAnswers(source.buffer, solution)
+    log.info('PDF-Overlay erzeugt', {
+      overlays: overlay.overlays,
+      usedGeometry: overlay.usedGeometry,
+      usedBBox: overlay.usedBBox,
+      answers: solution.answers.length,
+    })
+    return {
+      buffer: overlay.buffer,
+      fileName: solutionFileName(source.fileName, 'pdf'),
+      mimeType: 'application/pdf',
+      strategy: 'pdf_overlay',
+      summary: solution.summary,
+    }
+  }
+
+  // Keine Datei: DOCX aus Struktur erzeugen.
+  const buffer = buildSolutionDocx(title, solution, { notice: AI_CONTENT_NOTICE })
+  return {
+    buffer,
+    fileName: solutionFileName(materialTitle, 'docx'),
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    strategy: 'docx_from_structure',
+    summary: solution.summary,
+  }
+}
+
 /**
  * Bereitet die Dateien einer Variante für das Modell auf.
  * PDFs gehen direkt an Anbieter, die das unterstützen; andernfalls werden die
- * ersten Seiten als Bilder gerendert.
+ * ersten Seiten als Bilder gerendert (typisch für multimodale Ollama-Modelle).
  */
 async function collectVisionParts(
   variantId: string,
@@ -264,7 +586,7 @@ async function collectVisionParts(
             fileName: asset.fileName ?? 'material.pdf',
           })
         } else {
-          // Lokale Modelle nehmen nur Bilder entgegen.
+          // Multimodale lokale Modelle (z. B. gemma4): Seiten als Bilder.
           const pages = await rasterizePdf(buffer, { maxPages: MAX_VISION_PAGES })
           if (pages.length === 0) {
             skipped.push(`${asset.fileName} (Bildumwandlung nicht möglich)`)
@@ -277,6 +599,7 @@ async function collectVisionParts(
         continue
       }
 
+      // Office-Dateien: für Vision-Pipeline nicht direkt nutzbar (Text kommt separat).
       skipped.push(`${asset.fileName} (Format wird nicht als Bild übergeben)`)
     } catch (error) {
       log.warn('Anhang konnte nicht gelesen werden', { assetId: asset.id, error })
@@ -285,6 +608,215 @@ async function collectVisionParts(
   }
 
   return { parts, skipped }
+}
+
+async function enrichFromPdfBuffer(
+  buffer: Buffer,
+  structured: StructuredSolution,
+  blanks: PdfBlankRegion[],
+): Promise<StructuredSolution> {
+  try {
+    const pdf = await PDFDocument.load(buffer, { ignoreEncryption: true })
+    const pageSizes = pdf.getPages().map((page) => page.getSize())
+    return enrichSolutionPlacements(structured, blanks, pageSizes)
+  } catch (error) {
+    log.warn('Platzierungen konnten nicht angereichert werden', error)
+    return {
+      ...structured,
+      answers: structured.answers.map((a) => ({
+        ...a,
+        fieldType:
+          a.fieldType ?? (a.answer.length > 90 || /\n/.test(a.answer) ? 'freitext' : 'luecke'),
+      })),
+    }
+  }
+}
+
+export interface UpdateSolutionOptions {
+  structuredSolution: StructuredSolution
+  /** PDF neu aus Quelldokument + Struktur zeichnen (Standard: true bei PDF-Overlay). */
+  reRender?: boolean
+  reviewed?: boolean
+}
+
+/**
+ * Speichert korrigierte Antworten und erzeugt optional das Overlay-PDF neu.
+ */
+export async function updateSolutionStructure(
+  materialId: string,
+  userId: string,
+  options: UpdateSolutionOptions,
+): Promise<{ materialId: string; reRendered: boolean; fillStrategy: string | null }> {
+  const db = useDatabase()
+  const material = await getMaterialDetail(materialId, db)
+  if (!material) throw appError('NICHT_GEFUNDEN', 'Das Material wurde nicht gefunden.')
+  if (material.materialType !== 'musterloesung' || material.origin !== 'ki') {
+    throw appError(
+      'UNGUELTIGE_EINGABE',
+      'Nur KI-Musterlösungen können so nachbearbeitet werden.',
+    )
+  }
+
+  const meta = material.aiMeta ?? {}
+  const sourceMaterialId = meta.sourceMaterialId
+  if (!sourceMaterialId) {
+    throw appError(
+      'KI_FEHLER',
+      'Zu dieser Musterlösung ist kein Quellmaterial hinterlegt – Neuzeichnen nicht möglich.',
+    )
+  }
+
+  let structured = normalizeStructuredSolution(options.structuredSolution)
+  const sourceMaterial = await getMaterialDetail(sourceMaterialId, db)
+  if (!sourceMaterial) {
+    throw appError('NICHT_GEFUNDEN', 'Das Quellmaterial der Musterlösung wurde nicht gefunden.')
+  }
+
+  const sourceVariant =
+    sourceMaterial.variants.find((v) => v.id === meta.sourceVariantId) ??
+    sourceMaterial.variants.find((v) => v.isDefault) ??
+    sourceMaterial.variants[0]
+  const source = sourceVariant ? await loadPrimarySourceAsset(sourceVariant.id) : null
+
+  const fillStrategy = meta.fillStrategy ?? null
+  const wantsRender = options.reRender !== false
+  let reRendered = false
+  let newStrategy = fillStrategy
+
+  if (wantsRender && source && PDF_EXTENSIONS.has(source.extension)) {
+    // Nachbearbeitung: gespeicherte bbox/fieldType haben Vorrang.
+    structured = await enrichFromPdfBuffer(source.buffer, structured, [])
+    const overlay = await overlayPdfAnswers(source.buffer, structured, { preferBBox: true })
+    await replaceHauptAsset(
+      material,
+      {
+        buffer: overlay.buffer,
+        fileName: solutionFileName(source.fileName, 'pdf'),
+        mimeType: 'application/pdf',
+      },
+      db,
+    )
+    reRendered = true
+    newStrategy = 'pdf_overlay'
+  } else if (wantsRender && source && OFFICE_EXTENSIONS.has(source.extension)) {
+    const filled = await buildFilledDocument(source, structured, sourceMaterial.title)
+    await replaceHauptAsset(
+      material,
+      { buffer: filled.buffer, fileName: filled.fileName, mimeType: filled.mimeType },
+      db,
+    )
+    reRendered = true
+    newStrategy = filled.strategy
+  } else if (wantsRender && !source) {
+    throw appError(
+      'KI_FEHLER',
+      'Die Quelldatei wurde nicht gefunden – das Dokument kann nicht neu erzeugt werden.',
+    )
+  }
+
+  const summaryMd = [
+    AI_CONTENT_NOTICE_MD,
+    '',
+    structured.summary,
+    `\n${solutionToMarkdown(structured)}`,
+    '',
+    reRendered ? `_Dokument neu erzeugt (${newStrategy})._` : `_Struktur gespeichert._`,
+  ]
+    .filter(Boolean)
+    .join('\n')
+    .slice(0, 20_000)
+
+  const authorCredit =
+    kiAutorAnzeige({ model: meta.model, provider: meta.provider }, material.author) ??
+    material.author
+
+  const reviewed =
+    options.reviewed !== undefined ? options.reviewed : Boolean(meta.reviewed)
+
+  await updateMaterial(
+    materialId,
+    {
+      content: summaryMd,
+      author: authorCredit,
+      aiMeta: {
+        ...meta,
+        structuredSolution: structured,
+        fillStrategy: newStrategy ?? meta.fillStrategy,
+        reviewed,
+        reviewedAt: reviewed ? (meta.reviewedAt ?? new Date().toISOString()) : undefined,
+        reviewedBy: reviewed ? (meta.reviewedBy ?? userId) : undefined,
+        editedAt: new Date().toISOString(),
+        editedBy: userId,
+      },
+    },
+    db,
+  )
+
+  return { materialId, reRendered, fillStrategy: newStrategy }
+}
+
+async function replaceHauptAsset(
+  material: NonNullable<Awaited<ReturnType<typeof getMaterialDetail>>>,
+  file: { buffer: Buffer; fileName: string; mimeType: string },
+  db: ReturnType<typeof useDatabase>,
+): Promise<void> {
+  const variant =
+    material.variants.find((v) => v.isDefault) ?? material.variants[0]
+  if (!variant) throw appError('KI_FEHLER', 'Die Lösungsvariante fehlt.')
+
+  const oldHaupt =
+    variant.assets.find((a) => a.kind === 'datei' && a.role === 'haupt') ??
+    variant.assets.find((a) => a.kind === 'datei')
+
+  if (oldHaupt) {
+    await deleteAsset(oldHaupt.id, db)
+  }
+
+  await addFileAsset(
+    variant.id,
+    { buffer: file.buffer, fileName: file.fileName },
+    { role: 'haupt', title: 'Musterlösung (Dokument)' },
+    db,
+  )
+}
+
+function normalizeStructuredSolution(raw: StructuredSolution): StructuredSolution {
+  const answers: StructuredSolution['answers'] = []
+  for (const [index, row] of (raw.answers ?? []).entries()) {
+    const answer = String(row.answer ?? '').trim()
+    if (!answer) continue
+    const fieldRaw = String(row.fieldType ?? '').toLowerCase()
+    const parsedType =
+      fieldRaw === 'freitext' ? 'freitext' : fieldRaw === 'luecke' ? 'luecke' : null
+    answers.push({
+      id: String(row.id ?? index + 1),
+      label: String(row.label ?? `Aufgabe ${index + 1}`).trim() || `Aufgabe ${index + 1}`,
+      answer,
+      page: typeof row.page === 'number' ? row.page : null,
+      blankIndex: typeof row.blankIndex === 'number' ? row.blankIndex : null,
+      leftContext: row.leftContext ? String(row.leftContext) : null,
+      rightContext: row.rightContext ? String(row.rightContext) : null,
+      bbox: row.bbox ?? null,
+      fieldType:
+        parsedType ??
+        (answer.length > 90 || /\n/.test(answer) ? 'freitext' : 'luecke'),
+    })
+  }
+
+  return {
+    summary: String(raw.summary ?? 'Korrigierte Musterlösung.').trim(),
+    answers,
+    formFields: Array.isArray(raw.formFields)
+      ? raw.formFields
+          .map((f) => ({
+            name: String(f.name ?? '').trim(),
+            value: String(f.value ?? '').trim(),
+          }))
+          .filter((f) => f.name && f.value)
+      : [],
+    notesForTeacher: raw.notesForTeacher ? String(raw.notesForTeacher) : null,
+    uncertainties: raw.uncertainties ? String(raw.uncertainties) : null,
+  }
 }
 
 /** Markiert eine KI-Musterlösung als fachlich geprüft. */

@@ -1,3 +1,4 @@
+import { SCHOOL_FORMS } from '#shared/types/domain'
 import { and, asc, count, eq, ne } from 'drizzle-orm'
 import { useDatabase } from '../database/client'
 import { users, type UserPreferences } from '../database/schema'
@@ -182,15 +183,24 @@ export async function changeOwnPassword(
 
 export async function updatePreferences(
   userId: string,
-  preferences: UserPreferences,
+  preferences: UserPreferences & { visibleSchoolForms?: UserPreferences['visibleSchoolForms'] | null },
 ): Promise<SafeUser> {
   const db = useDatabase()
   const [current] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
   if (!current) throw notFound('Das Benutzerkonto')
 
+  const merged: UserPreferences = { ...current.preferences, ...preferences }
+  if (
+    preferences.visibleSchoolForms === null ||
+    !preferences.visibleSchoolForms?.length ||
+    preferences.visibleSchoolForms.length >= SCHOOL_FORMS.length
+  ) {
+    delete merged.visibleSchoolForms
+  }
+
   const [updated] = await db
     .update(users)
-    .set({ preferences: { ...current.preferences, ...preferences }, updatedAt: new Date() })
+    .set({ preferences: merged, updatedAt: new Date() })
     .where(eq(users.id, userId))
     .returning()
 

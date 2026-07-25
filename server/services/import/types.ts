@@ -1,3 +1,5 @@
+import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
+
 /**
  * Gemeinsame Zwischendarstellung für alle Importformate.
  *

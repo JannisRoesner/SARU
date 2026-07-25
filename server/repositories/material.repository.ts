@@ -2,6 +2,11 @@ import { type SQL, sql } from 'drizzle-orm'
 import { queryRows, useDatabase, type Database } from '../database/client'
 import type { AiMeta } from '../database/schema'
 import type { MaterialType, Origin, SchoolForm } from '#shared/types/domain'
+import {
+  type GradeLevel,
+  gradeLevelToStorage,
+  normalizeGradeLevels,
+} from '#shared/utils/jahrgangsstufen'
 
 export interface MaterialFilters {
   subjectIds?: string[]
@@ -9,7 +14,7 @@ export interface MaterialFilters {
   tagIds?: string[]
   competencyIds?: string[]
   learningGroupIds?: string[]
-  gradeLevels?: number[]
+  gradeLevels?: GradeLevel[]
   materialTypes?: string[]
   schoolForms?: string[]
   /** Dateiendungen, z. B. `pdf`. */
@@ -70,7 +75,7 @@ export type MaterialSummary = {
   subjects: MaterialTaxonomyRef[]
   topics: MaterialTaxonomyRef[]
   tags: MaterialTaxonomyRef[]
-  gradeLevels: number[]
+  gradeLevels: GradeLevel[]
   variantCount: number
   assetCount: number
   fileTypes: string[]
@@ -176,6 +181,15 @@ function pgArray(values: readonly (string | number)[], cast: string): SQL {
   )}]::${sql.raw(cast)}`
 }
 
+function mapGradeLevels<T extends { gradeLevels: unknown }>(row: T): T & { gradeLevels: GradeLevel[] } {
+  return {
+    ...row,
+    gradeLevels: normalizeGradeLevels(
+      Array.isArray(row.gradeLevels) ? (row.gradeLevels as unknown[]) : [],
+    ),
+  }
+}
+
 function buildConditions(filters: MaterialFilters): SQL[] {
   const conditions: SQL[] = []
 
@@ -235,8 +249,9 @@ function buildConditions(filters: MaterialFilters): SQL[] {
     )
   }
   if (filters.gradeLevels?.length) {
+    const stored = filters.gradeLevels.map(gradeLevelToStorage)
     conditions.push(
-      sql`exists (select 1 from material_grade_levels x where x.material_id = m.id and x.grade_level = any(${pgArray(filters.gradeLevels, 'int[]')}))`,
+      sql`exists (select 1 from material_grade_levels x where x.material_id = m.id and x.grade_level = any(${pgArray(stored, 'text[]')}))`,
     )
   }
   if (filters.fileTypes?.length) {
@@ -316,7 +331,7 @@ export async function listMaterials(
       limit ${pageSize} offset ${(page - 1) * pageSize}`,
   )
 
-  return { items: rows as unknown as MaterialSummary[], total: countRow?.total ?? 0 }
+  return { items: (rows as unknown as MaterialSummary[]).map(mapGradeLevels), total: countRow?.total ?? 0 }
 }
 
 export async function getMaterialSummaries(
@@ -329,7 +344,7 @@ export async function getMaterialSummaries(
       where m.id = any(${pgArray(ids, 'uuid[]')})
       order by array_position(${pgArray(ids, 'uuid[]')}, m.id)`,
   )
-  return rows as unknown as MaterialSummary[]
+  return (rows as unknown as MaterialSummary[]).map(mapGradeLevels)
 }
 
 export type MaterialVariantDetail = {
@@ -484,14 +499,15 @@ export async function getMaterialDetail(
       from materials m where m.id = ${id}::uuid`,
   )
 
-  return (rows as unknown as MaterialDetail[])[0] ?? null
+  const detail = (rows as unknown as MaterialDetail[])[0]
+  return detail ? mapGradeLevels(detail) : null
 }
 
 /** Kennzahlen für die Filterleiste: wie viele Treffer je Facette. */
 export type MaterialFacets = {
   materialTypes: { value: string; count: number }[]
   subjects: { id: string; name: string; color: string | null; count: number }[]
-  gradeLevels: { value: number; count: number }[]
+  gradeLevels: { value: GradeLevel; count: number }[]
   fileTypes: { value: string; count: number }[]
   tags: { id: string; name: string; count: number }[]
   origins: { value: string; count: number }[]
@@ -555,7 +571,7 @@ export async function getMaterialFacets(
         ), '[]'::json) as "origins"`,
   )
 
-  return (
+  const facets =
     row ?? {
       materialTypes: [],
       subjects: [],
@@ -564,5 +580,14 @@ export async function getMaterialFacets(
       tags: [],
       origins: [],
     }
-  )
+
+  return {
+    ...facets,
+    gradeLevels: facets.gradeLevels
+      .map((entry) => {
+        const value = normalizeGradeLevels([entry.value])[0]
+        return value ? { value, count: entry.count } : null
+      })
+      .filter((entry): entry is { value: GradeLevel; count: number } => entry !== null),
+  }
 }

@@ -46,6 +46,8 @@ export function useDarstellung() {
       design.value = gespeichertesDesign
     }
     anwenden()
+
+    watch(istDunkel, () => anwenden())
   }
 
   async function setzen(neu: { modus?: Farbmodus; design?: FarbdesignId }, speichern = true) {

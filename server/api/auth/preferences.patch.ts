@@ -1,3 +1,4 @@
+import { SCHOOL_FORMS } from '#shared/types/domain'
 import { z } from 'zod'
 import { updatePreferences } from '../../services/user.service'
 import { requireUser } from '../../utils/auth'
@@ -9,6 +10,8 @@ const schema = z.object({
   density: z.enum(['komfortabel', 'kompakt']).optional(),
   defaultMaterialView: z.enum(['raster', 'liste', 'tabelle']).optional(),
   sidebarCollapsed: z.boolean().optional(),
+  /** null setzt die Einstellung zurück (alle Schulformen sichtbar). */
+  visibleSchoolForms: z.array(z.enum(SCHOOL_FORMS)).max(SCHOOL_FORMS.length).nullish(),
 })
 
 export default defineEventHandler(async (event) => {

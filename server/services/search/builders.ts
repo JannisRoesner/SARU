@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm'
 import { queryRows, useDatabase } from '../../database/client'
 import { materialTypes, schoolForms, socialForms } from '#shared/utils/labels'
+import { formatJahrgaenge, normalizeGradeLevels, type GradeLevel } from '#shared/utils/jahrgangsstufen'
 import { chunkText, type IndexDocument } from './indexer'
 
 /**
@@ -33,7 +34,7 @@ interface MaterialIndexRow {
   tags: string[]
   competencies: string[]
   groups: string[]
-  gradeLevels: number[]
+  gradeLevels: GradeLevel[]
   assets: { label: string; text: string | null }[]
 }
 
@@ -72,10 +73,12 @@ export async function buildMaterialDocuments(
   const row = (rows as unknown as MaterialIndexRow[])[0]
   if (!row) return null
 
+  const gradeLevels = normalizeGradeLevels(row.gradeLevels as unknown[])
+
   const metaText = joinMeta([
     materialTypes.label(row.materialType as never),
     row.subjects.join(', '),
-    row.gradeLevels.length ? `Jahrgangsstufe ${row.gradeLevels.join(', ')}` : null,
+    gradeLevels.length ? `Jahrgangsstufe ${formatJahrgaenge(gradeLevels)}` : null,
     row.schoolForm ? schoolForms.label(row.schoolForm as never) : null,
     row.topics.join(', '),
     row.tags.join(', '),

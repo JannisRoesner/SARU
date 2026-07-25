@@ -7,7 +7,7 @@ defineProps<{
 </script>
 
 <template>
-  <header class="seitenkopf flex flex-wrap items-end justify-between gap-4 !max-w-none">
+  <header class="seitenkopf flex flex-wrap items-start justify-between gap-x-4 gap-y-3 !max-w-none">
     <div class="min-w-0 max-w-3xl">
       <p v-if="kicker" class="seitenkopf-kicker">{{ kicker }}</p>
       <h1 class="text-3xl tracking-tight text-ink sm:text-[2rem]">{{ titel }}</h1>
@@ -15,7 +15,7 @@ defineProps<{
         {{ untertitel }}
       </p>
     </div>
-    <div v-if="$slots.aktionen" class="flex shrink-0 flex-wrap items-center gap-2 pb-1">
+    <div v-if="$slots.aktionen" class="ml-auto flex shrink-0 flex-wrap items-center gap-2">
       <slot name="aktionen" />
     </div>
   </header>

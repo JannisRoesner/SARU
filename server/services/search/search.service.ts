@@ -1,3 +1,4 @@
+import { resolveEmbeddingModel } from '#shared/utils/embeddings'
 import { sql } from 'drizzle-orm'
 import { queryRows, useDatabase, type Database } from '../../database/client'
 import { EMBEDDING_DIMENSIONS } from '../../database/schema'
@@ -57,7 +58,8 @@ async function embedQuery(query: string): Promise<number[] | null> {
   const settings = await getAiSettings()
   if (!settings.enabled || !settings.embeddingsEnabled || !settings.embeddingModel) return null
 
-  const key = `${settings.embeddingModel}:${query}`
+  const model = resolveEmbeddingModel(settings.provider, settings.embeddingModel)
+  const key = `${model}:${query}`
   const cached = embeddingCache.get(key)
   if (cached) return cached
 

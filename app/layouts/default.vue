@@ -56,7 +56,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', beiTastenkuerzel))
   <div class="min-h-screen lg:flex">
     <a
       href="#inhalt"
-      class="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[70] focus:rounded-lg focus:bg-primary focus:px-4 focus:py-2 focus:text-primary-contrast"
+      class="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[70] focus:rounded-lg focus:bg-primary-solid focus:px-4 focus:py-2 focus:text-primary-contrast"
     >
       Zum Inhalt springen
     </a>
@@ -76,13 +76,13 @@ onBeforeUnmount(() => document.removeEventListener('keydown', beiTastenkuerzel))
     </Transition>
 
     <aside
-      class="fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-line bg-surface transition-transform duration-250 ease-[cubic-bezier(0.22,1,0.36,1)] lg:static lg:translate-x-0"
+      class="fixed inset-y-0 left-0 z-40 flex h-screen w-64 shrink-0 flex-col border-r border-line bg-surface transition-transform duration-250 ease-[cubic-bezier(0.22,1,0.36,1)] lg:sticky lg:top-0 lg:translate-x-0"
       :class="menueOffen ? 'translate-x-0' : '-translate-x-full'"
     >
       <div class="flex h-16 items-center gap-2.5 border-b border-line px-5">
         <NuxtLink to="/" class="flex items-center gap-2.5 font-semibold">
           <span
-            class="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-contrast"
+            class="flex size-9 items-center justify-center rounded-lg bg-primary-solid text-primary-contrast"
           >
             <UiIcon name="graduation-cap" />
           </span>
@@ -104,7 +104,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', beiTastenkuerzel))
         />
       </div>
 
-      <nav class="flex-1 space-y-6 overflow-y-auto px-3 py-4" aria-label="Hauptnavigation">
+      <nav class="min-h-0 flex-1 space-y-6 overflow-y-auto px-3 py-4" aria-label="Hauptnavigation">
         <ul class="space-y-0.5">
           <li v-for="eintrag in HAUPTNAVIGATION" :key="eintrag.pfad">
             <NuxtLink
@@ -168,7 +168,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', beiTastenkuerzel))
         </div>
       </nav>
 
-      <div class="border-t border-line p-3">
+      <div class="mt-auto shrink-0 border-t border-line p-3">
         <LayoutBenutzermenue :benutzer="benutzer" :ist-admin="istAdmin" @abmelden="abmelden" />
       </div>
     </aside>

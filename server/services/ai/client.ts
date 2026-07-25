@@ -1,3 +1,4 @@
+import { resolveEmbeddingModel } from '#shared/utils/embeddings'
 import { appError } from '../../utils/errors'
 import { createLogger } from '../../utils/logger'
 import { DEFAULT_BASE_URLS, type AiProviderId, type AiSettings } from '../settings.service'
@@ -166,10 +167,11 @@ export async function createEmbeddings(
   targetDimensions: number,
 ): Promise<number[][]> {
   if (inputs.length === 0) return []
-  const model = settings.embeddingModel
-  if (!model) {
+  const configured = settings.embeddingModel
+  if (!configured) {
     throw appError('KI_NICHT_KONFIGURIERT', 'Es ist kein Embedding-Modell konfiguriert.')
   }
+  const model = resolveEmbeddingModel(settings.provider, configured)
 
   const body: Record<string, unknown> = { model, input: inputs }
   // OpenAI kann die Ausgabedimension direkt begrenzen (Matryoshka-Modelle).
@@ -286,13 +288,26 @@ export async function testConnection(
 
     const payload = (await response.json()) as { data?: { id: string }[] }
     const models = payload.data?.map((entry) => entry.id).sort() ?? []
-    return {
-      ok: true,
-      message: models.length
-        ? `Verbindung erfolgreich. ${models.length} Modelle verfügbar.`
-        : 'Verbindung erfolgreich.',
-      models,
+    let message = models.length
+      ? `Verbindung erfolgreich. ${models.length} Modelle verfügbar.`
+      : 'Verbindung erfolgreich.'
+
+    if (settings.embeddingsEnabled && settings.embeddingModel.trim()) {
+      try {
+        const model = resolveEmbeddingModel(settings.provider, settings.embeddingModel)
+        await createEmbeddings({ ...settings, embeddingModel: model }, ['Verbindungstest'], 1536)
+        message += ` Embedding-Modell „${model}“ antwortet.`
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : 'Unbekannter Fehler'
+        return {
+          ok: false,
+          message: `${message} Embedding-Test fehlgeschlagen: ${detail}`,
+          models,
+        }
+      }
     }
+
+    return { ok: true, message, models }
   } catch (error) {
     return {
       ok: false,
