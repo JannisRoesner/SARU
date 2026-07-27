@@ -59,6 +59,18 @@ export const materialTypes = definitions<MaterialType>({
   zusatzmaterial: { label: 'Zusatzmaterial', icon: 'circle-plus', tone: 'neutral' },
   differenzierung: { label: 'Differenzierungsmaterial', icon: 'code-branch', tone: 'accent' },
   notiz: { label: 'Notiz', icon: 'note-sticky', tone: 'gelb' },
+  moodle_kurs: {
+    label: 'Moodle-Kurs',
+    icon: 'graduation-cap',
+    tone: 'primary',
+    description: 'Fertiges Kursarchiv (.mbz / .imscc) zum Wiederherstellen im SchulMoodle',
+  },
+  h5p: {
+    label: 'H5P-Inhalt',
+    icon: 'puzzle-piece',
+    tone: 'accent',
+    description: 'Interaktives H5P-Lernpaket (.h5p) zum Einbetten oder Hochladen in Moodle',
+  },
   sonstiges: { label: 'Sonstiges', icon: 'shapes', tone: 'neutral' },
 })
 

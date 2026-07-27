@@ -366,7 +366,16 @@
   }
 
   .speicher-anzeige {
-    @apply inline-flex items-center gap-1.5 text-xs text-ink-subtle;
+    @apply inline-flex max-w-[12rem] items-center gap-1.5 text-xs text-ink-subtle sm:max-w-xs;
+  }
+
+  /* Aktionsleisten: auf schmalen Screens volle Breite, damit CTAs erreichbar bleiben. */
+  .aktionen-leiste > * {
+    @apply max-w-full;
+  }
+
+  .aktionen-leiste.flex-col > * {
+    @apply w-full sm:w-auto;
   }
 
   /*

@@ -49,14 +49,12 @@ async function anlegen() {
 <template>
   <div class="mx-auto max-w-3xl">
     <LayoutSeitenkopf
-      kicker="Neu"
+      zurueck-to="/stunden"
+      zurueck-label="Alle Stunden"
+      kicker="Stunden"
       titel="Stunde planen"
       untertitel="Rahmen festlegen. Phasen und Materialien ergänzt du im Editor."
-    >
-      <template #aktionen>
-        <UiButton to="/stunden" variante="still" icon="arrow-left">Zurück</UiButton>
-      </template>
-    </LayoutSeitenkopf>
+    />
 
     <form class="space-y-5" @submit.prevent="anlegen">
       <UiCard titel="Rahmen" icon="chalkboard-user" einklappbar einklapp-id="stunde-neu-rahmen">

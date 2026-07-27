@@ -61,13 +61,9 @@ async function schulformUmschalten(form: SchoolForm, sichtbar: boolean) {
 
 <template>
   <div class="mx-auto max-w-3xl">
-    <div class="mb-2">
-      <NuxtLink to="/einstellungen" class="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-primary">
-        <UiIcon name="arrow-left" fest /> Einstellungen
-      </NuxtLink>
-    </div>
-
     <LayoutSeitenkopf
+      zurueck-to="/einstellungen"
+      zurueck-label="Einstellungen"
       kicker="Persönlich"
       titel="Darstellung"
       untertitel="Farbmodus, Palette und sichtbare Schulformen – alles geräteübergreifend über dein Konto."

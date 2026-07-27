@@ -15,6 +15,20 @@
       "when": 1784935000000,
       "tag": "0001_grade_level_text",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784936000000,
+      "tag": "0002_moodle_kurs_material_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784937000000,
+      "tag": "0003_h5p_material_type",
+      "breakpoints": true
     }
   ]
 }

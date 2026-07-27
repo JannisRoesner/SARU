@@ -42,15 +42,16 @@ const icon = computed(() => {
 
 <template>
   <span
-    class="speicher-anzeige"
+    class="speicher-anzeige max-w-full"
     :class="{
       'text-warning': zustand === 'geaendert',
       'text-danger': zustand === 'fehler',
       'text-success': zustand === 'gespeichert',
     }"
     role="status"
+    :title="text"
   >
     <UiIcon :name="icon" fest :dreht="zustand === 'speichert'" />
-    {{ text }}
+    <span class="min-w-0 truncate">{{ text }}</span>
   </span>
 </template>

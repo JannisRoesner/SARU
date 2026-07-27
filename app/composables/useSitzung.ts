@@ -35,14 +35,16 @@ export function useSitzung() {
   }
 
   async function anmelden(email: string, passwort: string) {
+    const authFetch = { credentials: 'include' as const }
     await $fetch<{ user: SitzungsBenutzer }>('/api/auth/login', {
       method: 'POST',
       body: { email, password: passwort },
+      ...authFetch,
     })
 
     // Cookie muss vom Browser angenommen worden sein – sonst wäre die UI
     // „angemeldet“, API-Aufrufe scheiterten aber mit 401.
-    const sitzung = await $fetch<{ user: SitzungsBenutzer | null }>('/api/auth/session')
+    const sitzung = await $fetch<{ user: SitzungsBenutzer | null }>('/api/auth/session', authFetch)
     if (!sitzung.user) {
       throw createError({
         statusCode: 401,

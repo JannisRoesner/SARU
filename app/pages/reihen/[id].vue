@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { seriesStatuses, materialTypes } from '#shared/utils/labels'
+import { istMoodleKursMaterial } from '#shared/utils/moodle'
 import type { SeriesDetail } from '~~/server/repositories/series.repository'
 import type { LessonSummary } from '~~/server/repositories/lesson.repository'
 import type { MaterialSummary } from '~~/server/repositories/material.repository'
@@ -155,10 +156,10 @@ async function reiheLoeschen() {
         </NuxtLink>
       </div>
 
-      <header class="mb-6 flex flex-wrap items-start justify-between gap-4">
-        <div>
+      <header class="mb-6 flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+        <div class="min-w-0">
           <p class="seitenkopf-kicker">Unterrichtsreihe</p>
-          <h1 class="text-3xl tracking-tight text-ink">{{ data.title }}</h1>
+          <h1 class="break-words text-3xl tracking-tight text-ink">{{ data.title }}</h1>
           <div class="mt-2 flex flex-wrap items-center gap-2">
             <UiBadge :ton="seriesStatuses.tone(data.status)" :icon="seriesStatuses.icon(data.status)">
               {{ seriesStatuses.label(data.status) }}
@@ -179,7 +180,7 @@ async function reiheLoeschen() {
             </div>
           </div>
         </div>
-        <div class="flex flex-wrap items-center gap-2">
+        <LayoutAktionen class="sm:ml-auto sm:justify-end">
           <UiSpeichernAnzeige
             v-if="darfBearbeiten"
             :zustand="autosave.zustand.value"
@@ -201,7 +202,7 @@ async function reiheLoeschen() {
             title="Löschen"
             @click="loeschenOffen = true"
           />
-        </div>
+        </LayoutAktionen>
       </header>
 
       <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
@@ -354,7 +355,15 @@ async function reiheLoeschen() {
                 v-for="mat in data.materials"
                 :key="mat.id"
                 class="flex items-center gap-2 rounded-lg border border-line px-2 py-2 text-sm"
+                :class="istMoodleKursMaterial(mat.materialType) && 'border-[#f98012]/30 bg-[#f98012]/5'"
               >
+                <UiIcon
+                  v-if="istMoodleKursMaterial(mat.materialType)"
+                  name="graduation-cap"
+                  fest
+                  class="shrink-0 text-[#f98012]"
+                  title="Moodle-Kursbackup"
+                />
                 <NuxtLink
                   :to="`/materialien/${mat.materialId}`"
                   class="min-w-0 flex-1 truncate font-medium hover:text-primary"
@@ -363,6 +372,7 @@ async function reiheLoeschen() {
                 </NuxtLink>
                 <span class="text-xs text-ink-subtle">
                   {{ materialTypes.label(mat.materialType as never) }}
+                  <template v-if="mat.variantLabel"> · {{ mat.variantLabel }}</template>
                 </span>
                 <UiButton
                   v-if="darfBearbeiten"

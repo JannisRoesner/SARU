@@ -38,6 +38,10 @@ export const MATERIAL_TYPES = [
   'zusatzmaterial',
   'differenzierung',
   'notiz',
+  /** Fertiges Kursarchiv (.mbz / .imscc) zum Wiederherstellen im SchulMoodle. */
+  'moodle_kurs',
+  /** Interaktiver H5P-Inhalt als .h5p-Paket (ZIP-basiert). */
+  'h5p',
   'sonstiges',
 ] as const
 export type MaterialType = (typeof MATERIAL_TYPES)[number]

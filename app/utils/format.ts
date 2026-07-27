@@ -141,6 +141,9 @@ const DATEI_ICONS: Record<string, string> = {
   webm: 'file-video',
   mp3: 'file-audio',
   zip: 'file-zipper',
+  mbz: 'graduation-cap',
+  imscc: 'graduation-cap',
+  h5p: 'puzzle-piece',
   txt: 'file-lines',
   md: 'file-lines',
 }

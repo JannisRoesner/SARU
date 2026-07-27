@@ -11,6 +11,7 @@ const email = ref('')
 const passwort = ref('')
 const laeuft = ref(false)
 const fehler = ref<string | null>(null)
+const formular = ref<HTMLFormElement | null>(null)
 
 watch(offen, (wert) => {
   if (wert) {
@@ -19,11 +20,28 @@ watch(offen, (wert) => {
   }
 })
 
+/** Browser-Autofill (v. a. auf Smartphones) aktualisiert oft nicht v-model. */
+function felderAusDom() {
+  if (!formular.value) return
+  const emailFeld = formular.value.querySelector<HTMLInputElement>('input[type="email"]')
+  const passwortFeld = formular.value.querySelector<HTMLInputElement>('input[type="password"]')
+  if (emailFeld?.value) email.value = emailFeld.value
+  if (passwortFeld?.value) passwort.value = passwortFeld.value
+}
+
 async function absenden() {
+  felderAusDom()
   fehler.value = null
+
+  const emailNorm = email.value.trim()
+  if (!emailNorm || !passwort.value) {
+    fehler.value = 'Bitte E-Mail-Adresse und Passwort angeben.'
+    return
+  }
+
   laeuft.value = true
   try {
-    await anmelden(email.value, passwort.value)
+    await anmelden(emailNorm, passwort.value)
     offen.value = false
     await navigateTo(props.weiter || '/')
   } catch (error) {
@@ -44,7 +62,14 @@ async function absenden() {
     icon="right-to-bracket"
     breite="sm"
   >
-    <form class="space-y-4" novalidate @submit.prevent="absenden">
+    <form
+      ref="formular"
+      class="space-y-4"
+      novalidate
+      @input="felderAusDom"
+      @change="felderAusDom"
+      @submit.prevent="absenden"
+    >
       <UiField label="E-Mail-Adresse" pflicht>
         <UiInput
           v-model="email"
@@ -89,7 +114,7 @@ async function absenden() {
         groesse="lg"
         icon="right-to-bracket"
         :laedt="laeuft"
-        :disabled="!email || !passwort"
+        :disabled="laeuft"
       >
         Anmelden
       </UiButton>

@@ -217,10 +217,10 @@ function phaseGeaendert(phase: LessonPhaseDetail) {
         </NuxtLink>
       </div>
 
-      <header class="mb-6 flex flex-wrap items-start justify-between gap-4">
-        <div>
+      <header class="mb-6 flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+        <div class="min-w-0">
           <p class="seitenkopf-kicker">Unterrichtsstunde</p>
-          <h1 class="text-3xl tracking-tight text-ink">{{ data.title }}</h1>
+          <h1 class="break-words text-3xl tracking-tight text-ink">{{ data.title }}</h1>
           <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-sm text-ink-muted">
             <span v-if="data.date">{{ formatDatumLang(data.date) }}</span>
             <span v-if="data.subject">{{ data.subject.name }}</span>
@@ -228,13 +228,20 @@ function phaseGeaendert(phase: LessonPhaseDetail) {
             <span v-if="gesamtDauer">{{ formatDauer(gesamtDauer) }} Phasen</span>
           </div>
         </div>
-        <div class="flex flex-wrap items-center gap-2">
+        <LayoutAktionen class="sm:ml-auto sm:justify-end">
           <UiSpeichernAnzeige
             v-if="darfBearbeiten"
             :zustand="autosave.zustand.value"
             :fehler="autosave.letzterFehler.value"
             :zuletzt="autosave.zuletztGespeichert.value"
           />
+          <UiButton
+            :to="`/stunden/${id}/drucken`"
+            variante="sekundaer"
+            icon="print"
+          >
+            Drucken
+          </UiButton>
           <UiButton
             v-if="darfBearbeiten"
             variante="sekundaer"
@@ -251,7 +258,7 @@ function phaseGeaendert(phase: LessonPhaseDetail) {
             title="Löschen"
             @click="loeschenOffen = true"
           />
-        </div>
+        </LayoutAktionen>
       </header>
 
       <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">

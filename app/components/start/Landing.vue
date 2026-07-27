@@ -1,5 +1,55 @@
 <script setup lang="ts">
+import { materialRelationTypes, materialTypes, variantKinds } from '#shared/utils/labels'
+
 const emit = defineEmits<{ anmelden: [] }>()
+
+/** Dekorative Mock-Karten — kein MaterialSummary, absichtlich statisch. */
+const materialienMock = [
+  {
+    t: 'Photosynthese — Arbeitsblatt',
+    b: 'Arbeitsblatt',
+    f: 'Biologie',
+    c: '#3b82f6',
+    materialType: 'arbeitsblatt' as const,
+    preview: 'datei' as const,
+    ext: 'PDF',
+    anhaenge: 1,
+    tage: 2,
+  },
+  {
+    t: 'Satz des Pythagoras',
+    b: 'Präsentation',
+    f: 'Mathematik',
+    c: '#ef4444',
+    materialType: 'praesentation' as const,
+    preview: 'datei' as const,
+    ext: 'PPTX',
+    anhaenge: 1,
+    tage: 5,
+  },
+  {
+    t: 'Industrialisierung — Stationen',
+    b: 'Unterrichtseinheit',
+    f: 'Geschichte',
+    c: '#a16207',
+    materialType: 'unterrichtsentwurf' as const,
+    preview: 'datei' as const,
+    ext: 'DOCX',
+    anhaenge: 2,
+    tage: 12,
+  },
+  {
+    t: 'Chemie 10 — Kurs',
+    b: 'Moodle-Kurs',
+    f: 'Chemie',
+    c: '#8b5cf6',
+    materialType: 'moodle_kurs' as const,
+    preview: 'moodle' as const,
+    ext: 'MBZ',
+    anhaenge: 1,
+    tage: 3,
+  },
+]
 
 const features = [
   {
@@ -7,23 +57,23 @@ const features = [
     icon: 'folder-open',
     fensterTitel: 'Materialien',
     titel: 'Materialien sammeln',
-    text: 'Arbeitsblätter, Präsentationen und Anhänge mit Varianten, Favoriten und klarer Einordnung nach Fach und Jahrgang — alles an einem Ort.',
+    text: 'Arbeitsblätter, Präsentationen, Moodle-Kursarchive (.mbz / .imscc), H5P-Pakete und weitere Anhänge — mit Varianten, Favoriten und Einordnung nach Fach und Jahrgang — alles an einem Ort.',
     seite: 'rechts' as const,
   },
   {
-    id: 'stunden',
-    icon: 'chalkboard-user',
-    fensterTitel: 'Verlaufsplan',
-    titel: 'Stunden planen',
-    text: 'Verlaufspläne mit Phasen, Sozialformen und verknüpften Materialien. Phasen per Drag-and-drop sortieren und den roten Faden im Blick behalten.',
+    id: 'material-detail',
+    icon: 'pen-to-square',
+    fensterTitel: 'Material',
+    titel: 'Materialiendetails pflegen',
+    text: 'Titel, Fach, Schlagwörter und Notizen direkt bearbeiten — mit Varianten, Anhängen und automatischem Speichern, während du arbeitest.',
     seite: 'links' as const,
   },
   {
-    id: 'reihen',
-    icon: 'layer-group',
-    fensterTitel: 'Unterrichtsreihe',
-    titel: 'Reihen denken',
-    text: 'Unterrichtsreihen als Timeline mit Fortschritt, Druckansicht und wiederverwendbaren Materialien — vom Einstieg bis zur Sicherung.',
+    id: 'loesungen-ki',
+    icon: 'wand-magic-sparkles',
+    fensterTitel: 'Material · Lösungen',
+    titel: 'Lösungen verknüpfen — optional mit KI',
+    text: 'Verknüpfe vorhandene Lösungen manuell mit Arbeitsblättern — oder nutze optional die KI, wenn sie in den Einstellungen aktiviert ist: Am Arbeitsblatt startest du „Musterlösung erstellen“, gibst bei Bedarf eine Anweisung an. Die KI legt ein separates Musterlösungs-Material an und verbindet es automatisch. Dort prüfst du den Entwurf in der Dokumentvorschau, korrigierst bei Bedarf und markierst ihn als fachlich geprüft.',
     seite: 'rechts' as const,
   },
   {
@@ -31,21 +81,37 @@ const features = [
     icon: 'magnifying-glass',
     fensterTitel: 'Suche',
     titel: 'Hybrid suchen',
-    text: 'Volltext und optionale Vektorsuche finden Inhalte über Titel, Notizen und extrahierten Dateitext hinweg — auch wenn du dich nur ungefähr erinnerst.',
+    text: 'Volltext, Ähnlichkeitssuche und optionale Vektorsuche finden Inhalte über Titel, Notizen und extrahierten Dateitext hinweg — auch wenn du dich nur ungefähr erinnerst.',
+    seite: 'links' as const,
+  },
+  {
+    id: 'stunden',
+    icon: 'chalkboard-user',
+    fensterTitel: 'Verlaufsplan',
+    titel: 'Stunden planen',
+    text: 'Verlaufspläne mit Phasen, Sozialformen und verknüpften Materialien. Phasen per Drag-and-drop sortieren und den roten Faden im Blick behalten.',
+    seite: 'rechts' as const,
+  },
+  {
+    id: 'reihen',
+    icon: 'layer-group',
+    fensterTitel: 'Unterrichtsreihe',
+    titel: 'Reihen denken',
+    text: 'Unterrichtsreihen als Timeline mit Fortschritt, Druckansicht und wiederverwendbaren Materialien — vom Einstieg bis zur Sicherung.',
     seite: 'links' as const,
   },
   {
     id: 'import',
     icon: 'file-import',
-    fensterTitel: 'SchulPortal-Import',
-    titel: 'SchulPortal importieren',
+    fensterTitel: 'Schulportal-Import',
+    titel: 'Schulportal importieren',
     text: 'Kursmappen analysieren, Dubletten erkennen und zuordnen. Vor dem Übernehmen prüfen, bei Bedarf rückgängig machen.',
     seite: 'rechts' as const,
   },
 ]
 
 const schritte = [
-  { nr: '01', titel: 'Sammeln', text: 'Materialien anlegen oder aus dem SchulPortal importieren.' },
+  { nr: '01', titel: 'Sammeln', text: 'Materialien anlegen, aus dem Schulportal importieren oder Moodle-Kursarchive für dein SchulMoodle ablegen.' },
   { nr: '02', titel: 'Ordnen', text: 'Nach Fach, Thema und Lerngruppe einordnen, damit du alles wiederfindest.' },
   { nr: '03', titel: 'Planen', text: 'Stunden und Reihen mit Phasen und Materialien aufbauen.' },
   { nr: '04', titel: 'Unterrichten', text: 'Schnell finden, wiederverwenden, Fortschritt im Blick behalten.' },
@@ -55,12 +121,26 @@ const mehr = [
   {
     icon: 'wand-magic-sparkles',
     titel: 'KI-Musterlösungen',
-    text: 'Optional Lösungen erzeugen, klar als KI kennzeichnen und mit dem Ausgangsmaterial verknüpfen.',
+    text: 'Optional Lösungen aus PDF- und Office-Dateien erzeugen — klar als KI kennzeichnen, mit dem Ausgangsmaterial verknüpfen und als geprüft markieren.',
   },
-  { icon: 'users', titel: 'Rollen & Rechte', text: 'Admin, Lehrkraft und Leserecht sind klar getrennt.' },
+  {
+    icon: 'layer-group',
+    titel: 'Stapel-Upload',
+    text: 'Mehrere PDFs auf einmal hochladen, gemeinsam einordnen und mit optionalen KI-Vorschlägen für Titel und Typ prüfen — vor dem Übernehmen kontrollieren.',
+  },
+  {
+    icon: 'users',
+    titel: 'Rollen & Rechte',
+    text: 'Lehrkraft und Administration pflegen Materialien, Stunden und Reihen; Lesezugriff bleibt schreibgeschützt. Die Administration verwaltet zusätzlich Benutzer und System.',
+  },
   { icon: 'palette', titel: 'Darstellung', text: 'Hell, Dunkel oder System plus ruhige Farbpaletten.' },
   { icon: 'server', titel: 'Self-Hosted', text: 'Deine Daten bleiben in deiner Instanz.' },
-  { icon: 'print', titel: 'Druckansicht', text: 'Verlaufspläne sauber für die Mappe exportieren.' },
+  { icon: 'print', titel: 'Druckansicht', text: 'Verlaufspläne und Reihenübersichten sauber für die Mappe drucken.' },
+  {
+    icon: 'robot',
+    titel: 'Lokale KI',
+    text: 'Optional Ollama auf deiner Infrastruktur — Musterlösungen, Stapel-Vorschläge und Vektorsuche bleiben unter deiner Kontrolle.',
+  },
   { icon: 'shield-halved', titel: 'Datenschutz', text: 'Kein Cloud-Zwang — du bestimmst, wo SARU läuft.' },
 ]
 </script>
@@ -117,7 +197,7 @@ const mehr = [
           </h1>
           <p class="mx-auto mt-4 max-w-xl text-base leading-relaxed text-ink-muted sm:text-lg">
             Sammle, ordne und plane Unterricht an einem Ort —
-            mit Suche, SchulPortal-Import und optionaler KI.
+            mit Suche, Schulportal-Import und optionaler KI.
           </p>
 
           <p class="landing-akronym mx-auto mt-6 max-w-lg text-sm leading-relaxed sm:text-base">
@@ -176,44 +256,347 @@ const mehr = [
               <div :class="f.seite === 'links' ? 'lg:order-1' : ''" aria-hidden="true">
                 <StartLandingFenster :titel="f.fensterTitel">
                   <!-- Materialien -->
-                  <div v-if="f.id === 'materialien'" class="space-y-3 p-4 sm:p-5">
-                    <div class="flex gap-2">
-                      <div class="h-9 flex-1 rounded-lg border border-line bg-surface px-3 text-xs leading-9 text-ink-subtle">
-                        Suche in Materialien…
+                  <div v-if="f.id === 'materialien'" class="space-y-2.5 p-4 sm:p-5">
+                    <div class="mb-1 flex flex-wrap gap-2">
+                      <div class="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg border border-line bg-surface px-3 text-xs text-ink-subtle">
+                        <UiIcon name="magnifying-glass" fest class="shrink-0 opacity-70" />
+                        <span class="truncate">Titel, Inhalt, Schlagwort …</span>
                       </div>
-                      <div class="rounded-lg bg-primary-soft px-3 text-xs font-medium leading-9 text-primary-strong">
-                        Favoriten
-                      </div>
+                      <span class="filter-chip filter-chip-aktiv">
+                        <UiIcon name="star" fest /> Favoriten
+                      </span>
                     </div>
                     <div
-                      v-for="m in [
-                        { t: 'Photosynthese — Arbeitsblatt', b: 'Arbeitsblatt', f: 'Biologie', c: '#3b82f6' },
-                        { t: 'Satz des Pythagoras', b: 'Präsentation', f: 'Mathematik', c: '#ef4444' },
-                        { t: 'Industrialisierung — Stationen', b: 'Unterrichtseinheit', f: 'Geschichte', c: '#a16207' },
-                      ]"
+                      v-for="m in materialienMock"
                       :key="m.t"
-                      class="flex items-center gap-3 rounded-xl border border-line bg-surface px-3 py-2.5 shadow-soft"
+                      class="karte flex items-center gap-3 p-3"
                     >
-                      <span
-                        class="flex size-9 shrink-0 items-center justify-center rounded-lg"
-                        :style="{ backgroundColor: `${m.c}22`, color: m.c }"
+                      <div
+                        class="relative h-14 w-11 shrink-0 overflow-hidden rounded-md border border-line bg-surface-sunken shadow-sm"
                       >
-                        <UiIcon name="file-lines" fest />
-                      </span>
+                        <span
+                          class="absolute inset-0 flex flex-col items-center justify-center gap-1 text-ink-subtle"
+                          :class="
+                            m.preview === 'moodle'
+                              ? 'landing-moodle-vorschau'
+                              : 'bg-gradient-to-b from-surface to-surface-sunken'
+                          "
+                        >
+                          <UiIcon
+                            :name="m.preview === 'moodle' ? 'graduation-cap' : 'file'"
+                            fest
+                            class="text-lg opacity-80"
+                          />
+                          <span class="text-[0.6rem] font-semibold uppercase tracking-wide">
+                            {{ m.ext }}
+                          </span>
+                        </span>
+                      </div>
                       <div class="min-w-0 flex-1">
-                        <p class="truncate text-sm font-medium text-ink">{{ m.t }}</p>
-                        <p class="mt-0.5 flex items-center gap-2 text-[0.7rem] text-ink-subtle">
-                          <span
-                            class="rounded-md px-1.5 py-0.5 font-medium"
-                            :style="{
-                              backgroundColor: `color-mix(in oklab, ${m.c} 18%, var(--surface-base))`,
-                              color: `color-mix(in oklab, ${m.c} 80%, var(--text-strong))`,
-                            }"
-                          >{{ m.f }}</span>
-                          {{ m.b }}
+                        <div class="flex items-start gap-2">
+                          <p class="min-w-0 flex-1 truncate text-sm font-medium text-ink">{{ m.t }}</p>
+                          <UiIcon name="star" stil="far" fest class="shrink-0 text-ink-subtle" />
+                        </div>
+                        <div class="mt-2 flex flex-wrap items-center gap-1.5">
+                          <UiBadge
+                            groesse="sm"
+                            :ton="materialTypes.tone(m.materialType)"
+                            :icon="materialTypes.icon(m.materialType) ?? undefined"
+                          >
+                            {{ m.b }}
+                          </UiBadge>
+                          <UiBadge groesse="sm" :farbe="m.c">
+                            {{ m.f }}
+                          </UiBadge>
+                        </div>
+                        <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-subtle">
+                          <span class="flex items-center gap-1">
+                            <UiIcon name="paperclip" fest />
+                            {{ m.anhaenge }}
+                            {{ m.anhaenge === 1 ? 'Anhang' : 'Anhänge' }}
+                          </span>
+                          <span class="flex items-center gap-1">
+                            <UiIcon name="clock-rotate-left" fest />
+                            vor {{ m.tage }} Tagen
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Material-Detail -->
+                  <div v-else-if="f.id === 'material-detail'" class="space-y-3 p-4 sm:p-5">
+                    <p class="flex items-center gap-1.5 text-[0.7rem] text-ink-subtle">
+                      <UiIcon name="arrow-left" fest />
+                      Materialien
+                    </p>
+
+                    <div class="flex items-start justify-between gap-2">
+                      <div class="min-w-0">
+                        <p class="text-[0.65rem] font-medium tracking-[0.14em] text-ink-subtle uppercase">
+                          Material
+                        </p>
+                        <p class="truncate text-sm font-semibold text-ink">Photosynthese — Arbeitsblatt</p>
+                        <div class="mt-2 flex flex-wrap gap-1.5">
+                          <UiBadge
+                            groesse="sm"
+                            :ton="materialTypes.tone('arbeitsblatt')"
+                            :icon="materialTypes.icon('arbeitsblatt') ?? undefined"
+                          >
+                            Arbeitsblatt
+                          </UiBadge>
+                          <UiBadge groesse="sm" farbe="#3b82f6">
+                            Biologie
+                          </UiBadge>
+                        </div>
+                      </div>
+                      <span class="shrink-0 rounded-md bg-success-soft px-2 py-0.5 text-[0.65rem] font-medium text-success-strong">
+                        Gespeichert
+                      </span>
+                    </div>
+
+                    <!-- Dokumentvorschau -->
+                    <div class="overflow-hidden rounded-xl border border-line bg-surface shadow-soft">
+                      <div class="flex items-center gap-2 border-b border-line bg-surface-sunken/60 px-3 py-2">
+                        <UiIcon name="eye" fest class="text-xs text-ink-subtle" />
+                        <span class="text-xs font-medium text-ink">Dokumentvorschau</span>
+                        <UiIcon name="chevron-down" fest class="ml-auto text-[0.65rem] text-ink-subtle" />
+                      </div>
+                      <div class="flex items-center gap-3 p-3">
+                        <div class="relative h-12 w-9 shrink-0 overflow-hidden rounded-md border border-line bg-gradient-to-b from-surface to-surface-sunken shadow-sm">
+                          <span class="absolute inset-0 flex flex-col items-center justify-center gap-0.5 text-ink-subtle">
+                            <UiIcon name="file" fest class="text-sm opacity-80" />
+                            <span class="text-[0.55rem] font-semibold uppercase tracking-wide">PDF</span>
+                          </span>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                          <p class="truncate text-xs font-medium text-ink">photosynthese_ab.pdf</p>
+                          <p class="text-[0.65rem] text-ink-subtle">842 KB</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Angaben -->
+                    <div class="overflow-hidden rounded-xl border border-line bg-surface shadow-soft">
+                      <div class="flex items-center gap-2 border-b border-line bg-surface-sunken/60 px-3 py-2">
+                        <UiIcon name="pen-to-square" fest class="text-xs text-ink-subtle" />
+                        <span class="text-xs font-medium text-ink">Angaben</span>
+                        <UiIcon name="chevron-down" fest class="ml-auto text-[0.65rem] text-ink-subtle" />
+                      </div>
+                      <div class="space-y-2.5 p-3">
+                        <div>
+                          <p class="text-[0.65rem] font-medium text-ink-subtle">Titel</p>
+                          <div class="mt-0.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs text-ink">
+                            Photosynthese — Arbeitsblatt
+                          </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                          <div>
+                            <p class="text-[0.65rem] font-medium text-ink-subtle">Materialart</p>
+                            <div class="mt-0.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs text-ink">
+                              Arbeitsblatt
+                            </div>
+                          </div>
+                          <div>
+                            <p class="text-[0.65rem] font-medium text-ink-subtle">Schulform</p>
+                            <div class="mt-0.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs text-ink-subtle">
+                              –
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Varianten & Anhänge -->
+                    <div class="overflow-hidden rounded-xl border border-line bg-surface shadow-soft">
+                      <div class="flex items-center gap-2 border-b border-line bg-surface-sunken/60 px-3 py-2">
+                        <UiIcon name="code-branch" fest class="text-xs text-ink-subtle" />
+                        <span class="text-xs font-medium text-ink">Varianten & Anhänge</span>
+                        <UiIcon name="chevron-up" fest class="ml-auto text-[0.65rem] text-ink-subtle" />
+                      </div>
+                      <div class="space-y-2 p-3">
+                        <div class="rounded-lg border border-line bg-surface-sunken/40 p-2.5">
+                          <div class="mb-2 flex items-center gap-1.5">
+                            <p class="text-xs font-medium text-ink">Standard</p>
+                            <UiBadge groesse="sm" ton="primary">Standard</UiBadge>
+                          </div>
+                          <p class="mb-2 text-[0.65rem] text-ink-subtle">
+                            {{ variantKinds.label('standard') }}
+                          </p>
+                          <div class="flex items-center gap-2 rounded-lg bg-surface px-2.5 py-1.5 text-xs">
+                            <UiIcon name="file" fest class="text-ink-subtle" />
+                            <span class="min-w-0 flex-1 truncate text-ink">photosynthese_ab.pdf</span>
+                            <span class="text-[0.65rem] text-ink-subtle">842 KB</span>
+                          </div>
+                        </div>
+                        <div class="rounded-lg border border-line bg-surface-sunken/40 p-2.5">
+                          <div class="mb-2 flex items-center gap-1.5">
+                            <p class="text-xs font-medium text-ink">Leichte Sprache</p>
+                          </div>
+                          <p class="mb-2 text-[0.65rem] text-ink-subtle">
+                            {{ variantKinds.label('differenzierung') }}
+                          </p>
+                          <div class="flex items-center gap-2 rounded-lg bg-surface px-2.5 py-1.5 text-xs">
+                            <UiIcon name="file" fest class="text-ink-subtle" />
+                            <span class="min-w-0 flex-1 truncate text-ink">photosynthese_leichte_sprache.pdf</span>
+                            <span class="text-[0.65rem] text-ink-subtle">524 KB</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Lösungen & KI -->
+                  <div v-else-if="f.id === 'loesungen-ki'" class="space-y-3 p-4 sm:p-5">
+                    <span class="landing-ki-optional-chip">
+                      <UiIcon name="wand-magic-sparkles" fest />
+                      Optional · KI in Einstellungen aktivierbar
+                    </span>
+
+                    <!-- Arbeitsblatt: Ausgangsmaterial -->
+                    <div class="overflow-hidden rounded-xl border border-line bg-surface shadow-soft">
+                      <div class="flex items-start justify-between gap-2 border-b border-line bg-surface-sunken/40 px-3 py-2.5">
+                        <div class="min-w-0">
+                          <p class="text-[0.65rem] font-medium tracking-[0.14em] text-ink-subtle uppercase">
+                            Arbeitsblatt
+                          </p>
+                          <p class="truncate text-xs font-semibold text-ink">Photosynthese — Arbeitsblatt</p>
+                          <div class="mt-1.5 flex flex-wrap gap-1">
+                            <UiBadge
+                              groesse="sm"
+                              :ton="materialTypes.tone('arbeitsblatt')"
+                              :icon="materialTypes.icon('arbeitsblatt') ?? undefined"
+                            >
+                              Arbeitsblatt
+                            </UiBadge>
+                            <UiBadge groesse="sm" farbe="#3b82f6">
+                              Biologie
+                            </UiBadge>
+                          </div>
+                        </div>
+                        <span class="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg border border-line bg-surface px-2 text-[0.65rem] font-medium text-ink">
+                          <UiIcon name="wand-magic-sparkles" fest class="text-ki-strong" />
+                          Musterlösung erstellen
+                        </span>
+                      </div>
+
+                      <!-- KI-Modal (wie in [id].vue) -->
+                      <div class="landing-ki-modal mx-3 my-2.5 rounded-lg border border-line bg-surface p-3 shadow-soft">
+                        <div class="mb-2 flex items-center gap-2">
+                          <UiIcon name="wand-magic-sparkles" class="text-ki-strong" />
+                          <p class="text-xs font-semibold text-ink">Musterlösung erstellen</p>
+                        </div>
+                        <p class="mb-2 text-[0.65rem] leading-relaxed text-ink-muted">
+                          KI wertet die Quelldatei aus und erzeugt ein herunterladbares Dokument — als verknüpfte Musterlösung.
+                        </p>
+                        <p class="mb-1 text-[0.65rem] font-medium text-ink-muted">
+                          Zusätzliche Anweisung
+                          <span class="font-normal text-ink-subtle">(optional)</span>
+                        </p>
+                        <div class="rounded-lg border border-line bg-surface-sunken px-3 py-2 text-[0.7rem] leading-relaxed text-ink-subtle">
+                          Lücken knapp ausfüllen, Erwartungshorizont für Klasse 8 …
+                        </div>
+                        <div class="mt-2.5 flex justify-end gap-1.5">
+                          <span class="inline-flex h-7 items-center rounded-lg px-2.5 text-[0.65rem] text-ink-muted">
+                            Abbrechen
+                          </span>
+                          <span class="inline-flex h-7 items-center gap-1 rounded-lg bg-primary-solid px-2.5 text-[0.65rem] font-medium text-primary-contrast">
+                            <UiIcon name="wand-magic-sparkles" fest />
+                            Musterlösung erstellen
+                          </span>
+                        </div>
+                      </div>
+
+                      <!-- Verknüpfungen (Listenstil wie [id].vue) -->
+                      <div class="border-t border-line px-3 py-2.5">
+                        <div class="mb-2 flex items-center justify-between gap-2">
+                          <p class="flex items-center gap-1.5 text-[0.65rem] font-medium tracking-[0.14em] text-ink-subtle uppercase">
+                            <UiIcon name="link" fest />
+                            Verknüpfungen
+                          </p>
+                          <span class="text-[0.65rem] text-ink-subtle">+ Verknüpfen</span>
+                        </div>
+                        <ul class="space-y-1.5">
+                          <li class="flex items-center gap-2 rounded-lg border border-line px-2.5 py-1.5">
+                            <UiBadge
+                              groesse="sm"
+                              :ton="materialRelationTypes.tone('musterloesung')"
+                              :icon="materialRelationTypes.icon('musterloesung') ?? undefined"
+                            >
+                              Musterlösung
+                            </UiBadge>
+                            <span class="min-w-0 flex-1 truncate text-xs font-medium text-primary">
+                              Photosynthese — Musterlösung
+                            </span>
+                          </li>
+                        </ul>
+                        <p class="mt-1.5 text-[0.6rem] text-ink-subtle">
+                          Oder manuell: bestehende Lösung per „Verknüpfen“ zuordnen.
                         </p>
                       </div>
-                      <UiIcon name="star" stil="far" class="text-ink-subtle" />
+                    </div>
+
+                    <!-- Separates Musterlösungs-Material -->
+                    <div class="overflow-hidden rounded-xl border border-line bg-surface shadow-soft">
+                      <div class="border-b border-line bg-surface-sunken/40 px-3 py-2.5">
+                        <p class="text-[0.65rem] font-medium tracking-[0.14em] text-ink-subtle uppercase">
+                          Musterlösungs-Material
+                        </p>
+                        <p class="truncate text-xs font-semibold text-ink">Photosynthese — Musterlösung</p>
+                        <div class="mt-1.5 flex flex-wrap gap-1">
+                          <UiBadge
+                            groesse="sm"
+                            :ton="materialTypes.tone('musterloesung')"
+                            :icon="materialTypes.icon('musterloesung') ?? undefined"
+                          >
+                            Musterlösung
+                          </UiBadge>
+                          <UiBadge groesse="sm" ton="ki" icon="robot">
+                            KI
+                          </UiBadge>
+                          <UiBadge groesse="sm" ton="gruen" icon="circle-check">
+                            Geprüft
+                          </UiBadge>
+                        </div>
+                      </div>
+
+                      <div class="p-3">
+                        <div class="flex items-center gap-2 border-b border-line bg-surface-sunken/60 px-2.5 py-1.5 -mx-3 -mt-3 mb-2.5">
+                          <UiIcon name="eye" fest class="text-[0.65rem] text-ink-subtle" />
+                          <span class="text-[0.65rem] font-medium text-ink">Dokumentvorschau</span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                          <div class="relative h-12 w-9 shrink-0 overflow-hidden rounded-md border border-line bg-gradient-to-b from-surface to-surface-sunken shadow-sm">
+                            <span class="absolute inset-0 flex flex-col items-center justify-center gap-0.5 text-ink-subtle">
+                              <UiIcon name="file" fest class="text-sm opacity-80" />
+                              <span class="text-[0.55rem] font-semibold uppercase tracking-wide">PDF</span>
+                            </span>
+                          </div>
+                          <div class="min-w-0 flex-1">
+                            <p class="truncate text-xs font-medium text-ink">photosynthese_loesung.pdf</p>
+                            <p class="text-[0.65rem] text-ink-subtle">KI-Dokument · 612 KB</p>
+                          </div>
+                        </div>
+                        <div class="mt-2.5 flex flex-wrap gap-1.5">
+                          <span class="inline-flex h-7 items-center gap-1 rounded-lg bg-primary-solid px-2.5 text-[0.65rem] font-medium text-primary-contrast">
+                            <UiIcon name="eye" fest />
+                            Vorschau &amp; korrigieren
+                          </span>
+                          <span class="inline-flex h-7 items-center gap-1 rounded-lg border border-line bg-surface px-2.5 text-[0.65rem] text-ink">
+                            <UiIcon name="download" fest />
+                            Download
+                          </span>
+                        </div>
+                        <div class="mt-2.5 flex items-center justify-between gap-2 rounded-lg border border-line bg-surface-sunken/60 px-2.5 py-2">
+                          <div>
+                            <p class="text-[0.7rem] font-medium text-ink">Fachlich geprüft</p>
+                            <p class="text-[0.6rem] text-ink-subtle">KI-Musterlösung als kontrolliert markieren</p>
+                          </div>
+                          <span class="shrink-0 rounded-full bg-primary-solid px-2 py-0.5 text-[0.6rem] font-medium text-primary-contrast">
+                            an
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </div>
 
@@ -432,7 +815,7 @@ const mehr = [
             Starte mit deinem Unterrichtsarchiv
           </h2>
           <p class="mx-auto mt-4 max-w-lg text-sm leading-relaxed text-ink-muted sm:text-base">
-            Melde dich an, lege Materialien an oder importiere eine Kursmappe aus dem SchulPortal.
+            Melde dich an, lege Materialien an oder importiere eine Kursmappe aus dem Schulportal.
           </p>
           <div class="mt-8 flex justify-center">
             <UiButton variante="primaer" groesse="lg" icon="right-to-bracket" @click="emit('anmelden')">
@@ -550,5 +933,29 @@ const mehr = [
     animation: none !important;
     transition: none !important;
   }
+}
+
+.landing-moodle-vorschau {
+  background: linear-gradient(160deg, rgb(249 128 18 / 0.14), var(--surface-sunken));
+  color: #f98012;
+}
+
+.landing-ki-optional-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, var(--badge-ki) 25%, var(--surface-line));
+  background: color-mix(in oklab, var(--badge-ki-soft) 55%, var(--surface-base));
+  padding: 0.25rem 0.65rem;
+  font-size: 0.65rem;
+  font-weight: 500;
+  color: var(--badge-ki-strong);
+}
+
+.landing-ki-modal {
+  border-style: dashed;
+  border-color: color-mix(in oklab, var(--badge-ki) 22%, var(--surface-line));
+  background: color-mix(in oklab, var(--badge-ki-soft) 18%, var(--surface-base));
 }
 </style>

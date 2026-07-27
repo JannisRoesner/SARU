@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { isThumbnailCandidate } from '#shared/utils/thumbnail-candidate'
+import { istMoodleBackupDatei, istMoodleKursMaterial, istH5pDatei, istH5pMaterial, materialVorschauIcon, materialZeigtIconVorschau } from '#shared/utils/moodle'
 
 /**
  * Papierähnliche Dokument-Miniatur (paperless-Stil).
@@ -11,6 +12,7 @@ const props = withDefaults(
     assetId?: string | null
     fileName?: string | null
     mimeType?: string | null
+    materialType?: string | null
     /** Kompakte Kachel in Listen. */
     groesse?: 'sm' | 'md' | 'lg'
     klickbar?: boolean
@@ -25,12 +27,23 @@ const fehler = ref(false)
 const src = ref<string | null>(null)
 let objectUrl: string | null = null
 
+const zeigtIconVorschau = computed(
+  () => materialZeigtIconVorschau(props.materialType, props.fileName),
+)
+
+const vorschauStil = computed<'moodle' | 'h5p' | null>(() => {
+  if (istMoodleKursMaterial(props.materialType) || istMoodleBackupDatei(props.fileName)) return 'moodle'
+  if (istH5pMaterial(props.materialType) || istH5pDatei(props.fileName)) return 'h5p'
+  return null
+})
+
 const hatMiniatur = computed(() => {
+  if (zeigtIconVorschau.value) return false
   if (!props.assetId) return false
   return isThumbnailCandidate(props.mimeType, props.fileName)
 })
 
-const icon = computed(() => dateiIcon(props.fileName))
+const icon = computed(() => materialVorschauIcon(props.materialType, props.fileName))
 
 const mass = computed(() => {
   if (props.groesse === 'sm') return 'h-14 w-11'
@@ -113,6 +126,10 @@ onBeforeUnmount(() => {
     <span
       v-if="!src || fehler || !geladen"
       class="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-gradient-to-b from-surface to-surface-sunken text-ink-subtle"
+      :class="[
+        vorschauStil === 'moodle' && 'moodle-vorschau',
+        vorschauStil === 'h5p' && 'h5p-vorschau',
+      ]"
     >
       <UiIcon :name="icon" fest class="text-lg opacity-80" />
       <span
@@ -124,3 +141,15 @@ onBeforeUnmount(() => {
     </span>
   </component>
 </template>
+
+<style scoped>
+.moodle-vorschau {
+  background: linear-gradient(160deg, rgb(249 128 18 / 0.14), var(--surface-sunken));
+  color: #f98012;
+}
+
+.h5p-vorschau {
+  background: linear-gradient(160deg, color-mix(in oklch, var(--color-accent) 16%, transparent), var(--surface-sunken));
+  color: var(--color-accent);
+}
+</style>

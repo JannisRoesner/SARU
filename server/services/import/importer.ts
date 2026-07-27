@@ -119,7 +119,7 @@ export async function analyzeImport(
       'IMPORT_FEHLER',
       oeffentlicheFehlermeldung(
         error,
-        'Die Datei konnte nicht ausgewertet werden. Bitte prüfen, ob es sich um eine gültige Kursmappe aus dem SchulPortal handelt.',
+        'Die Datei konnte nicht ausgewertet werden. Bitte prüfen, ob es sich um eine gültige Kursmappe aus dem Schulportal handelt.',
       ),
       { cause: error },
     )

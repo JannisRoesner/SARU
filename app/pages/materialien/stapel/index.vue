@@ -99,16 +99,9 @@ async function analysieren() {
 
 <template>
   <div>
-    <div class="mb-2">
-      <NuxtLink
-        to="/materialien"
-        class="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-primary"
-      >
-        <UiIcon name="arrow-left" fest /> Alle Materialien
-      </NuxtLink>
-    </div>
-
     <LayoutSeitenkopf
+      zurueck-to="/materialien"
+      zurueck-label="Alle Materialien"
       kicker="Materialien"
       titel="Stapel-Upload"
       untertitel="Mehrere PDFs hochladen, gemeinsame Einordnung setzen, KI-Vorschläge prüfen und einmal anlegen."

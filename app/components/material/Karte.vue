@@ -2,6 +2,7 @@
 import { NuxtLink } from '#components'
 import { materialTypes, origins } from '#shared/utils/labels'
 import { istKiMusterloesung, kiAutorAnzeige } from '#shared/utils/ki'
+import { materialVorschauIcon, materialZeigtIconVorschau } from '#shared/utils/moodle'
 import { isThumbnailCandidate } from '#shared/utils/thumbnail-candidate'
 import type { MaterialSummary } from '~~/server/repositories/material.repository'
 
@@ -21,7 +22,10 @@ const emit = defineEmits<{
   auswahl: [id: string, wert: boolean]
 }>()
 
-const icon = computed(() => materialTypes.icon(props.material.materialType) ?? 'file')
+const icon = computed(() => materialVorschauIcon(props.material.materialType, preview.value?.fileName))
+const zeigtIconVorschau = computed(() =>
+  materialZeigtIconVorschau(props.material.materialType, preview.value?.fileName),
+)
 const fachfarbe = computed(() => props.material.subjects[0]?.color ?? null)
 const kiCredit = computed(() =>
   istKiMusterloesung(props.material)
@@ -32,6 +36,7 @@ const kiCredit = computed(() =>
 const jetzt = useJetzt()
 const preview = computed(() => props.material.preview)
 const zeigtMiniatur = computed(() => {
+  if (zeigtIconVorschau.value) return false
   const p = preview.value
   if (!p || p.kind !== 'datei') return false
   return isThumbnailCandidate(p.mimeType, p.fileName)
@@ -65,20 +70,21 @@ const zeigtMiniatur = computed(() => {
     </label>
 
     <MaterialVorschauMiniatur
-      v-if="zeigtMiniatur && preview?.assetId"
-      :asset-id="preview.assetId"
-      :file-name="preview.fileName"
-      :mime-type="preview.mimeType"
+      v-if="zeigtIconVorschau || (zeigtMiniatur && preview?.assetId)"
+      :asset-id="preview?.assetId"
+      :file-name="preview?.fileName"
+      :mime-type="preview?.mimeType"
+      :material-type="material.materialType"
       :groesse="kompakt ? 'sm' : 'md'"
     />
     <span
       v-else
       class="flex shrink-0 items-center justify-center rounded-xl"
       :class="kompakt ? 'size-10 text-base' : 'size-12 text-lg'"
-      :style="fachfarbe
+      :style="!zeigtIconVorschau && fachfarbe
         ? { backgroundColor: `${fachfarbe}22`, color: fachfarbe }
         : undefined"
-      :data-standard="fachfarbe ? undefined : ''"
+      :data-standard="!zeigtIconVorschau && !fachfarbe ? '' : undefined"
     >
       <UiIcon :name="icon" fest class="group-data-[standard]:text-primary" />
     </span>
@@ -191,3 +197,10 @@ const zeigtMiniatur = computed(() => {
     </div>
   </component>
 </template>
+
+<style scoped>
+span[data-standard] {
+  background: var(--surface-sunken);
+  color: var(--ink-subtle);
+}
+</style>

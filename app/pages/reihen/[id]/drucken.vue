@@ -71,7 +71,60 @@ function drucken() {
         <p v-if="reihe.description" class="mt-4 text-sm leading-relaxed text-ink-muted">
           {{ reihe.description }}
         </p>
+        <p v-if="reihe.learningObjectives?.length" class="mt-3 text-sm">
+          <strong>Lernziele:</strong> {{ reihe.learningObjectives.join(' · ') }}
+        </p>
       </header>
+
+      <section v-if="reihe.lessons.length" class="mb-10">
+        <h2 class="mb-3 text-sm font-semibold tracking-wide text-ink-subtle uppercase">
+          Reihenübersicht
+        </h2>
+        <table class="w-full border-collapse text-sm">
+          <thead>
+            <tr class="border-b border-line text-left text-xs tracking-wide text-ink-subtle uppercase">
+              <th class="py-2 pr-2 w-12">Nr.</th>
+              <th class="py-2 pr-2">Stunde</th>
+              <th class="py-2 pr-2">Datum</th>
+              <th class="py-2 pr-2">Status</th>
+              <th class="py-2">Phasen</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="(stunde, index) in stundenDetails.length ? stundenDetails : reihe.lessons"
+              :key="stunde.id"
+              class="border-b border-line align-top"
+            >
+              <td class="py-2 pr-2 text-ink-subtle">{{ index + 1 }}</td>
+              <td class="py-2 pr-2 font-medium">{{ stunde.title }}</td>
+              <td class="py-2 pr-2">
+                {{ stunde.date ? formatDatumLang(stunde.date) : '–' }}
+              </td>
+              <td class="py-2 pr-2">{{ lessonStatuses.label(stunde.status) }}</td>
+              <td class="py-2 text-ink-muted">
+                <template v-if="'phases' in stunde && stunde.phases?.length">
+                  {{ stunde.phases.map((p) => p.name).join(' · ') }}
+                </template>
+                <template v-else-if="laedtDetails">…</template>
+                <template v-else>–</template>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section v-if="reihe.materials.length" class="mb-10">
+        <h2 class="mb-2 text-sm font-semibold tracking-wide text-ink-subtle uppercase">
+          Reihenmaterialien
+        </h2>
+        <ul class="list-inside list-disc text-sm text-ink-muted">
+          <li v-for="mat in reihe.materials" :key="mat.id">
+            {{ mat.title }}
+            <span v-if="mat.note" class="text-ink-subtle"> ({{ mat.note }})</span>
+          </li>
+        </ul>
+      </section>
 
       <p v-if="laedtDetails" class="text-sm text-ink-muted">Lade Stundendetails …</p>
 
@@ -127,6 +180,10 @@ function drucken() {
                   S: {{ phase.studentActivity }}
                 </p>
                 <p v-if="phase.method" class="mt-1 text-ink-subtle">Methode: {{ phase.method }}</p>
+                <p v-if="phase.notes" class="mt-1 text-ink-subtle">Hinweis: {{ phase.notes }}</p>
+                <ul v-if="phase.materials?.length" class="mt-1 list-inside list-disc text-ink-muted">
+                  <li v-for="mat in phase.materials" :key="mat.id">{{ mat.title }}</li>
+                </ul>
               </td>
               <td class="py-2">
                 {{ phase.socialForm ? socialForms.label(phase.socialForm) : '–' }}

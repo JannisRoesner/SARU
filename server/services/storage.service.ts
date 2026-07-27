@@ -80,6 +80,18 @@ export const ALLOWED_TYPES: AllowedType[] = [
   },
   { label: 'ZIP-Archiv', extensions: ['zip'], mimeTypes: ['application/zip'], sniffable: true },
   { label: 'GeoGebra', extensions: ['ggb'], mimeTypes: ['application/zip'], sniffable: true },
+  {
+    label: 'Kursarchiv',
+    extensions: ['mbz', 'imscc'],
+    mimeTypes: ['application/gzip', 'application/x-gzip', 'application/zip'],
+    sniffable: false,
+  },
+  {
+    label: 'H5P-Paket',
+    extensions: ['h5p'],
+    mimeTypes: ['application/zip'],
+    sniffable: false,
+  },
 ]
 
 export function uploadRoot(): string {

@@ -51,10 +51,10 @@ const kennzahlen = computed(() => {
 })
 
 const schnellaktionen = [
-  { label: 'Material anlegen', icon: 'plus', to: '/materialien/neu', variante: 'primaer' as const },
-  { label: 'Stunde anlegen', icon: 'calendar-plus', to: '/stunden/neu', variante: 'sekundaer' as const },
-  { label: 'Reihe anlegen', icon: 'layer-group', to: '/reihen/neu', variante: 'sekundaer' as const },
-  { label: 'Import aus SchulPortal', icon: 'file-import', to: '/import', variante: 'sekundaer' as const },
+  { label: 'Material anlegen', kurz: 'Material', icon: 'plus', to: '/materialien/neu', variante: 'primaer' as const },
+  { label: 'Stunde anlegen', kurz: 'Stunde', icon: 'calendar-plus', to: '/stunden/neu', variante: 'sekundaer' as const },
+  { label: 'Reihe anlegen', kurz: 'Reihe', icon: 'layer-group', to: '/reihen/neu', variante: 'sekundaer' as const },
+  { label: 'Import aus Schulportal', kurz: 'Import', icon: 'file-import', to: '/import', variante: 'sekundaer' as const },
 ]
 
 const { favoritSetzen } = useMaterialAktionen(() => refresh())
@@ -66,20 +66,26 @@ const { favoritSetzen } = useMaterialAktionen(() => refresh())
       kicker="Übersicht"
       :titel="vorname ? `${begruessung}, ${vorname}` : begruessung"
       :untertitel="heutigesDatum"
+    />
+
+    <div
+      v-if="darfBearbeiten"
+      class="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-4"
     >
-      <template v-if="darfBearbeiten" #aktionen>
-        <UiButton
-          v-for="aktion in schnellaktionen"
-          :key="aktion.to"
-          :to="aktion.to"
-          :variante="aktion.variante"
-          :icon="aktion.icon"
-          groesse="sm"
-        >
-          {{ aktion.label }}
-        </UiButton>
-      </template>
-    </LayoutSeitenkopf>
+      <UiButton
+        v-for="aktion in schnellaktionen"
+        :key="aktion.to"
+        :to="aktion.to"
+        :variante="aktion.variante"
+        :icon="aktion.icon"
+        :title="aktion.label"
+        groesse="sm"
+        breit
+      >
+        <span class="truncate sm:hidden">{{ aktion.kurz }}</span>
+        <span class="hidden truncate sm:inline">{{ aktion.label }}</span>
+      </UiButton>
+    </div>
 
     <UiFehlerzustand v-if="error" :text="toApiFehler(error).nachricht" @erneut="refresh()" />
 
@@ -121,7 +127,7 @@ const { favoritSetzen } = useMaterialAktionen(() => refresh())
               klein
               icon="folder-open"
               titel="Noch keine Materialien"
-              text="Lege dein erstes Material an oder importiere einen Export aus dem SchulPortal."
+              text="Lege dein erstes Material an oder importiere einen Export aus dem Schulportal."
             >
               <UiButton v-if="darfBearbeiten" to="/materialien/neu" variante="primaer" groesse="sm" icon="plus">
                 Material anlegen

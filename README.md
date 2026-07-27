@@ -2,15 +2,18 @@
 
 **S**ystem zur **A**rchivierung von **R**eihen und **U**nterrichtsmaterialien
 
-Selbst gehostetes Archiv für Unterrichtsreihen, Stunden und Materialien – mit Volltext- und Ähnlichkeitssuche, SchulPortal-Import und optionaler KI-Unterstützung.
+Selbst gehostetes Archiv für Unterrichtsreihen, Stunden und Materialien – mit Volltext- und Ähnlichkeitssuche, Schulportal-Import und optionaler KI-Unterstützung.
 
 ## Funktionen
 
-- Materialien mit Varianten, Dateianhängen, Tags und Bewertungen
+- Materialien mit Varianten, Dateianhängen (PDF, Office), Moodle-Kursarchiven (.mbz / .imscc), H5P-Paketen, Tags und Bewertungen
+- PDF-Stapel-Upload: mehrere Dateien gemeinsam hochladen, einordnen und optional mit KI-Vorschlägen prüfen
 - Unterrichtsstunden und Reihen mit Phasen und Materialzuordnung
-- Hybride Suche (Volltext, Trigramme, optional Vektorsuche)
-- Import von SchulPortal-Kursmappen
-- Mehrbenutzerbetrieb mit Rollen (Administration / Nutzung)
+- Hybride Suche (Volltext, Ähnlichkeitssuche, optional Vektorsuche)
+- Import von Schulportal-Kursmappen
+- KI-Musterlösungen aus PDF- und Office-Dateien — klar als KI gekennzeichnet, mit Ausgangsmaterial verknüpft
+- Moodle-Kursarchive zum Ablegen für Wiederherstellung im SchulMoodle (Archiv-Upload, kein Moodle-API-Import)
+- Mehrbenutzerbetrieb mit Rollen (Administration / Lehrkraft / Lesezugriff)
 - Einstellungen für KI, Uploads, Darstellung und Datenschutz
 
 ## Schnellstart mit Docker

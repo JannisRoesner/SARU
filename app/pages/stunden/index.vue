@@ -121,7 +121,7 @@ watch(page, syncQuery)
         v-else-if="!(data?.items.length)"
         icon="chalkboard-user"
         titel="Keine Stunden"
-        text="Plane deine erste Unterrichtsstunde oder importiere einen Kurs aus dem SchulPortal."
+        text="Plane deine erste Unterrichtsstunde oder importiere einen Kurs aus dem Schulportal."
       >
         <UiButton v-if="darfBearbeiten" to="/stunden/neu" variante="primaer" icon="plus">
           Stunde planen

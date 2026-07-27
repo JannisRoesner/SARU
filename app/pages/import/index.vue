@@ -66,7 +66,7 @@ async function analysieren() {
     <LayoutSeitenkopf
       kicker="Werkzeuge"
       titel="Import"
-      untertitel="Kursmappen aus dem SchulPortal importieren."
+      untertitel="Kursmappen aus dem Schulportal importieren."
     />
 
     <UiCard titel="Neue Datei hochladen" icon="file-import" class="mb-8" einklappbar einklapp-id="import-upload">
@@ -80,7 +80,7 @@ async function analysieren() {
         <UiIcon name="cloud-arrow-up" class="mb-3 text-3xl text-primary" />
         <p class="font-medium text-ink">ZIP-Export hier ablegen</p>
         <p class="mt-1 text-sm text-ink-muted">
-          z. B. SchulPortal-Kursmappe mit Stunden und Anhängen
+          z. B. Schulportal-Kursmappe mit Stunden und Anhängen
         </p>
         <label class="mt-4 inline-flex cursor-pointer">
           <input

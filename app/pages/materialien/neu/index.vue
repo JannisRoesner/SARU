@@ -87,7 +87,9 @@ async function anlegen() {
 <template>
   <div class="mx-auto max-w-3xl">
     <LayoutSeitenkopf
-      kicker="Neu"
+      zurueck-to="/materialien"
+      zurueck-label="Alle Materialien"
+      kicker="Materialien"
       titel="Material anlegen"
       untertitel="Titel und Typ genügen zum Start. Dateien kannst du direkt hier anhängen."
     >
@@ -95,7 +97,9 @@ async function anlegen() {
         <UiButton to="/materialien/stapel" variante="sekundaer" icon="layer-group">
           Stapel-Upload
         </UiButton>
-        <UiButton to="/materialien" variante="still" icon="arrow-left">Zurück</UiButton>
+        <UiButton to="/materialien/neu/moodle" variante="sekundaer" icon="graduation-cap">
+          Moodle-Kurs
+        </UiButton>
       </template>
     </LayoutSeitenkopf>
 

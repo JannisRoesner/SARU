@@ -174,7 +174,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', beiTastenkuerzel))
     </aside>
 
     <!-- Inhaltsbereich -->
-    <div class="flex min-w-0 flex-1 flex-col">
+    <div class="flex min-w-0 flex-1 flex-col overflow-x-clip">
       <header
         class="kein-druck sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-line bg-canvas/85 px-4 backdrop-blur-md lg:px-8"
       >
@@ -189,11 +189,11 @@ onBeforeUnmount(() => document.removeEventListener('keydown', beiTastenkuerzel))
 
         <button
           type="button"
-          class="flex h-10 max-w-md flex-1 items-center gap-2.5 rounded-lg border border-line bg-surface px-3 text-left text-sm text-ink-subtle transition-colors hover:border-line-strong hover:bg-surface-hover"
+          class="flex h-10 min-w-0 max-w-md flex-1 items-center gap-2.5 rounded-lg border border-line bg-surface px-3 text-left text-sm text-ink-subtle transition-colors hover:border-line-strong hover:bg-surface-hover"
           @click="suchePaletteOffen = true"
         >
-          <UiIcon name="magnifying-glass" />
-          <span class="flex-1 truncate">Materialien, Stunden und Reihen durchsuchen …</span>
+          <UiIcon name="magnifying-glass" class="shrink-0" />
+          <span class="min-w-0 flex-1 truncate">Materialien, Stunden und Reihen durchsuchen …</span>
           <kbd
             class="hidden rounded border border-line bg-surface-sunken px-1.5 py-0.5 font-sans text-[0.7rem] text-ink-subtle sm:inline"
           >
@@ -206,7 +206,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', beiTastenkuerzel))
         </div>
       </header>
 
-      <main id="inhalt" class="flex-1 px-4 py-6 lg:px-8 lg:py-8">
+      <main id="inhalt" class="min-w-0 flex-1 overflow-x-clip px-4 py-6 lg:px-8 lg:py-8">
         <slot />
       </main>
     </div>

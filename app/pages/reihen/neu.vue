@@ -42,14 +42,12 @@ async function anlegen() {
 <template>
   <div class="mx-auto max-w-3xl">
     <LayoutSeitenkopf
-      kicker="Neu"
+      zurueck-to="/reihen"
+      zurueck-label="Alle Reihen"
+      kicker="Reihen"
       titel="Reihe starten"
       untertitel="Bündele zusammengehörige Stunden zu einer Unterrichtsreihe."
-    >
-      <template #aktionen>
-        <UiButton to="/reihen" variante="still" icon="arrow-left">Zurück</UiButton>
-      </template>
-    </LayoutSeitenkopf>
+    />
 
     <form class="space-y-5" @submit.prevent="anlegen">
       <UiCard titel="Rahmen" icon="layer-group" einklappbar einklapp-id="reihe-neu-rahmen">

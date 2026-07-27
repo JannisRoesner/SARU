@@ -191,13 +191,9 @@ async function hermesTesten() {
 
 <template>
   <div class="mx-auto max-w-3xl space-y-6">
-    <div class="mb-2">
-      <NuxtLink to="/einstellungen" class="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-primary">
-        <UiIcon name="arrow-left" fest /> Einstellungen
-      </NuxtLink>
-    </div>
-
     <LayoutSeitenkopf
+      zurueck-to="/einstellungen"
+      zurueck-label="Einstellungen"
       kicker="System"
       titel="KI-Anbindung"
       untertitel="Musterlösungen erzeugen, multimodale Modelle anbinden und optional Hermes nutzen. API-Schlüssel werden serverseitig verschlüsselt gespeichert."

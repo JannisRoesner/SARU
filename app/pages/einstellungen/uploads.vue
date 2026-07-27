@@ -77,13 +77,9 @@ async function privacySpeichern() {
 
 <template>
   <div class="mx-auto max-w-3xl space-y-5">
-    <div class="mb-2">
-      <NuxtLink to="/einstellungen" class="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-primary">
-        <UiIcon name="arrow-left" fest /> Einstellungen
-      </NuxtLink>
-    </div>
-
     <LayoutSeitenkopf
+      zurueck-to="/einstellungen"
+      zurueck-label="Einstellungen"
       kicker="System"
       titel="Uploads & Datenschutz"
       untertitel="Grenzen für Dateien und Aufbewahrungsfristen."

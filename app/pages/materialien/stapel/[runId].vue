@@ -209,10 +209,10 @@ function alleWaehlen(wert: boolean) {
     <UiSkelett v-else-if="status === 'pending' || !data" art="list" :zeilen="6" />
 
     <template v-else>
-      <header class="mb-6 flex flex-wrap items-start justify-between gap-4">
-        <div>
+      <header class="mb-6 flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+        <div class="min-w-0">
           <p class="seitenkopf-kicker">Stapel-Assistent</p>
-          <h1 class="text-3xl tracking-tight text-ink">{{ data.sourceFileName }}</h1>
+          <h1 class="break-words text-3xl tracking-tight text-ink">{{ data.sourceFileName }}</h1>
           <div class="mt-2 flex flex-wrap items-center gap-2 text-sm text-ink-muted">
             <UiBadge
               :ton="importStatuses.tone(data.status as never)"
@@ -226,7 +226,7 @@ function alleWaehlen(wert: boolean) {
             <span v-else>ohne KI</span>
           </div>
         </div>
-        <div class="flex flex-wrap gap-2">
+        <LayoutAktionen class="sm:ml-auto sm:justify-end" stapeln>
           <UiButton
             v-if="data.canCommit"
             variante="primaer"
@@ -254,7 +254,7 @@ function alleWaehlen(wert: boolean) {
           >
             Zur Sammlung
           </UiButton>
-        </div>
+        </LayoutAktionen>
       </header>
 
       <ol class="mb-8 grid gap-2 sm:grid-cols-4">

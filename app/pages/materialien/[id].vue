@@ -6,6 +6,7 @@ import {
   materialRelationTypes,
 } from '#shared/utils/labels'
 import { istKiMusterloesung, kiAutorAnzeige } from '#shared/utils/ki'
+import { istMoodleKursMaterial, istH5pMaterial, kursarchivErweiterung } from '#shared/utils/moodle'
 import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
 import type { MaterialDetail } from '~~/server/repositories/material.repository'
 import type { StoredStructuredSolution } from '~~/server/database/schema/materials'
@@ -102,7 +103,21 @@ const aktiveVarianteId = ref<string | null>(null)
 const neueVariante = reactive({
   label: '',
   variantKind: 'standard',
+  schoolYear: '',
 })
+
+function varianteModalOeffnen() {
+  if (istMoodleKurs.value) {
+    neueVariante.label = ''
+    neueVariante.variantKind = 'jahrgang'
+    neueVariante.schoolYear = ''
+  } else {
+    neueVariante.label = ''
+    neueVariante.variantKind = 'standard'
+    neueVariante.schoolYear = ''
+  }
+  varianteOffen.value = true
+}
 
 const neuerLink = reactive({ url: '', title: '' })
 const neueRelation = reactive({
@@ -113,14 +128,23 @@ const neueRelation = reactive({
 const kiAnweisung = ref('')
 
 async function varianteAnlegen() {
+  const body = istMoodleKurs.value
+    ? {
+        label: neueVariante.label,
+        variantKind: neueVariante.variantKind,
+        schoolYear: neueVariante.schoolYear.trim() || null,
+      }
+    : { label: neueVariante.label, variantKind: neueVariante.variantKind }
+
   const ergebnis = await aufruf(`/api/materials/${id.value}/variants`, {
     method: 'POST',
-    body: { ...neueVariante },
-    erfolgsmeldung: 'Variante angelegt.',
+    body,
+    erfolgsmeldung: istMoodleKurs.value ? 'Kursversion angelegt.' : 'Variante angelegt.',
   })
   if (ergebnis) {
     varianteOffen.value = false
     neueVariante.label = ''
+    neueVariante.schoolYear = ''
     await refresh()
   }
 }
@@ -129,10 +153,14 @@ async function dateienHochladen(variantId: string, files: FileList | null) {
   if (!files?.length) return
   const body = new FormData()
   for (const file of Array.from(files)) body.append('files', file)
-  body.append('role', 'anhang')
+  body.append('role', istMoodleKurs.value ? 'haupt' : 'anhang')
   const ergebnis = await aufruf<{ erstellt: { id: string }[]; abgelehnt: unknown[] }>(
     `/api/variants/${variantId}/uploads`,
-    { method: 'POST', body, erfolgsmeldung: 'Datei(en) hochgeladen.' },
+    {
+      method: 'POST',
+      body,
+      erfolgsmeldung: istMoodleKurs.value ? 'Kursarchiv hochgeladen.' : 'Datei(en) hochgeladen.',
+    },
   )
   if (ergebnis) await refresh()
 }
@@ -286,6 +314,20 @@ const hauptVorschau = computed(() => {
 
 const kiLoesungAktiv = computed(() => (data.value ? istKiMusterloesung(data.value) : false))
 
+const istMoodleKurs = computed(() =>
+  data.value ? istMoodleKursMaterial(data.value.materialType) : false,
+)
+
+const istH5p = computed(() =>
+  data.value ? istH5pMaterial(data.value.materialType) : false,
+)
+
+const istIconVorschau = computed(() => istMoodleKurs.value || istH5p.value)
+
+const kursarchivFormat = computed(() =>
+  kursarchivErweiterung(hauptVorschau.value?.fileName),
+)
+
 const kiCredit = computed(() =>
   data.value
     ? kiAutorAnzeige(data.value.aiMeta, data.value.author)
@@ -324,10 +366,10 @@ const loesungBearbeitbar = computed(
         </NuxtLink>
       </div>
 
-      <header class="mb-6 flex flex-wrap items-start justify-between gap-4">
+      <header class="mb-6 flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
         <div class="min-w-0 max-w-3xl">
           <p class="seitenkopf-kicker">Material</p>
-          <h1 class="text-3xl tracking-tight text-ink">{{ data.title }}</h1>
+          <h1 class="break-words text-3xl tracking-tight text-ink">{{ data.title }}</h1>
           <div class="mt-3 flex flex-wrap gap-1.5">
             <UiBadge :ton="materialTypes.tone(data.materialType)" :icon="materialTypes.icon(data.materialType)">
               {{ materialTypes.label(data.materialType) }}
@@ -360,7 +402,7 @@ const loesungBearbeitbar = computed(
           </div>
         </div>
 
-        <div class="flex flex-wrap items-center gap-2">
+        <LayoutAktionen class="sm:ml-auto sm:justify-end">
           <UiSpeichernAnzeige
             v-if="darfBearbeiten"
             :zustand="autosave.zustand.value"
@@ -375,20 +417,24 @@ const loesungBearbeitbar = computed(
             @click="favoritSetzen(data.id, !data.isFavorite)"
           />
           <UiButton
-            v-if="darfBearbeiten && !kiLoesungAktiv"
+            v-if="darfBearbeiten && !kiLoesungAktiv && !istMoodleKurs"
             variante="sekundaer"
             icon="wand-magic-sparkles"
+            title="Musterlösung erstellen"
             @click="kiOffen = true"
           >
-            Musterlösung erstellen
+            <span class="sm:hidden">KI-Lösung</span>
+            <span class="hidden sm:inline">Musterlösung erstellen</span>
           </UiButton>
           <UiButton
             v-if="loesungBearbeitbar && hauptVorschau"
             variante="sekundaer"
             icon="pen-to-square"
+            title="Antworten korrigieren"
             @click="assetOeffnen(hauptVorschau)"
           >
-            Antworten korrigieren
+            <span class="sm:hidden">Korrigieren</span>
+            <span class="hidden sm:inline">Antworten korrigieren</span>
           </UiButton>
           <UiButton
             v-if="darfBearbeiten"
@@ -414,17 +460,17 @@ const loesungBearbeitbar = computed(
             title="Löschen"
             @click="loeschenOffen = true"
           />
-        </div>
+        </LayoutAktionen>
       </header>
 
       <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
         <div class="space-y-5">
           <UiCard
             v-if="hauptVorschau"
-            titel="Dokumentvorschau"
-            icon="eye"
+            :titel="istMoodleKurs ? 'Kursarchiv' : istH5p ? 'H5P-Paket' : 'Dokumentvorschau'"
+            :icon="istMoodleKurs ? 'graduation-cap' : istH5p ? 'puzzle-piece' : 'eye'"
             einklappbar
-            einklapp-id="material-vorschau"
+            :einklapp-id="istMoodleKurs ? 'material-moodle-backup' : istH5p ? 'material-h5p-paket' : 'material-vorschau'"
             :standard-offen="true"
           >
             <div class="flex flex-wrap items-start gap-4">
@@ -432,8 +478,9 @@ const loesungBearbeitbar = computed(
                 :asset-id="hauptVorschau.id"
                 :file-name="hauptVorschau.fileName"
                 :mime-type="hauptVorschau.mimeType"
+                :material-type="data.materialType"
                 groesse="lg"
-                klickbar
+                :klickbar="!istIconVorschau"
                 @klick="assetOeffnen(hauptVorschau)"
               />
               <div class="min-w-0 flex-1 space-y-3">
@@ -444,9 +491,23 @@ const loesungBearbeitbar = computed(
                   <p v-if="hauptVorschau.sizeBytes" class="text-sm text-ink-muted">
                     {{ formatBytes(hauptVorschau.sizeBytes) }}
                   </p>
+                  <p v-if="istMoodleKurs && kursarchivFormat === 'imscc'" class="mt-2 text-sm leading-relaxed text-ink-muted">
+                    Diese .imscc-Datei kannst du im SchulMoodle als IMS Common Cartridge importieren.
+                  </p>
+                  <p v-else-if="istMoodleKurs" class="mt-2 text-sm leading-relaxed text-ink-muted">
+                    Dieses Backup kannst du im SchulMoodle unter
+                    <strong class="font-medium text-ink">Website-Administration → Kurse → Wiederherstellen</strong>
+                    hochladen.
+                  </p>
+                  <p v-else-if="istH5p" class="mt-2 text-sm leading-relaxed text-ink-muted">
+                    Dieses H5P-Paket kannst du im SchulMoodle unter
+                    <strong class="font-medium text-ink">Inhalt hinzufügen → H5P</strong>
+                    hochladen oder einbetten.
+                  </p>
                 </div>
                 <div class="flex flex-wrap gap-2">
                   <UiButton
+                    v-if="!istIconVorschau"
                     variante="primaer"
                     icon="eye"
                     @click="assetOeffnen(hauptVorschau)"
@@ -454,11 +515,11 @@ const loesungBearbeitbar = computed(
                     {{ loesungBearbeitbar ? 'Vorschau & korrigieren' : 'Vorschau' }}
                   </UiButton>
                   <UiButton
-                    variante="sekundaer"
+                    :variante="istIconVorschau ? 'primaer' : 'sekundaer'"
                     icon="download"
                     @click="assetHerunterladen(hauptVorschau.id)"
                   >
-                    Download
+                    {{ istMoodleKurs ? 'Archiv herunterladen' : istH5p ? 'Paket herunterladen' : 'Download' }}
                   </UiButton>
                 </div>
                 <UiToggle
@@ -495,7 +556,7 @@ const loesungBearbeitbar = computed(
                 <UiField label="Materialart">
                   <UiSelect
                     v-model="formular.materialType"
-                    :disabled="!darfBearbeiten"
+                    :disabled="!darfBearbeiten || istMoodleKurs"
                     :optionen="materialTypes.options().map((o) => ({ value: o.value, label: o.label }))"
                   />
                 </UiField>
@@ -580,8 +641,8 @@ const loesungBearbeitbar = computed(
           </UiCard>
 
           <UiCard
-            titel="Varianten & Anhänge"
-            icon="code-branch"
+            :titel="istMoodleKurs ? 'Kursversionen' : 'Varianten & Anhänge'"
+            :icon="istMoodleKurs ? 'graduation-cap' : 'code-branch'"
             einklappbar
             einklapp-id="material-varianten"
             :standard-offen="!data.variants.some((v) => v.assets.length)"
@@ -592,14 +653,20 @@ const loesungBearbeitbar = computed(
                 variante="still"
                 groesse="sm"
                 icon="plus"
-                @click="varianteOffen = true"
+                @click="varianteModalOeffnen"
               >
-                Variante
+                {{ istMoodleKurs ? 'Kursversion' : 'Variante' }}
               </UiButton>
             </template>
 
+            <p v-if="istMoodleKurs" class="mb-4 text-sm text-ink-muted">
+              Pro Schuljahr oder Fassung ein eigenes Kursarchiv (.mbz oder .imscc). Jede Kursversion enthält genau eine Archiv-Datei.
+            </p>
+
             <div v-if="!data.variants.length" class="text-sm text-ink-muted">
-              Noch keine Variante – beim Anlegen wird automatisch eine Standardfassung erzeugt.
+              {{ istMoodleKurs
+                ? 'Noch keine Kursversion – beim Anlegen wird automatisch eine erste Fassung erzeugt.'
+                : 'Noch keine Variante – beim Anlegen wird automatisch eine Standardfassung erzeugt.' }}
             </div>
 
             <div v-else class="space-y-4">
@@ -620,18 +687,24 @@ const loesungBearbeitbar = computed(
                     </p>
                   </div>
                   <div v-if="darfBearbeiten" class="flex gap-1.5">
-                    <label class="inline-flex cursor-pointer">
+                    <label
+                      v-if="!istMoodleKurs || !variante.assets.some((a) => a.kind === 'datei')"
+                      class="inline-flex cursor-pointer"
+                    >
                       <input
                         type="file"
-                        multiple
+                        :multiple="!istMoodleKurs"
+                        accept=".mbz,.imscc,application/gzip,application/x-gzip,application/zip"
                         class="sr-only"
-                        @change="dateienHochladen(variante.id, ($event.target as HTMLInputElement).files)"
+                        @change="dateienHochladen(variante.id, ($event.target as HTMLInputElement).files); ($event.target as HTMLInputElement).value = ''"
                       >
                       <span class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line bg-surface px-3 text-sm hover:bg-surface-hover">
-                        <UiIcon name="upload" fest /> Hochladen
+                        <UiIcon :name="istMoodleKurs ? 'graduation-cap' : 'upload'" fest />
+                        {{ istMoodleKurs ? 'Archiv hochladen' : 'Hochladen' }}
                       </span>
                     </label>
                     <UiButton
+                      v-if="!istMoodleKurs"
                       variante="sekundaer"
                       groesse="sm"
                       icon="link"
@@ -653,8 +726,9 @@ const loesungBearbeitbar = computed(
                       :asset-id="asset.id"
                       :file-name="asset.fileName"
                       :mime-type="asset.mimeType"
+                      :material-type="data.materialType"
                       groesse="sm"
-                      klickbar
+                      :klickbar="!istIconVorschau"
                       @klick="assetOeffnen(asset)"
                     />
                     <UiIcon
@@ -693,7 +767,9 @@ const loesungBearbeitbar = computed(
                     />
                   </li>
                 </ul>
-                <p v-else class="text-xs text-ink-subtle">Keine Anhänge</p>
+                <p v-else class="text-xs text-ink-subtle">
+                  {{ istMoodleKurs ? 'Noch kein Backup hochgeladen' : 'Keine Anhänge' }}
+                </p>
               </section>
             </div>
           </UiCard>
@@ -822,12 +898,22 @@ const loesungBearbeitbar = computed(
       @bestaetigt="materialLoeschen"
     />
 
-    <UiModal v-model="varianteOffen" titel="Variante anlegen" icon="code-branch">
+    <UiModal
+      v-model="varianteOffen"
+      :titel="istMoodleKurs ? 'Kursversion anlegen' : 'Variante anlegen'"
+      :icon="istMoodleKurs ? 'graduation-cap' : 'code-branch'"
+    >
       <div class="space-y-4">
-        <UiField label="Bezeichnung" pflicht>
-          <UiInput v-model="neueVariante.label" placeholder="z. B. Einfache Fassung" />
+        <UiField :label="istMoodleKurs ? 'Bezeichnung' : 'Bezeichnung'" pflicht>
+          <UiInput
+            v-model="neueVariante.label"
+            :placeholder="istMoodleKurs ? 'z. B. 2024/25' : 'z. B. Einfache Fassung'"
+          />
         </UiField>
-        <UiField label="Art">
+        <UiField v-if="istMoodleKurs" label="Schuljahr">
+          <UiInput v-model="neueVariante.schoolYear" placeholder="z. B. 2024/25" />
+        </UiField>
+        <UiField v-if="!istMoodleKurs" label="Art">
           <UiSelect
             v-model="neueVariante.variantKind"
             :optionen="variantKinds.options().map((o) => ({ value: o.value, label: o.label }))"

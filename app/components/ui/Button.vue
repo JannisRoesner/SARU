@@ -32,7 +32,7 @@ const PADDING = { sm: 'px-3', md: 'px-4', lg: 'px-5' } as const
 const NUR_ICON = { sm: 'w-8', md: 'w-10', lg: 'w-12' } as const
 
 const klassen = computed(() => [
-  'inline-flex items-center justify-center rounded-lg font-medium transition-all duration-150',
+  'inline-flex max-w-full items-center justify-center rounded-lg font-medium transition-all duration-150',
   'disabled:cursor-not-allowed disabled:opacity-50 active:scale-[0.98]',
   VARIANTEN[props.variante],
   GROESSEN[props.groesse],

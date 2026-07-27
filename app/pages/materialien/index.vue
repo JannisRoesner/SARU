@@ -128,6 +128,9 @@ const aktiveFilter = computed(() => {
         <UiButton to="/materialien/stapel" variante="sekundaer" icon="layer-group">
           Stapel-Upload
         </UiButton>
+        <UiButton to="/materialien/neu/moodle" variante="sekundaer" icon="graduation-cap">
+          Moodle-Kurs
+        </UiButton>
         <UiButton to="/materialien/neu" variante="primaer" icon="plus">
           Material anlegen
         </UiButton>
@@ -218,7 +221,7 @@ const aktiveFilter = computed(() => {
         v-else-if="!eintraege.length"
         icon="folder-open"
         titel="Keine Materialien gefunden"
-        text="Lege ein neues Material an oder importiere einen Export aus dem SchulPortal."
+        text="Lege ein neues Material an oder importiere einen Export aus dem Schulportal."
       >
         <UiButton v-if="darfBearbeiten" to="/materialien/neu" variante="primaer" icon="plus">
           Material anlegen

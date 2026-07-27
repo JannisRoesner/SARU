@@ -85,13 +85,9 @@ async function loeschen() {
 
 <template>
   <div>
-    <div class="mb-2">
-      <NuxtLink to="/einstellungen" class="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-primary">
-        <UiIcon name="arrow-left" fest /> Einstellungen
-      </NuxtLink>
-    </div>
-
     <LayoutSeitenkopf
+      zurueck-to="/einstellungen"
+      zurueck-label="Einstellungen"
       kicker="Administration"
       titel="Benutzer"
       untertitel="Zugänge verwalten und Rollen zuweisen."

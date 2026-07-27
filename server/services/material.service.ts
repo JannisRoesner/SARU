@@ -14,11 +14,12 @@ import {
   type AiMeta,
 } from '../database/schema'
 import { oeffentlicheFehlermeldung } from '#shared/utils/public-error'
+import { istKursarchivErweiterung } from '#shared/utils/moodle'
 import { conflict, invalidInput, notFound } from '../utils/errors'
 import { createLogger } from '../utils/logger'
 import { sanitizeText } from '../utils/validation'
 import { getMaterialDetail, type MaterialDetail } from '../repositories/material.repository'
-import { deleteFile, storeFile } from './storage.service'
+import { deleteFile, extensionOf, storeFile } from './storage.service'
 import { deleteThumbnail, queueThumbnailGeneration } from './thumbnail.service'
 import { extractTextFromStorage, isExtractable } from './extraction.service'
 import { queueReindex, removeFromIndex } from './search/indexer'
@@ -540,6 +541,31 @@ export async function addFileAsset(
     .limit(1)
   if (!variant) throw notFound('Die Variante')
 
+  const [material] = await db
+    .select({ materialType: materials.materialType })
+    .from(materials)
+    .where(eq(materials.id, variant.materialId))
+    .limit(1)
+
+  const ext = extensionOf(file.fileName)
+  if (material?.materialType === 'moodle_kurs') {
+    if (!istKursarchivErweiterung(ext)) {
+      throw invalidInput('Bei Moodle-Kursmaterialien sind nur .mbz- und .imscc-Dateien erlaubt.')
+    }
+    if ((options.role ?? 'haupt') !== 'haupt') {
+      throw invalidInput('Kursarchive müssen als Hauptdatei der Variante hochgeladen werden.')
+    }
+    const [{ value: vorhanden } = { value: 0 }] = await db
+      .select({ value: sql<number>`count(*)::int` })
+      .from(materialAssets)
+      .where(and(eq(materialAssets.variantId, variantId), eq(materialAssets.role, 'haupt')))
+    if ((vorhanden ?? 0) > 0) {
+      throw invalidInput(
+        'Diese Kursversion hat bereits ein Archiv. Lege für eine neue Datei eine neue Kursversion an.',
+      )
+    }
+  }
+
   const stored = await storeFile(file.buffer, file.fileName)
 
   const [{ value: highest } = { value: null }] = await db
@@ -564,9 +590,11 @@ export async function addFileAsset(
     })
     .returning({ id: materialAssets.id })
 
-  // Textextraktion und Miniatur im Hintergrund – der Upload soll nicht darauf warten.
+  // Textextraktion und Miniatur im Hintergrund – Kursarchive haben keine Dokumentvorschau.
   void extractAssetText(created!.id, variant.materialId)
-  queueThumbnailGeneration(created!.id, stored.mimeType, stored.fileName)
+  if (!istKursarchivErweiterung(ext)) {
+    queueThumbnailGeneration(created!.id, stored.mimeType, stored.fileName)
+  }
 
   return created!.id
 }
