@@ -55,7 +55,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="overflow-hidden rounded-xl border border-line bg-surface-sunken/40">
+  <div class="min-w-0 max-w-full overflow-hidden rounded-xl border border-line bg-surface-sunken/40">
     <button
       type="button"
       class="flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-inset"

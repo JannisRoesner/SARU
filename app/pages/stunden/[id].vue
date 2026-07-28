@@ -261,8 +261,8 @@ function phaseGeaendert(phase: LessonPhaseDetail) {
         </LayoutAktionen>
       </header>
 
-      <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
-        <div class="space-y-5">
+      <div class="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <div class="min-w-0 space-y-5">
           <UiCard titel="Rahmen" icon="sliders" einklappbar einklapp-id="stunde-rahmen" :standard-offen="true">
             <div class="grid gap-4 sm:grid-cols-2">
               <UiField label="Titel" pflicht class="sm:col-span-2">
@@ -502,7 +502,7 @@ function phaseGeaendert(phase: LessonPhaseDetail) {
           </UiCard>
         </div>
 
-        <aside class="space-y-4">
+        <aside class="min-w-0 space-y-4">
           <UiCard titel="Stundenmaterialien" icon="folder-open" einklappbar einklapp-id="stunde-materialien" :standard-offen="false">
             <template #kopf>
               <UiButton

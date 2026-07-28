@@ -59,6 +59,24 @@ const seitenFlaeche = ref<HTMLElement | null>(null)
 const seitenHoehePx = ref(0)
 let seitenResizeObserver: ResizeObserver | null = null
 
+const { pdfIframeUnterstuetzt } = usePdfIframeVorschau()
+/** Auf Smartphones kein iframe – Browser zeigen dort oft nur „Öffnen“ statt Inhalt. */
+const pdfAlsSeitenbild = computed(() => !pdfIframeUnterstuetzt.value)
+const pdfSeite = ref(1)
+const pdfSeitenFehler = ref(false)
+
+const pdfSeitenSkala = computed(() => {
+  if (!import.meta.client) return 1.5
+  return Math.min(2.5, Math.max(1.35, window.devicePixelRatio || 1.5))
+})
+
+const pdfSeitenBildUrl = computed(() => {
+  if (!props.assetId || !pdfAlsSeitenbild.value || pdfSeitenFehler.value) return null
+  return `/api/assets/${props.assetId}/page?page=${pdfSeite.value}&scale=${pdfSeitenSkala.value}`
+})
+
+const pdfLetzteSeite = computed(() => info.value?.pdfPageCount ?? null)
+
 type LoesungAutosaveDaten = {
   structuredSolution: StoredStructuredSolution | null
   reviewed: boolean
@@ -159,6 +177,8 @@ async function strukturInitialisieren() {
 
 watch(offen, (istOffen) => {
   if (istOffen) {
+    pdfSeite.value = 1
+    pdfSeitenFehler.value = false
     void laden()
     void strukturInitialisieren()
   }
@@ -167,9 +187,15 @@ watch(offen, (istOffen) => {
 watch(
   () => props.assetId,
   () => {
+    pdfSeite.value = 1
+    pdfSeitenFehler.value = false
     if (offen.value) void laden()
   },
 )
+
+watch(pdfSeite, () => {
+  pdfSeitenFehler.value = false
+})
 
 watch(
   () => props.struktur,
@@ -564,8 +590,66 @@ onBeforeUnmount(() => {
           </div>
 
           <template v-else>
+            <!-- PDF auf Mobile/Tablet: Seiten als PNG (iframe-PDF funktioniert dort nicht zuverlässig) -->
+            <div
+              v-if="info.mode === 'pdf' && pdfAlsSeitenbild"
+              class="flex min-h-0 w-full max-w-3xl flex-1 flex-col"
+            >
+              <div class="mb-2 flex shrink-0 flex-wrap items-center justify-center gap-2 text-white">
+                <UiButton
+                  variante="still"
+                  groesse="sm"
+                  icon="chevron-left"
+                  nur-icon
+                  class="!text-white hover:!bg-white/10"
+                  :disabled="pdfSeite <= 1"
+                  title="Vorherige Seite"
+                  @click="pdfSeite = Math.max(1, pdfSeite - 1)"
+                />
+                <span class="text-xs text-white/80">
+                  Seite {{ pdfSeite }}<template v-if="pdfLetzteSeite"> / {{ pdfLetzteSeite }}</template>
+                </span>
+                <UiButton
+                  variante="still"
+                  groesse="sm"
+                  icon="chevron-right"
+                  nur-icon
+                  class="!text-white hover:!bg-white/10"
+                  :disabled="pdfLetzteSeite ? pdfSeite >= pdfLetzteSeite : false"
+                  title="Nächste Seite"
+                  @click="pdfSeite += 1"
+                />
+              </div>
+
+              <div
+                v-if="pdfSeitenFehler"
+                class="max-w-md rounded-xl bg-surface px-6 py-8 text-center shadow-lg"
+              >
+                <UiIcon name="triangle-exclamation" class="mb-3 text-2xl text-warning" />
+                <p class="font-medium text-ink">Seite konnte nicht geladen werden</p>
+                <p class="mt-2 text-sm text-ink-muted">
+                  Die PDF-Vorschau ist auf diesem Gerät eingeschränkt. Du kannst die Datei herunterladen
+                  und in einer PDF-App öffnen.
+                </p>
+                <UiButton class="mt-4" variante="primaer" icon="download" @click="herunterladen">
+                  Herunterladen
+                </UiButton>
+              </div>
+
+              <div v-else class="min-h-0 flex-1 overflow-auto">
+                <img
+                  v-if="pdfSeitenBildUrl"
+                  :key="pdfSeitenBildUrl"
+                  :src="pdfSeitenBildUrl"
+                  :alt="`${anzeigeTitel} – Seite ${pdfSeite}`"
+                  class="mx-auto block w-full rounded-lg bg-white shadow-2xl"
+                  @error="pdfSeitenFehler = true"
+                >
+              </div>
+            </div>
+
             <iframe
-              v-if="info.mode === 'pdf' && info.inlineUrl"
+              v-else-if="info.mode === 'pdf' && info.inlineUrl"
               :src="info.inlineUrl"
               class="size-full max-h-full rounded-lg bg-white shadow-2xl"
               title="PDF-Vorschau"

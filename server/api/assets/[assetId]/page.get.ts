@@ -18,6 +18,8 @@ export default defineEventHandler(async (event) => {
   const assetId = parseOrThrow(uuidSchema, getRouterParam(event, 'assetId'))
   const query = getQuery(event)
   const page = Math.max(1, Math.min(40, Number(query.page ?? 1) || 1))
+  const scaleRaw = Number(query.scale ?? 1.35) || 1.35
+  const scale = Math.min(3, Math.max(1, scaleRaw))
 
   const [asset] = await useDatabase()
     .select({
@@ -40,7 +42,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const buffer = await readFile(resolveStoragePath(asset.storageKey))
-  const pages = await rasterizePdf(buffer, { page, scale: 1.35 })
+  const pages = await rasterizePdf(buffer, { page, scale })
   const target = pages[0]
   if (!target) {
     throw notFound('Die PDF-Seite')

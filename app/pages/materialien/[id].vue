@@ -463,8 +463,8 @@ const loesungBearbeitbar = computed(
         </LayoutAktionen>
       </header>
 
-      <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
-        <div class="space-y-5">
+      <div class="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
+        <div class="min-w-0 space-y-5">
           <UiCard
             v-if="hauptVorschau"
             :titel="istMoodleKurs ? 'Kursarchiv' : istH5p ? 'H5P-Paket' : 'Dokumentvorschau'"
@@ -829,7 +829,7 @@ const loesungBearbeitbar = computed(
           </UiCard>
         </div>
 
-        <aside class="space-y-4">
+        <aside class="min-w-0 space-y-4">
           <UiCard
             titel="Verwendung"
             icon="chalkboard-user"

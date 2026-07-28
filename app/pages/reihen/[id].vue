@@ -205,8 +205,8 @@ async function reiheLoeschen() {
         </LayoutAktionen>
       </header>
 
-      <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
-        <div class="space-y-5">
+      <div class="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <div class="min-w-0 space-y-5">
           <UiCard titel="Angaben" icon="pen-to-square" einklappbar einklapp-id="reihe-angaben" :standard-offen="true">
             <div class="grid gap-4 sm:grid-cols-2">
               <UiField label="Titel" pflicht class="sm:col-span-2">
@@ -330,7 +330,7 @@ async function reiheLoeschen() {
           </UiCard>
         </div>
 
-        <aside class="space-y-4">
+        <aside class="min-w-0 space-y-4">
           <UiCard titel="Reihenmaterialien" icon="folder-open" einklappbar einklapp-id="reihe-materialien" :standard-offen="false">
             <template #kopf>
               <UiButton
@@ -354,7 +354,7 @@ async function reiheLoeschen() {
               <li
                 v-for="mat in data.materials"
                 :key="mat.id"
-                class="flex items-center gap-2 rounded-lg border border-line px-2 py-2 text-sm"
+                class="flex min-w-0 items-center gap-2 rounded-lg border border-line px-2 py-2 text-sm"
                 :class="istMoodleKursMaterial(mat.materialType) && 'border-[#f98012]/30 bg-[#f98012]/5'"
               >
                 <UiIcon
@@ -370,7 +370,7 @@ async function reiheLoeschen() {
                 >
                   {{ mat.title }}
                 </NuxtLink>
-                <span class="text-xs text-ink-subtle">
+                <span class="hidden shrink-0 text-xs text-ink-subtle sm:inline">
                   {{ materialTypes.label(mat.materialType as never) }}
                   <template v-if="mat.variantLabel"> · {{ mat.variantLabel }}</template>
                 </span>

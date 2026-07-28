@@ -307,7 +307,7 @@
   }
 
   .karte {
-    @apply rounded-[--radius-card] border border-line bg-surface shadow-[--shadow-soft];
+    @apply min-w-0 max-w-full rounded-[--radius-card] border border-line bg-surface shadow-[--shadow-soft];
     transition:
       box-shadow 0.25s var(--ease-smooth),
       border-color 0.2s var(--ease-smooth),

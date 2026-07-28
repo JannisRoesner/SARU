@@ -22,6 +22,8 @@ defineProps<{
 
 <style scoped>
 .landing-fenster {
+  width: 100%;
+  max-width: 100%;
   overflow: hidden;
   border-radius: 0.9rem;
   border: 1px solid var(--surface-line-strong);

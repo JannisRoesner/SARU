@@ -239,9 +239,9 @@ const mehr = [
             <article
               v-for="f in features"
               :key="f.id"
-              class="grid items-center gap-8 lg:grid-cols-2 lg:gap-12"
+              class="grid min-w-0 items-center gap-8 lg:grid-cols-2 lg:gap-12"
             >
-              <div :class="f.seite === 'links' ? 'lg:order-2' : ''">
+              <div class="min-w-0" :class="f.seite === 'links' ? 'lg:order-2' : ''">
                 <span class="mb-4 flex size-11 items-center justify-center rounded-xl bg-primary-soft text-primary-strong">
                   <UiIcon :name="f.icon" fest />
                 </span>
@@ -253,7 +253,7 @@ const mehr = [
                 </p>
               </div>
 
-              <div :class="f.seite === 'links' ? 'lg:order-1' : ''" aria-hidden="true">
+              <div class="min-w-0 overflow-hidden" :class="f.seite === 'links' ? 'lg:order-1' : ''" aria-hidden="true">
                 <StartLandingFenster :titel="f.fensterTitel">
                   <!-- Materialien -->
                   <div v-if="f.id === 'materialien'" class="space-y-2.5 p-4 sm:p-5">
@@ -447,15 +447,15 @@ const mehr = [
                   </div>
 
                   <!-- Lösungen & KI -->
-                  <div v-else-if="f.id === 'loesungen-ki'" class="space-y-3 p-4 sm:p-5">
+                  <div v-else-if="f.id === 'loesungen-ki'" class="min-w-0 space-y-3 p-4 sm:p-5">
                     <span class="landing-ki-optional-chip">
-                      <UiIcon name="wand-magic-sparkles" fest />
-                      Optional · KI in Einstellungen aktivierbar
+                      <UiIcon name="wand-magic-sparkles" fest class="shrink-0" />
+                      <span class="min-w-0">Optional · KI in Einstellungen aktivierbar</span>
                     </span>
 
                     <!-- Arbeitsblatt: Ausgangsmaterial -->
                     <div class="overflow-hidden rounded-xl border border-line bg-surface shadow-soft">
-                      <div class="flex items-start justify-between gap-2 border-b border-line bg-surface-sunken/40 px-3 py-2.5">
+                      <div class="flex flex-col gap-2 border-b border-line bg-surface-sunken/40 px-3 py-2.5 sm:flex-row sm:items-start sm:justify-between">
                         <div class="min-w-0">
                           <p class="text-[0.65rem] font-medium tracking-[0.14em] text-ink-subtle uppercase">
                             Arbeitsblatt
@@ -474,17 +474,17 @@ const mehr = [
                             </UiBadge>
                           </div>
                         </div>
-                        <span class="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg border border-line bg-surface px-2 text-[0.65rem] font-medium text-ink">
-                          <UiIcon name="wand-magic-sparkles" fest class="text-ki-strong" />
-                          Musterlösung erstellen
+                        <span class="inline-flex h-7 w-fit max-w-full shrink-0 items-center gap-1 rounded-lg border border-line bg-surface px-2 text-[0.65rem] font-medium text-ink">
+                          <UiIcon name="wand-magic-sparkles" fest class="shrink-0 text-ki-strong" />
+                          <span class="truncate">Musterlösung erstellen</span>
                         </span>
                       </div>
 
                       <!-- KI-Modal (wie in [id].vue) -->
-                      <div class="landing-ki-modal mx-3 my-2.5 rounded-lg border border-line bg-surface p-3 shadow-soft">
-                        <div class="mb-2 flex items-center gap-2">
-                          <UiIcon name="wand-magic-sparkles" class="text-ki-strong" />
-                          <p class="text-xs font-semibold text-ink">Musterlösung erstellen</p>
+                      <div class="landing-ki-modal mx-3 my-2.5 min-w-0 rounded-lg border border-line bg-surface p-3 shadow-soft">
+                        <div class="mb-2 flex min-w-0 items-center gap-2">
+                          <UiIcon name="wand-magic-sparkles" class="shrink-0 text-ki-strong" />
+                          <p class="min-w-0 text-xs font-semibold text-ink">Musterlösung erstellen</p>
                         </div>
                         <p class="mb-2 text-[0.65rem] leading-relaxed text-ink-muted">
                           KI wertet die Quelldatei aus und erzeugt ein herunterladbares Dokument — als verknüpfte Musterlösung.
@@ -493,16 +493,16 @@ const mehr = [
                           Zusätzliche Anweisung
                           <span class="font-normal text-ink-subtle">(optional)</span>
                         </p>
-                        <div class="rounded-lg border border-line bg-surface-sunken px-3 py-2 text-[0.7rem] leading-relaxed text-ink-subtle">
+                        <div class="rounded-lg border border-line bg-surface-sunken px-3 py-2 text-[0.7rem] leading-relaxed break-words text-ink-subtle">
                           Lücken knapp ausfüllen, Erwartungshorizont für Klasse 8 …
                         </div>
-                        <div class="mt-2.5 flex justify-end gap-1.5">
+                        <div class="mt-2.5 flex flex-wrap justify-end gap-1.5">
                           <span class="inline-flex h-7 items-center rounded-lg px-2.5 text-[0.65rem] text-ink-muted">
                             Abbrechen
                           </span>
-                          <span class="inline-flex h-7 items-center gap-1 rounded-lg bg-primary-solid px-2.5 text-[0.65rem] font-medium text-primary-contrast">
-                            <UiIcon name="wand-magic-sparkles" fest />
-                            Musterlösung erstellen
+                          <span class="inline-flex h-7 max-w-full items-center gap-1 rounded-lg bg-primary-solid px-2.5 text-[0.65rem] font-medium text-primary-contrast">
+                            <UiIcon name="wand-magic-sparkles" fest class="shrink-0" />
+                            <span class="truncate">Musterlösung erstellen</span>
                           </span>
                         </div>
                       </div>
@@ -942,6 +942,7 @@ const mehr = [
 
 .landing-ki-optional-chip {
   display: inline-flex;
+  max-width: 100%;
   align-items: center;
   gap: 0.35rem;
   border-radius: 999px;

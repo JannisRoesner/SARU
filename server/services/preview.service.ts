@@ -1,4 +1,5 @@
 import { eq } from 'drizzle-orm'
+import { readFile } from 'node:fs/promises'
 import { useDatabase } from '../database/client'
 import { materialAssets, type User } from '../database/schema'
 import { hasRole } from '../utils/auth'
@@ -11,6 +12,8 @@ import {
 } from './collabora.service'
 import { getCollaboraSettings } from './settings.service'
 import { canHaveThumbnail } from './thumbnail.service'
+import { getPdfPageCount } from './ai/rasterize'
+import { resolveStoragePath } from './storage.service'
 
 export type PreviewMode = 'pdf' | 'bild' | 'text' | 'collabora' | 'download' | 'link' | 'keine'
 
@@ -31,6 +34,8 @@ export interface AssetPreviewInfo {
   /** true, wenn der aktuelle Nutzer Office-Dokumente bearbeiten darf. */
   canWrite: boolean
   hinweis: string | null
+  /** PDF: Seitenzahl für Bild-Vorschau (Mobile). */
+  pdfPageCount: number | null
 }
 
 /**
@@ -52,7 +57,10 @@ export async function getAssetPreviewInfo(
   const title = asset.title || asset.fileName || asset.url || 'Anhang'
   const downloadUrl = `/api/assets/${asset.id}/download`
   const canWrite = hasRole(user, 'lehrkraft')
-  const base: Omit<AssetPreviewInfo, 'mode' | 'inlineUrl' | 'collaboraUrl' | 'hinweis' | 'thumbnailUrl'> = {
+  const base: Omit<
+    AssetPreviewInfo,
+    'mode' | 'inlineUrl' | 'collaboraUrl' | 'hinweis' | 'thumbnailUrl' | 'pdfPageCount'
+  > = {
     assetId: asset.id,
     title,
     fileName: asset.fileName,
@@ -71,6 +79,7 @@ export async function getAssetPreviewInfo(
       thumbnailUrl: null,
       collaboraUrl: null,
       hinweis: null,
+      pdfPageCount: null,
     }
   }
 
@@ -82,6 +91,15 @@ export async function getAssetPreviewInfo(
   const mime = asset.mimeType ?? ''
 
   if (mime === 'application/pdf' || (asset.fileName ?? '').toLowerCase().endsWith('.pdf')) {
+    let pdfPageCount: number | null = null
+    if (asset.storageKey) {
+      try {
+        const buffer = await readFile(resolveStoragePath(asset.storageKey))
+        pdfPageCount = await getPdfPageCount(buffer)
+      } catch {
+        pdfPageCount = null
+      }
+    }
     return {
       ...base,
       mode: 'pdf',
@@ -89,6 +107,7 @@ export async function getAssetPreviewInfo(
       thumbnailUrl: thumb,
       collaboraUrl: null,
       hinweis: null,
+      pdfPageCount,
     }
   }
 
@@ -100,6 +119,7 @@ export async function getAssetPreviewInfo(
       thumbnailUrl: thumb,
       collaboraUrl: null,
       hinweis: null,
+      pdfPageCount: null,
     }
   }
 
@@ -111,6 +131,7 @@ export async function getAssetPreviewInfo(
       thumbnailUrl: null,
       collaboraUrl: null,
       hinweis: null,
+      pdfPageCount: null,
     }
   }
 
@@ -161,6 +182,7 @@ export async function getAssetPreviewInfo(
         thumbnailUrl: thumb,
         collaboraUrl,
         hinweis: hinweise.length ? hinweise.join(' ') : null,
+        pdfPageCount: null,
       }
     }
 
@@ -174,6 +196,7 @@ export async function getAssetPreviewInfo(
         process.env.NODE_ENV === 'production'
           ? 'Office-Vorschau konnte nicht geladen werden. Bitte wenden Sie sich an die Administration. Der Download bleibt verfügbar.'
           : 'Collabora ist konfiguriert, aber die Discovery-URL ist nicht erreichbar. Port 9980 antwortet oft nur auf https (trotz ssl.enable=false). Basis-URL prüfen und Collabora-Container neu starten. Der Download bleibt verfügbar.',
+      pdfPageCount: null,
     }
   }
 
@@ -186,6 +209,7 @@ export async function getAssetPreviewInfo(
       collaboraUrl: null,
       hinweis:
         'Für Office-Dokumente kann unter Einstellungen → Office-Vorschau eine Collabora-Online-URL hinterlegt werden. Bis dahin steht nur der Download zur Verfügung.',
+      pdfPageCount: null,
     }
   }
 
@@ -196,5 +220,6 @@ export async function getAssetPreviewInfo(
     thumbnailUrl: thumb,
     collaboraUrl: null,
     hinweis: 'Für diesen Dateityp ist keine In-App-Vorschau verfügbar.',
+    pdfPageCount: null,
   }
 }
