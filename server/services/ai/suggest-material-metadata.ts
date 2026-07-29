@@ -12,6 +12,7 @@ import {
 } from '#shared/utils/schulfaecher'
 import { chatCompletion } from './client'
 import type { AiSettings } from '../settings.service'
+import { extractJsonObject } from '../../utils/json-parse'
 import { createLogger } from '../../utils/logger'
 
 const log = createLogger('ai:suggest-metadata')
@@ -160,10 +161,15 @@ Antworte ausschließlich mit einem JSON-Objekt (kein Markdown):
   "tagNames": ["max. 5 kurze Schlagwörter zu Inhalten/Themen"],
   "learningObjectives": ["max. 4 kurze Lernziele auf Deutsch"],
   "description": "1–2 Sätze Kurzbeschreibung auf Deutsch",
-  "contentSummary": "Markdown-Zusammenfassung (3–8 Sätze oder Stichpunkte) des Inhalts – keine Volltext-Abschrift"
+  "contentSummary": "Kurze Markdown-Zusammenfassung (max. 4 Sätze oder Stichpunkte) – keine Volltext-Abschrift"
 }`
 
+  const maxTokens = Math.min(Math.max(options.settings.maxOutputTokens || 2000, 2000), 4000)
+
   let lastError: unknown
+  let lastRawResponse = ''
+  let lastOutputTokens: number | undefined
+
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const result = await chatCompletion(
@@ -174,24 +180,37 @@ Antworte ausschließlich mit einem JSON-Objekt (kein Markdown):
             parts: [
               {
                 type: 'text',
-                text: 'Du antwortest nur mit gültigem JSON ohne Erklärungstext.',
+                text:
+                  'Du antwortest ausschließlich mit einem gültigen JSON-Objekt. Kein Markdown, kein Fließtext davor oder danach.',
               },
             ],
           },
           { role: 'user', parts: [{ type: 'text', text: prompt }] },
         ],
-        { temperature: 0.2, maxOutputTokens: 1200 },
+        { temperature: 0.1, maxOutputTokens: maxTokens, jsonMode: true },
       )
+
+      lastRawResponse = result.text
+      lastOutputTokens = result.outputTokens
 
       const parsed = extractJsonObject(result.text)
       if (!parsed) {
         if (attempt === 0) {
           log.warn('KI-Metadaten: ungültige JSON-Antwort, wiederhole …', {
             fileName: options.fileName,
+            antwortLaenge: result.text.length,
+            outputTokens: result.outputTokens,
+            antwortVorschau: result.text.slice(0, 400),
           })
           await pause(1500)
           continue
         }
+        log.warn('KI-Metadaten: JSON konnte nicht gelesen werden', {
+          fileName: options.fileName,
+          antwortLaenge: result.text.length,
+          outputTokens: result.outputTokens,
+          antwortVorschau: result.text.slice(0, 600),
+        })
         return fallback
       }
 
@@ -238,6 +257,9 @@ Antworte ausschließlich mit einem JSON-Objekt (kein Markdown):
   log.warn('KI-Metadaten-Vorschlag endgültig fehlgeschlagen, Dateiname wird verwendet', {
     fileName: options.fileName,
     error: lastError,
+    antwortLaenge: lastRawResponse.length,
+    outputTokens: lastOutputTokens,
+    antwortVorschau: lastRawResponse.slice(0, 600),
   })
   return fallback
 }
@@ -257,17 +279,6 @@ function mergeSubjectNames(
     result.unshift(fromContext)
   }
   return result.slice(0, 3)
-}
-
-function extractJsonObject(text: string): Record<string, unknown> | null {
-  const start = text.indexOf('{')
-  const end = text.lastIndexOf('}')
-  if (start < 0 || end <= start) return null
-  try {
-    return JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>
-  } catch {
-    return null
-  }
 }
 
 function normalizeMaterialType(value: unknown, fallback: MaterialType): MaterialType {

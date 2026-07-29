@@ -113,14 +113,20 @@ interface ChatCompletionResponse {
 export async function chatCompletion(
   settings: AiSettings,
   messages: ChatMessage[],
-  options: { model?: string; temperature?: number; maxOutputTokens?: number } = {},
+  options: {
+    model?: string
+    temperature?: number
+    maxOutputTokens?: number
+    /** Erzwingt JSON-Ausgabe (Ollama: format=json, sonst response_format). */
+    jsonMode?: boolean
+  } = {},
 ): Promise<ChatResult> {
   const model = options.model || settings.chatModel
   if (!model) {
     throw appError('KI_NICHT_KONFIGURIERT', 'Es ist kein Sprachmodell konfiguriert.')
   }
 
-  const body = {
+  const body: Record<string, unknown> = {
     model,
     temperature: options.temperature ?? settings.temperature,
     max_tokens: options.maxOutputTokens ?? settings.maxOutputTokens,
@@ -128,6 +134,14 @@ export async function chatCompletion(
       role: message.role,
       content: serializeParts(message.parts, settings.provider),
     })),
+  }
+
+  if (options.jsonMode) {
+    if (settings.provider === 'ollama') {
+      body.format = 'json'
+    } else {
+      body.response_format = { type: 'json_object' }
+    }
   }
 
   const started = Date.now()
