@@ -13,6 +13,9 @@ export interface BulkUploadFileSuggestion {
   materialType: MaterialType
   tagNames: string[]
   description: string
+  learningObjectives?: string[]
+  contentSummary?: string
+  schoolForm?: string | null
   /** true, wenn die Vorschläge vom Sprachmodell stammen. */
   aiUsed: boolean
 }
@@ -23,6 +26,9 @@ export interface BulkUploadDetectedFile {
   sizeBytes: number
   checksum: string
   stagingPath: string
+  /** Sidecar mit dem einmalig extrahierten Volltext (Textebene oder Vision). */
+  extractedTextKey?: string | null
+  extractionMethod?: 'text_layer' | 'vision' | 'none'
   pageCount: number | null
   hasText: boolean
   /** Kurzer Ausschnitt für die UI (nicht der volle Extrakt). */
@@ -44,6 +50,8 @@ export interface BulkUploadRecordDecision {
   materialType?: MaterialType
   description?: string
   tagNames?: string[]
+  learningObjectives?: string[]
+  content?: string
   action?: 'erstellen' | 'ueberspringen'
   duplicateOfId?: string | null
 }

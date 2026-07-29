@@ -19,6 +19,13 @@ import {
   createMaterial,
   deleteMaterial,
 } from '../material.service'
+import { ensureExtractedText } from '../ai/document-text'
+import {
+  MATERIAL_METADATA_PROMPT_VERSION,
+  suggestMaterialMetadata,
+} from '../ai/suggest-material-metadata'
+import { isExtractable } from '../extraction.service'
+import { getAiSettings } from '../settings.service'
 import { attachMaterial, createLesson, deleteLesson } from '../lesson.service'
 import { createSeries, deleteSeries } from '../series.service'
 import { deleteFile, resolveStoragePath, storeStagingFile } from '../storage.service'
@@ -353,6 +360,7 @@ export async function commitImport(
     sizeBytes: buffer.length,
   }
   const parsed = await adapter.parse(source)
+  const aiSettings = await getAiSettings()
 
   const stats: ImportStats = {
     reihen: 0,
@@ -514,17 +522,70 @@ export async function commitImport(
           }
 
           if (!materialId) {
+            const fallbackTitle = titleFromFileName(attachment.fileName)
+            const fallbackType = guessMaterialType(attachment.fileName)
+            const fallbackDescription = `Aus dem Schulportal importiert (Termin ${lesson.date ?? 'ohne Datum'}).`
+            const lessonContext = [
+              lesson.topic ? `Thema: ${lesson.topic}` : null,
+              lesson.content ? `Inhalt: ${lesson.content}` : null,
+              lesson.date ? `Datum: ${lesson.date}` : null,
+            ]
+              .filter(Boolean)
+              .join('\n')
+
+            let extractionText = ''
+            let extractionMethod: 'text_layer' | 'vision' | 'none' = 'none'
+            let pageCount: number | null = null
+
+            if (isExtractable(attachment.fileName)) {
+              const ensured = await ensureExtractedText(
+                content,
+                attachment.fileName,
+                aiSettings,
+              )
+              extractionText = ensured.text
+              extractionMethod = ensured.method
+              pageCount = ensured.pageCount ?? null
+            }
+
+            const suggestion = await suggestMaterialMetadata({
+              fileName: attachment.fileName,
+              extractedText: extractionText,
+              settings: aiSettings,
+              context: {
+                subjectLabel: mapping.subjectName,
+                gradeLevel: mappedGradeLevel,
+                schoolForm: mapping.schoolForm,
+                defaultMaterialType: fallbackType as never,
+                lessonContext,
+              },
+            })
+
             materialId = await createMaterial(
               {
-                title: titleFromFileName(attachment.fileName),
-                description: `Aus dem Schulportal importiert (Termin ${lesson.date ?? 'ohne Datum'}).`,
-                materialType: guessMaterialType(attachment.fileName),
+                title: suggestion.title || fallbackTitle,
+                description: suggestion.aiUsed && suggestion.description.trim()
+                  ? suggestion.description
+                  : fallbackDescription,
+                content: suggestion.contentSummary?.trim() || null,
+                materialType: (suggestion.materialType || fallbackType) as never,
                 origin: 'import',
-                schoolForm: mapping.schoolForm ?? null,
+                schoolForm:
+                  suggestion.schoolForm ?? mapping.schoolForm ?? null,
                 subjectIds: subjectId ? [subjectId] : [],
                 topicIds: topicId ? [topicId] : [],
                 learningGroupIds: learningGroupId ? [learningGroupId] : [],
                 gradeLevels: mappedGradeLevel ? [mappedGradeLevel] : [],
+                tagNames: suggestion.tagNames ?? [],
+                learningObjectives: suggestion.learningObjectives ?? [],
+                aiMeta: suggestion.aiUsed
+                  ? {
+                      generatedAt: new Date().toISOString(),
+                      promptVersion: MATERIAL_METADATA_PROMPT_VERSION,
+                      sourceFileName: attachment.fileName,
+                      extractionMethod,
+                    }
+                  : null,
               },
               userId,
             )
@@ -538,7 +599,18 @@ export async function commitImport(
             await addFileAsset(
               variantId,
               { buffer: content, fileName: attachment.fileName },
-              { role: 'haupt' },
+              {
+                role: 'haupt',
+                preExtracted: extractionText.trim()
+                  ? {
+                      text: extractionText,
+                      status: 'erfolgreich',
+                      pageCount,
+                      method: extractionMethod,
+                    }
+                  : undefined,
+                skipContentAutofill: true,
+              },
             )
 
             materialByChecksum.set(checksum, materialId)

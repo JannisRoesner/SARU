@@ -100,8 +100,8 @@ async function analysieren() {
 <template>
   <div>
     <LayoutSeitenkopf
-      zurueck-to="/materialien"
-      zurueck-label="Alle Materialien"
+      zurueck-to="/materialien/neu"
+      zurueck-label="Wege zum Anlegen"
       kicker="Materialien"
       titel="Stapel-Upload"
       untertitel="Mehrere PDFs hochladen, gemeinsame Einordnung setzen, KI-Vorschläge prüfen und einmal anlegen."

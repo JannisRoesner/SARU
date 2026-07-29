@@ -31,6 +31,8 @@ interface DetectedFile {
     materialType: MaterialType
     tagNames: string[]
     description: string
+    learningObjectives?: string[]
+    contentSummary?: string
     aiUsed: boolean
   }
   warnings: string[]
@@ -58,6 +60,8 @@ interface RunOverview {
         materialType?: MaterialType
         description?: string
         tagNames?: string[]
+        learningObjectives?: string[]
+        content?: string
         action?: string
         duplicateOfId?: string | null
       }
@@ -91,6 +95,8 @@ const mapping = reactive({
       materialType: MaterialType
       description: string
       tagNames: string[]
+      learningObjectives: string[]
+      content: string
       action: string
       duplicateOfId: string | null
     }
@@ -120,6 +126,10 @@ watch(
         materialType: existing?.materialType ?? file.suggestions.materialType,
         description: existing?.description ?? file.suggestions.description ?? '',
         tagNames: [...(existing?.tagNames ?? file.suggestions.tagNames ?? [])],
+        learningObjectives: [
+          ...(existing?.learningObjectives ?? file.suggestions.learningObjectives ?? []),
+        ],
+        content: existing?.content ?? file.suggestions.contentSummary ?? '',
         action: existing?.action ?? 'erstellen',
         duplicateOfId: existing?.duplicateOfId ?? file.duplicate?.materialId ?? null,
       }
@@ -393,6 +403,15 @@ function alleWaehlen(wert: boolean) {
                         </UiField>
                         <UiField label="Kurzbeschreibung" class="sm:col-span-2">
                           <UiInput v-model="mapping.records[file.sourceRef]!.description" />
+                        </UiField>
+                        <UiField label="Lernziele" class="sm:col-span-2">
+                          <UiTagInput
+                            v-model="mapping.records[file.sourceRef]!.learningObjectives"
+                            platzhalter="Lernziel hinzufügen …"
+                          />
+                        </UiField>
+                        <UiField label="Inhalt / Zusammenfassung" class="sm:col-span-2">
+                          <UiInput v-model="mapping.records[file.sourceRef]!.content" />
                         </UiField>
                       </div>
                     </template>

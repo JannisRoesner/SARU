@@ -21,7 +21,16 @@ import { sanitizeText } from '../utils/validation'
 import { getMaterialDetail, type MaterialDetail } from '../repositories/material.repository'
 import { deleteFile, extensionOf, storeFile } from './storage.service'
 import { deleteThumbnail, queueThumbnailGeneration } from './thumbnail.service'
-import { extractTextFromStorage, isExtractable } from './extraction.service'
+import { isExtractable } from './extraction.service'
+import {
+  ensureExtractedTextFromStorage,
+  type ExtractionMethod,
+} from './ai/document-text'
+import {
+  MATERIAL_METADATA_PROMPT_VERSION,
+  suggestMaterialMetadata,
+} from './ai/suggest-material-metadata'
+import { getAiSettings } from './settings.service'
 import { queueReindex, removeFromIndex } from './search/indexer'
 import { resolveCompetencyIds, resolveTagIds } from './taxonomy.service'
 import {
@@ -531,7 +540,22 @@ async function isStorageKeyInUse(storageKey: string, db: Database): Promise<bool
 export async function addFileAsset(
   variantId: string,
   file: { buffer: Buffer; fileName: string },
-  options: { role?: 'haupt' | 'anhang'; title?: string | null } = {},
+  options: {
+    role?: 'haupt' | 'anhang'
+    title?: string | null
+    /**
+     * Bereits extrahierter Text (z. B. aus Stapel-/KI-Analyse).
+     * Verhindert erneutes Vision/OCR auf derselben Datei.
+     */
+    preExtracted?: {
+      text: string
+      status?: 'erfolgreich' | 'fehlgeschlagen' | 'nicht_unterstuetzt'
+      pageCount?: number | null
+      method?: ExtractionMethod
+    }
+    /** Keine automatische Inhaltszusammenfassung (bereits beim Anlegen gesetzt). */
+    skipContentAutofill?: boolean
+  } = {},
   db: Database = useDatabase(),
 ): Promise<string> {
   const [variant] = await db
@@ -573,6 +597,14 @@ export async function addFileAsset(
     .from(materialAssets)
     .where(eq(materialAssets.variantId, variantId))
 
+  const pre = options.preExtracted
+  const hasSeed = Boolean(pre?.text?.trim())
+  const seedStatus = hasSeed
+    ? (pre!.status ?? 'erfolgreich')
+    : isExtractable(stored.fileName)
+      ? 'ausstehend'
+      : 'nicht_unterstuetzt'
+
   const [created] = await db
     .insert(materialAssets)
     .values({
@@ -586,12 +618,21 @@ export async function addFileAsset(
       sizeBytes: stored.sizeBytes,
       checksum: stored.checksum,
       sortOrder: (highest ?? -1) + 1,
-      extractionStatus: isExtractable(stored.fileName) ? 'ausstehend' : 'nicht_unterstuetzt',
+      extractionStatus: seedStatus,
+      extractedText: hasSeed ? pre!.text : null,
+      pageCount: hasSeed ? (pre!.pageCount ?? null) : null,
+      extractionError: null,
     })
     .returning({ id: materialAssets.id })
 
-  // Textextraktion und Miniatur im Hintergrund – Kursarchive haben keine Dokumentvorschau.
-  void extractAssetText(created!.id, variant.materialId)
+  if (hasSeed) {
+    queueReindex('material', variant.materialId)
+  } else {
+    // Textextraktion und ggf. Inhaltszusammenfassung im Hintergrund.
+    void extractAssetText(created!.id, variant.materialId, {
+      skipContentAutofill: options.skipContentAutofill,
+    })
+  }
   if (!istKursarchivErweiterung(ext)) {
     queueThumbnailGeneration(created!.id, stored.mimeType, stored.fileName)
   }
@@ -600,7 +641,11 @@ export async function addFileAsset(
 }
 
 /** Extrahiert den Text einer Datei und aktualisiert anschließend den Suchindex. */
-export async function extractAssetText(assetId: string, materialId?: string): Promise<void> {
+export async function extractAssetText(
+  assetId: string,
+  materialId?: string,
+  options: { skipContentAutofill?: boolean } = {},
+): Promise<void> {
   const db = useDatabase()
   try {
     const [asset] = await db
@@ -611,12 +656,27 @@ export async function extractAssetText(assetId: string, materialId?: string): Pr
     if (!asset?.storageKey || !asset.fileName) return
     if (!isExtractable(asset.fileName)) return
 
+    // Bereits vorhandener Extrakt wiederverwenden (z. B. nach Seed).
+    if (asset.extractionStatus === 'erfolgreich' && asset.extractedText?.trim()) {
+      const targetId = await resolveMaterialId(asset.variantId, materialId, db)
+      if (targetId && !options.skipContentAutofill) {
+        await maybeAutofillContent(targetId, asset.fileName, asset.extractedText)
+      }
+      if (targetId) queueReindex('material', targetId)
+      return
+    }
+
     await db
       .update(materialAssets)
       .set({ extractionStatus: 'laeuft' })
       .where(eq(materialAssets.id, assetId))
 
-    const result = await extractTextFromStorage(asset.storageKey, asset.fileName)
+    const settings = await getAiSettings()
+    const result = await ensureExtractedTextFromStorage(
+      asset.storageKey,
+      asset.fileName,
+      settings,
+    )
 
     await db
       .update(materialAssets)
@@ -628,15 +688,11 @@ export async function extractAssetText(assetId: string, materialId?: string): Pr
       })
       .where(eq(materialAssets.id, assetId))
 
-    const targetId =
-      materialId ??
-      (
-        await db
-          .select({ materialId: materialVariants.materialId })
-          .from(materialVariants)
-          .where(eq(materialVariants.id, asset.variantId))
-          .limit(1)
-      )[0]?.materialId
+    const targetId = await resolveMaterialId(asset.variantId, materialId, db)
+
+    if (targetId && result.text.trim() && !options.skipContentAutofill) {
+      await maybeAutofillContent(targetId, asset.fileName, result.text, result.method)
+    }
 
     if (targetId) queueReindex('material', targetId)
   } catch (error) {
@@ -653,6 +709,70 @@ export async function extractAssetText(assetId: string, materialId?: string): Pr
       .where(eq(materialAssets.id, assetId))
       .catch(() => {})
   }
+}
+
+async function resolveMaterialId(
+  variantId: string,
+  materialId: string | undefined,
+  db: Database,
+): Promise<string | undefined> {
+  if (materialId) return materialId
+  return (
+    await db
+      .select({ materialId: materialVariants.materialId })
+      .from(materialVariants)
+      .where(eq(materialVariants.id, variantId))
+      .limit(1)
+  )[0]?.materialId
+}
+
+/**
+ * Füllt `materials.content` mit einer KI-Zusammenfassung, wenn das Feld noch leer ist.
+ * Nutzt den bereits extrahierten Text – kein erneutes Vision/OCR.
+ */
+async function maybeAutofillContent(
+  materialId: string,
+  fileName: string,
+  extractedText: string,
+  extractionMethod?: ExtractionMethod,
+): Promise<void> {
+  const db = useDatabase()
+  const [material] = await db
+    .select({
+      content: materials.content,
+      aiMeta: materials.aiMeta,
+    })
+    .from(materials)
+    .where(eq(materials.id, materialId))
+    .limit(1)
+
+  if (!material || material.content?.trim()) return
+
+  const settings = await getAiSettings()
+  if (!settings.enabled || !settings.chatModel) return
+
+  const suggestion = await suggestMaterialMetadata({
+    fileName,
+    extractedText,
+    settings,
+  })
+  if (!suggestion.aiUsed || !suggestion.contentSummary.trim()) return
+
+  const previous = (material.aiMeta as AiMeta | null) ?? {}
+  await db
+    .update(materials)
+    .set({
+      content: suggestion.contentSummary,
+      updatedAt: new Date(),
+      aiMeta: {
+        ...previous,
+        generatedAt: previous.generatedAt ?? new Date().toISOString(),
+        promptVersion: previous.promptVersion ?? MATERIAL_METADATA_PROMPT_VERSION,
+        extractionMethod: extractionMethod ?? previous.extractionMethod,
+        sourceFileName: previous.sourceFileName ?? fileName,
+      },
+    })
+    .where(eq(materials.id, materialId))
 }
 
 export async function addLinkAsset(

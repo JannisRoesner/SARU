@@ -125,21 +125,12 @@ async function anlegen() {
 <template>
   <div class="mx-auto max-w-3xl">
     <LayoutSeitenkopf
-      zurueck-to="/materialien"
-      zurueck-label="Alle Materialien"
+      zurueck-to="/materialien/neu"
+      zurueck-label="Wege zum Anlegen"
       kicker="Materialien"
       titel="Moodle-Kurs anlegen"
       untertitel="Lade ein fertiges Kursarchiv (.mbz oder .imscc) hoch, verknüpfe es mit einer Reihe und stelle es später im SchulMoodle wieder her."
-    >
-      <template #aktionen>
-        <UiButton to="/materialien/neu" variante="sekundaer" icon="file-lines">
-          Material anlegen
-        </UiButton>
-        <UiButton to="/materialien/stapel" variante="sekundaer" icon="layer-group">
-          Stapel-Upload
-        </UiButton>
-      </template>
-    </LayoutSeitenkopf>
+    />
 
     <form class="space-y-5" @submit.prevent="anlegen">
       <UiCard titel="Kursarchiv (.mbz / .imscc)" icon="graduation-cap">

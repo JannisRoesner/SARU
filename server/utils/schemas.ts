@@ -343,11 +343,28 @@ export const bulkUploadMappingSchema = z.object({
         materialType: z.enum(MATERIAL_TYPES).optional(),
         description: z.string().max(2000).optional(),
         tagNames: z.array(z.string().min(1).max(120)).max(12).optional(),
+        learningObjectives: z.array(z.string().min(1).max(500)).max(12).optional(),
+        content: z.string().max(20_000).optional(),
         action: z.enum(['erstellen', 'ueberspringen']).default('erstellen'),
         duplicateOfId: uuidSchema.nullish(),
       }),
     )
     .optional(),
+})
+
+export const aiMaterialCreateCommitSchema = z.object({
+  title: z.string().min(1, 'Bitte einen Titel angeben.').max(300),
+  description: nullableText(5000),
+  content: nullableText(20_000),
+  materialType: z.enum(MATERIAL_TYPES).default('arbeitsblatt'),
+  schoolForm: z.enum(SCHOOL_FORMS).nullish(),
+  subjectIds: idList,
+  subjectName: z.string().max(120).optional(),
+  gradeLevels: z.array(gradeLevelSchema).max(16).optional(),
+  tagNames: nameList,
+  learningObjectives: objectives,
+  source: nullableText(2000),
+  author: nullableText(300),
 })
 
 // --------------------------------------------------------------- Einstellungen

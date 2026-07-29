@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import { desc, eq, ne, sql } from 'drizzle-orm'
+import { and, desc, eq, ne, sql } from 'drizzle-orm'
 import { oeffentlicheFehlermeldung } from '#shared/utils/public-error'
 import { normalizeGradeLevel } from '#shared/utils/jahrgangsstufen'
 import type { MaterialType } from '#shared/types/domain'
@@ -15,7 +15,12 @@ import { sha256 } from '../../utils/crypto'
 import { createLogger } from '../../utils/logger'
 import { findAttachmentDuplicates } from '../import/duplicates'
 import { addFileAsset, createMaterial, deleteMaterial } from '../material.service'
-import { extractText } from '../extraction.service'
+import {
+  ensureExtractedText,
+  readExtractedTextSidecar,
+  storeExtractedTextSidecar,
+} from '../ai/document-text'
+import { MATERIAL_METADATA_PROMPT_VERSION } from '../ai/suggest-material-metadata'
 import { getAiSettings } from '../settings.service'
 import {
   deleteFile,
@@ -29,6 +34,7 @@ import {
 import { getOrCreateSubject } from '../taxonomy.service'
 import { waitForIndex } from '../search/indexer'
 import { suggestFileMetadata, titleFromFileName } from './suggest-metadata'
+import { AI_CREATE_ADAPTER_ID } from '../ai/material-create'
 import {
   BULK_PDF_ADAPTER_ID,
   BULK_PDF_ADAPTER_LABEL,
@@ -130,12 +136,23 @@ export async function analyzeBulkPdfUpload(
       const stagingPath = await storeStagingFile(file.buffer, file.fileName)
       stagingPaths.push(stagingPath)
 
-      const extraction = await extractText(file.buffer, file.fileName)
+      const extraction = await ensureExtractedText(file.buffer, file.fileName, settings)
       const hasText = Boolean(extraction.text.trim())
       const warnings: string[] = []
 
+      let extractedTextKey: string | null = null
+      if (hasText) {
+        extractedTextKey = await storeExtractedTextSidecar(stagingPath, extraction.text)
+      }
+
       if (!hasText) {
-        warnings.push('Keine Textebene gefunden (vermutlich Scan). Titel ggf. manuell prüfen.')
+        warnings.push(
+          settings.enabled
+            ? 'Kein Text gefunden (weder Textebene noch Vision). Titel ggf. manuell prüfen.'
+            : 'Keine Textebene gefunden (vermutlich Scan). KI/Vision ist deaktiviert.',
+        )
+      } else if (extraction.method === 'vision') {
+        warnings.push('Text per Vision/OCR aus Scan ermittelt.')
       }
       if (!titleFromFileName(file.fileName)) {
         warnings.push('Leerer Titel nach Bereinigung des Dateinamens.')
@@ -178,6 +195,8 @@ export async function analyzeBulkPdfUpload(
         sizeBytes: file.buffer.length,
         checksum,
         stagingPath,
+        extractedTextKey,
+        extractionMethod: extraction.method,
         pageCount: extraction.pageCount ?? null,
         hasText,
         textPreview: hasText ? extraction.text.slice(0, 400) : null,
@@ -199,6 +218,8 @@ export async function analyzeBulkPdfUpload(
         materialType: suggestions.materialType,
         description: suggestions.description,
         tagNames: suggestions.tagNames,
+        learningObjectives: suggestions.learningObjectives ?? [],
+        content: suggestions.contentSummary ?? '',
         action: skipDuplicate ? 'ueberspringen' : 'erstellen',
         duplicateOfId: duplicate?.materialId ?? null,
       }
@@ -378,22 +399,36 @@ export async function commitBulkUpload(
       const description =
         (decision?.description ?? file.suggestions.description)?.trim() || null
       const tagNames = decision?.tagNames ?? file.suggestions.tagNames ?? []
+      const learningObjectives =
+        decision?.learningObjectives ?? file.suggestions.learningObjectives ?? []
+      const content =
+        (decision?.content ?? file.suggestions.contentSummary)?.trim() || null
+      const schoolForm =
+        (file.suggestions.schoolForm as string | null | undefined) ??
+        mapping.schoolForm ??
+        null
+
+      const seededText =
+        (await readExtractedTextSidecar(file.extractedTextKey)) ?? null
 
       const materialId = await createMaterial(
         {
           title,
           description,
+          content,
           materialType,
           origin: 'manuell',
-          schoolForm: mapping.schoolForm ?? null,
+          schoolForm,
           subjectIds: subjectId ? [subjectId] : [],
           gradeLevels: gradeLevel ? [gradeLevel] : [],
           tagNames,
+          learningObjectives,
           aiMeta: file.suggestions.aiUsed
             ? {
                 generatedAt: new Date().toISOString(),
-                promptVersion: 'bulk-pdf-metadata-v1',
+                promptVersion: MATERIAL_METADATA_PROMPT_VERSION,
                 sourceFileName: file.fileName,
+                extractionMethod: file.extractionMethod,
               }
             : null,
         },
@@ -409,7 +444,18 @@ export async function commitBulkUpload(
       await addFileAsset(
         variantId,
         { buffer, fileName: file.fileName },
-        { role: 'haupt' },
+        {
+          role: 'haupt',
+          preExtracted: seededText
+            ? {
+                text: seededText,
+                status: 'erfolgreich',
+                pageCount: file.pageCount,
+                method: file.extractionMethod ?? 'text_layer',
+              }
+            : undefined,
+          skipContentAutofill: true,
+        },
       )
 
       materialIds.push(materialId)
@@ -417,6 +463,7 @@ export async function commitBulkUpload(
       stats.dateien = (stats.dateien ?? 0) + 1
       await track(file.sourceRef, materialId, 'erstellt')
       await deleteFile(file.stagingPath)
+      if (file.extractedTextKey) await deleteFile(file.extractedTextKey)
     } catch (error) {
       const message = oeffentlicheFehlermeldung(error, 'Die Datei konnte nicht übernommen werden.')
       stats.fehlgeschlagen = (stats.fehlgeschlagen ?? 0) + 1
@@ -570,14 +617,18 @@ export async function discardBulkUpload(runId: string): Promise<void> {
   const detected = (run.detected ?? {}) as unknown as BulkUploadDetected
   for (const file of detected.files ?? []) {
     if (file.stagingPath) await deleteFile(file.stagingPath)
+    if (file.extractedTextKey) await deleteFile(file.extractedTextKey)
   }
 
   await useDatabase().delete(importRuns).where(eq(importRuns.id, runId))
 }
 
-/** Für die Schulportal-Importliste: Stapel-Uploads ausblenden. */
+/** Für die Schulportal-Importliste: Stapel-Uploads und KI-Einzelanlagen ausblenden. */
 export function excludeBulkAdapterSql() {
-  return ne(importRuns.adapterId, BULK_PDF_ADAPTER_ID)
+  return and(
+    ne(importRuns.adapterId, BULK_PDF_ADAPTER_ID),
+    ne(importRuns.adapterId, AI_CREATE_ADAPTER_ID),
+  )
 }
 
 export { BULK_PDF_ADAPTER_ID, BULK_PDF_ADAPTER_LABEL }

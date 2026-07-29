@@ -67,6 +67,8 @@ export interface AiMeta {
   fillStrategy?: string
   hermesUsed?: boolean
   sourceFileName?: string
+  /** text_layer | vision – Herkunft des für Metadaten genutzten Extrakts. */
+  extractionMethod?: string
   /** Volle strukturierte Lösung inkl. Positionen – für Korrektur und PDF-Neuzeichnung. */
   structuredSolution?: StoredStructuredSolution | null
   /** Varianten-ID der Quelldatei, aus der die Lösung erzeugt wurde. */
