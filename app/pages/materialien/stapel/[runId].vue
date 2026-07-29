@@ -11,7 +11,7 @@ const route = useRoute()
 const runId = computed(() => String(route.params.runId))
 const { darfBearbeiten } = useSitzung()
 const { aufruf, laeuft } = useApi()
-const { fachOptionen, schlagwortNamen } = useTaxonomie()
+const { schlagwortNamen } = useTaxonomie()
 const { optionen: schulformOptionen } = useSchulformen()
 
 const jahrgangOptionen = jahrgangsstufenOptionen()
@@ -29,6 +29,7 @@ interface DetectedFile {
   suggestions: {
     title: string
     materialType: MaterialType
+    subjectNames: string[]
     tagNames: string[]
     description: string
     learningObjectives?: string[]
@@ -300,12 +301,11 @@ function alleWaehlen(wert: boolean) {
               />
             </template>
             <div class="grid gap-4 sm:grid-cols-2">
-              <UiField label="Fach (bestehend)">
-                <UiSelect v-model="mapping.subjectId" platzhalter="Neu anlegen …" :optionen="fachOptionen" />
-              </UiField>
-              <UiField label="Fachname (neu)">
-                <UiInput v-model="mapping.subjectName" :disabled="Boolean(mapping.subjectId)" />
-              </UiField>
+              <UiFachFeld
+                v-model:subject-id="mapping.subjectId"
+                v-model:subject-name="mapping.subjectName"
+                class="sm:col-span-2"
+              />
               <UiField label="Jahrgang">
                 <UiSelect
                   v-model="mapping.gradeLevel"
@@ -421,6 +421,9 @@ function alleWaehlen(wert: boolean) {
                       </p>
                       <p class="text-sm text-ink-muted">
                         {{ materialTypes.label((mapping.records[file.sourceRef]?.materialType ?? file.suggestions.materialType) as never) }}
+                        <template v-if="file.suggestions.subjectNames?.length">
+                          · {{ file.suggestions.subjectNames.join(', ') }}
+                        </template>
                       </p>
                     </template>
                   </div>

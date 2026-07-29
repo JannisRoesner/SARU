@@ -5,6 +5,11 @@ import {
   type SchoolForm,
 } from '#shared/types/domain'
 import { materialTypes, schoolForms } from '#shared/utils/labels'
+import {
+  normalizeSchulfach,
+  normalizeSchulfaecher,
+  schulfaecherPromptListe,
+} from '#shared/utils/schulfaecher'
 import { chatCompletion } from './client'
 import type { AiSettings } from '../settings.service'
 import { createLogger } from '../../utils/logger'
@@ -14,12 +19,14 @@ const log = createLogger('ai:suggest-metadata')
 const MATERIAL_TYPE_SET = new Set<string>(MATERIAL_TYPES)
 const SCHOOL_FORM_SET = new Set<string>(SCHOOL_FORMS)
 
-export const MATERIAL_METADATA_PROMPT_VERSION = 'material-metadata-v1'
+export const MATERIAL_METADATA_PROMPT_VERSION = 'material-metadata-v2'
 
 export interface MaterialMetadataSuggestion {
   title: string
   materialType: MaterialType
   schoolForm: SchoolForm | null
+  /** Erkannte Schulfächer (hessische Orientierungsliste). */
+  subjectNames: string[]
   tagNames: string[]
   learningObjectives: string[]
   description: string
@@ -77,6 +84,7 @@ export function filenameBasedMaterialSuggestion(
     title: titleFromFileName(fileName) || fileName,
     materialType: guessMaterialType(fileName, defaultMaterialType),
     schoolForm: null,
+    subjectNames: [],
     tagNames: [],
     learningObjectives: [],
     description: '',
@@ -119,13 +127,24 @@ export async function suggestMaterialMetadata(
       : null,
   ].filter(Boolean)
 
-  const prompt = `Du hilfst einer Lehrkraft in Deutschland, Metadaten und eine kurze Zusammenfassung für Unterrichtsmaterial vorzuschlagen.
+  const fachListe = schulfaecherPromptListe()
+  const prompt = `Du hilfst einer Lehrkraft in Hessen, Metadaten und eine kurze Zusammenfassung für Unterrichtsmaterial vorzuschlagen.
 
 Dateiname: ${options.fileName}
 ${contextParts.length ? `Kontext: ${contextParts.join(' · ')}` : ''}
 
 Erlaubte materialType-Werte (genau einen verwenden): ${typeList}
 Erlaubte schoolForm-Werte (einen oder null): ${schoolList}
+
+Schulfächer (nur aus dieser Liste wählen – keine Unterrichtsthemen, keine Detailgebiete):
+${fachListe}
+
+Regeln für subjectNames:
+- Nur echte Schulfächer aus der obigen Liste (z. B. „Informatik“, „Biologie“, „Deutsch“).
+- Keine Themen, Kapitel oder Methoden (z. B. NICHT „Objektorientierung“, „Photosynthese“, „Bruchrechnung“).
+- Solche Inhalte gehören in tagNames oder learningObjectives.
+- Typisch 1 Fach, höchstens 2 bei klarer fächerübergreifender Zuordnung.
+- Bei Unsicherheit lieber leeres Array als raten.
 
 Auszug aus dem Dokument:
 """
@@ -137,61 +156,107 @@ Antworte ausschließlich mit einem JSON-Objekt (kein Markdown):
   "title": "kurzer, klarer deutscher Titel ohne Dateiendung",
   "materialType": "einer der erlaubten Werte",
   "schoolForm": "einer der erlaubten Werte oder null",
-  "tagNames": ["max. 5 kurze Schlagwörter"],
+  "subjectNames": ["max. 2 exakte Namen aus der Schulfächer-Liste"],
+  "tagNames": ["max. 5 kurze Schlagwörter zu Inhalten/Themen"],
   "learningObjectives": ["max. 4 kurze Lernziele auf Deutsch"],
   "description": "1–2 Sätze Kurzbeschreibung auf Deutsch",
   "contentSummary": "Markdown-Zusammenfassung (3–8 Sätze oder Stichpunkte) des Inhalts – keine Volltext-Abschrift"
 }`
 
-  try {
-    const result = await chatCompletion(
-      options.settings,
-      [
-        {
-          role: 'system',
-          parts: [
-            {
-              type: 'text',
-              text: 'Du antwortest nur mit gültigem JSON ohne Erklärungstext.',
-            },
-          ],
-        },
-        { role: 'user', parts: [{ type: 'text', text: prompt }] },
-      ],
-      { temperature: 0.2, maxOutputTokens: 1200 },
-    )
+  let lastError: unknown
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const result = await chatCompletion(
+        options.settings,
+        [
+          {
+            role: 'system',
+            parts: [
+              {
+                type: 'text',
+                text: 'Du antwortest nur mit gültigem JSON ohne Erklärungstext.',
+              },
+            ],
+          },
+          { role: 'user', parts: [{ type: 'text', text: prompt }] },
+        ],
+        { temperature: 0.2, maxOutputTokens: 1200 },
+      )
 
-    const parsed = extractJsonObject(result.text)
-    if (!parsed) return fallback
+      const parsed = extractJsonObject(result.text)
+      if (!parsed) {
+        if (attempt === 0) {
+          log.warn('KI-Metadaten: ungültige JSON-Antwort, wiederhole …', {
+            fileName: options.fileName,
+          })
+          await pause(1500)
+          continue
+        }
+        return fallback
+      }
 
-    const title =
-      typeof parsed.title === 'string' && parsed.title.trim()
-        ? parsed.title.trim().slice(0, 300)
-        : fallback.title
+      const title =
+        typeof parsed.title === 'string' && parsed.title.trim()
+          ? parsed.title.trim().slice(0, 300)
+          : fallback.title
 
-    return {
-      title,
-      materialType: normalizeMaterialType(parsed.materialType, fallback.materialType),
-      schoolForm: normalizeSchoolForm(parsed.schoolForm, ctx.schoolForm),
-      tagNames: normalizeStringList(parsed.tagNames, 8),
-      learningObjectives: normalizeStringList(parsed.learningObjectives, 6),
-      description:
-        typeof parsed.description === 'string'
-          ? parsed.description.trim().slice(0, 2000)
-          : '',
-      contentSummary:
-        typeof parsed.contentSummary === 'string'
-          ? parsed.contentSummary.trim().slice(0, 8000)
-          : '',
-      aiUsed: true,
+      const subjectNames = mergeSubjectNames(
+        normalizeSchulfaecher(parsed.subjectNames),
+        ctx.subjectLabel,
+      )
+
+      return {
+        title,
+        materialType: normalizeMaterialType(parsed.materialType, fallback.materialType),
+        schoolForm: normalizeSchoolForm(parsed.schoolForm, ctx.schoolForm),
+        subjectNames,
+        tagNames: normalizeStringList(parsed.tagNames, 8),
+        learningObjectives: normalizeStringList(parsed.learningObjectives, 6),
+        description:
+          typeof parsed.description === 'string'
+            ? parsed.description.trim().slice(0, 2000)
+            : '',
+        contentSummary:
+          typeof parsed.contentSummary === 'string'
+            ? parsed.contentSummary.trim().slice(0, 8000)
+            : '',
+        aiUsed: true,
+      }
+    } catch (error) {
+      lastError = error
+      if (attempt === 0) {
+        log.warn('KI-Metadaten-Vorschlag fehlgeschlagen, wiederhole …', {
+          fileName: options.fileName,
+          error,
+        })
+        await pause(2000)
+        continue
+      }
     }
-  } catch (error) {
-    log.warn('KI-Metadaten-Vorschlag fehlgeschlagen, Dateiname wird verwendet', {
-      fileName: options.fileName,
-      error,
-    })
-    return fallback
   }
+
+  log.warn('KI-Metadaten-Vorschlag endgültig fehlgeschlagen, Dateiname wird verwendet', {
+    fileName: options.fileName,
+    error: lastError,
+  })
+  return fallback
+}
+
+function pause(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function mergeSubjectNames(
+  fromAi: string[],
+  contextLabel?: string | null,
+): string[] {
+  const result = [...fromAi]
+  const seen = new Set(result.map((s) => s.toLowerCase()))
+  const fromContext = contextLabel ? normalizeSchulfach(contextLabel) : null
+  if (fromContext && !seen.has(fromContext.toLowerCase())) {
+    result.unshift(fromContext)
+  }
+  return result.slice(0, 3)
 }
 
 function extractJsonObject(text: string): Record<string, unknown> | null {

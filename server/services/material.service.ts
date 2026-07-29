@@ -32,7 +32,7 @@ import {
 } from './ai/suggest-material-metadata'
 import { getAiSettings } from './settings.service'
 import { queueReindex, removeFromIndex } from './search/indexer'
-import { resolveCompetencyIds, resolveTagIds } from './taxonomy.service'
+import { resolveCompetencyIds, resolveSubjectIds, resolveTagIds } from './taxonomy.service'
 import {
   type GradeLevel,
   gradeLevelToStorage,
@@ -43,6 +43,8 @@ const log = createLogger('materials')
 
 export interface MaterialTaxonomyInput {
   subjectIds?: string[]
+  /** Freitext-Fächer; fehlende werden automatisch angelegt. */
+  subjectNames?: string[]
   topicIds?: string[]
   competencyIds?: string[]
   learningGroupIds?: string[]
@@ -81,12 +83,17 @@ async function applyTaxonomy(
   materialId: string,
   input: MaterialTaxonomyInput,
 ): Promise<void> {
-  if (input.subjectIds !== undefined) {
+  if (input.subjectIds !== undefined || input.subjectNames !== undefined) {
     await db.delete(materialSubjects).where(eq(materialSubjects.materialId, materialId))
-    if (input.subjectIds.length) {
+    const subjectIds = await resolveSubjectIds(
+      input.subjectIds ?? [],
+      input.subjectNames ?? [],
+      db,
+    )
+    if (subjectIds.length) {
       await db
         .insert(materialSubjects)
-        .values(input.subjectIds.map((subjectId) => ({ materialId, subjectId })))
+        .values(subjectIds.map((subjectId) => ({ materialId, subjectId })))
         .onConflictDoNothing()
     }
   }

@@ -11,7 +11,6 @@ const { darfBearbeiten } = useSitzung()
 if (!darfBearbeiten.value) await navigateTo('/materialien')
 
 const { aufruf, laeuft } = useApi()
-const { fachOptionen } = useTaxonomie()
 const { optionen: schulformOptionen } = useSchulformen()
 
 const jahrgangOptionen = jahrgangsstufenOptionen()
@@ -162,12 +161,11 @@ async function analysieren() {
         Diese Angaben gelten für alle Dateien im Stapel. Titel, Typ und Schlagwörter kannst du danach je Datei prüfen.
       </p>
       <div class="grid gap-4 sm:grid-cols-2">
-        <UiField label="Fach (bestehend)">
-          <UiSelect v-model="mapping.subjectId" platzhalter="Neu anlegen …" :optionen="fachOptionen" />
-        </UiField>
-        <UiField label="Fachname (neu)">
-          <UiInput v-model="mapping.subjectName" :disabled="Boolean(mapping.subjectId)" />
-        </UiField>
+        <UiFachFeld
+          v-model:subject-id="mapping.subjectId"
+          v-model:subject-name="mapping.subjectName"
+          class="sm:col-span-2"
+        />
         <UiField label="Jahrgang">
           <UiSelect
             v-model="mapping.gradeLevel"

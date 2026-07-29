@@ -27,6 +27,7 @@ describe('suggest-material-metadata helpers', () => {
     expect(vorschlag.title).toBe('AB Mitose')
     expect(vorschlag.contentSummary).toBe('')
     expect(vorschlag.learningObjectives).toEqual([])
+    expect(vorschlag.subjectNames).toEqual([])
   })
 })
 
@@ -77,6 +78,7 @@ describe('bulk suggestFileMetadata Wrapper', () => {
       title: 'Folien Einfuehrung',
       materialType: 'praesentation',
       aiUsed: false,
+      subjectNames: [],
       learningObjectives: [],
       contentSummary: '',
     })

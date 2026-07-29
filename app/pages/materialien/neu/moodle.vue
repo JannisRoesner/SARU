@@ -6,7 +6,7 @@ useHead({ title: 'Moodle-Kurs anlegen' })
 
 const { darfBearbeiten } = useSitzung()
 const { aufruf, laeuft } = useApi()
-const { fachOptionen, schlagwortNamen } = useTaxonomie()
+const { schlagwortNamen } = useTaxonomie()
 
 if (!darfBearbeiten.value) {
   await navigateTo('/materialien')
@@ -16,7 +16,7 @@ const formular = reactive({
   title: '',
   description: '',
   schoolYear: '',
-  subjectIds: [] as string[],
+  subjectNames: [] as string[],
   tagNames: ['Moodle'] as string[],
 })
 
@@ -90,7 +90,7 @@ async function anlegen() {
         : meta.value?.cartridgeVersion
           ? `IMS CC ${meta.value.cartridgeVersion}`
           : 'Moodle',
-      subjectIds: formular.subjectIds,
+      subjectNames: formular.subjectNames,
       tagNames: formular.tagNames,
     },
   })
@@ -123,7 +123,7 @@ async function anlegen() {
 </script>
 
 <template>
-  <div class="mx-auto max-w-3xl">
+  <div>
     <LayoutSeitenkopf
       zurueck-to="/materialien/neu"
       zurueck-label="Wege zum Anlegen"
@@ -218,16 +218,7 @@ async function anlegen() {
             <UiInput v-model="formular.schoolYear" placeholder="z. B. 2024/25" />
           </UiField>
           <UiField label="Fächer">
-            <select
-              multiple
-              class="min-h-28 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm"
-              :value="formular.subjectIds"
-              @change="formular.subjectIds = Array.from(($event.target as HTMLSelectElement).selectedOptions).map((o) => o.value)"
-            >
-              <option v-for="fach in fachOptionen" :key="fach.value" :value="fach.value">
-                {{ fach.label }}
-              </option>
-            </select>
+            <MaterialFachAuswahl v-model="formular.subjectNames" />
           </UiField>
           <UiField label="Schlagwörter">
             <UiTagInput v-model="formular.tagNames" :vorschlaege="schlagwortNamen" />

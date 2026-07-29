@@ -14,7 +14,7 @@ const route = useRoute()
 const id = computed(() => String(route.params.id))
 const { darfBearbeiten } = useSitzung()
 const { aufruf, laeuft } = useApi()
-const { fachOptionen, lerngruppenOptionen, themenOptionen, schlagwortNamen } = useTaxonomie()
+const { lerngruppenOptionen, themenOptionen, schlagwortNamen } = useTaxonomie()
 
 const { data, status, error, refresh } = await useFetch<LessonDetail>(
   () => `/api/lessons/${id.value}`,
@@ -30,6 +30,7 @@ const formular = reactive({
   periodTo: null as number | null,
   durationMinutes: null as number | null,
   subjectId: null as string | null,
+  subjectName: '',
   learningGroupId: null as string | null,
   topicId: null as string | null,
   status: 'entwurf',
@@ -287,9 +288,12 @@ function phaseGeaendert(phase: LessonPhaseDetail) {
               <UiField label="Dauer (Min.)">
                 <UiInput v-model="formular.durationMinutes" type="number" min="0" :disabled="!darfBearbeiten" />
               </UiField>
-              <UiField label="Fach">
-                <UiSelect v-model="formular.subjectId" platzhalter="–" :disabled="!darfBearbeiten" :optionen="fachOptionen" />
-              </UiField>
+              <UiFachFeld
+                v-model:subject-id="formular.subjectId"
+                v-model:subject-name="formular.subjectName"
+                :disabled="!darfBearbeiten"
+                class="sm:col-span-2"
+              />
               <UiField label="Lerngruppe">
                 <UiSelect v-model="formular.learningGroupId" platzhalter="–" :disabled="!darfBearbeiten" :optionen="lerngruppenOptionen" />
               </UiField>

@@ -67,6 +67,32 @@ export async function getOrCreateSubject(
   return retry[0]!.id
 }
 
+/** Löst bestehende IDs und Freitext-Namen zu einer eindeutigen Fach-ID-Liste auf. */
+export async function resolveSubjectIds(
+  subjectIds: string[],
+  subjectNames: string[],
+  db: Database = useDatabase(),
+): Promise<string[]> {
+  const ids = [...subjectIds]
+  for (const name of subjectNames) {
+    const trimmed = name.trim()
+    if (trimmed) ids.push(await getOrCreateSubject(trimmed, db))
+  }
+  return [...new Set(ids)]
+}
+
+/** Wählt eine bestehende Fach-ID oder legt anhand eines Freitextnamens ein Fach an. */
+export async function resolveSubjectIdFromInput(
+  subjectId: string | null | undefined,
+  subjectName: string | null | undefined,
+  db: Database = useDatabase(),
+): Promise<string | null> {
+  if (subjectId) return subjectId
+  const trimmed = subjectName?.trim()
+  if (trimmed) return getOrCreateSubject(trimmed, db)
+  return null
+}
+
 export async function listLearningGroups(db: Database = useDatabase()) {
   return db
     .select()

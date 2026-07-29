@@ -31,7 +31,7 @@ import {
   storeStagingFile,
   validateUpload,
 } from '../storage.service'
-import { getOrCreateSubject } from '../taxonomy.service'
+import { getOrCreateSubject, resolveSubjectIds } from '../taxonomy.service'
 import { waitForIndex } from '../search/indexer'
 import { suggestFileMetadata, titleFromFileName } from './suggest-metadata'
 import { AI_CREATE_ADAPTER_ID } from '../ai/material-create'
@@ -411,6 +411,13 @@ export async function commitBulkUpload(
       const seededText =
         (await readExtractedTextSidecar(file.extractedTextKey)) ?? null
 
+      let fileSubjectIds: string[] = []
+      if (subjectId) {
+        fileSubjectIds = [subjectId]
+      } else if (file.suggestions.subjectNames?.length) {
+        fileSubjectIds = await resolveSubjectIds([], file.suggestions.subjectNames)
+      }
+
       const materialId = await createMaterial(
         {
           title,
@@ -419,7 +426,7 @@ export async function commitBulkUpload(
           materialType,
           origin: 'manuell',
           schoolForm,
-          subjectIds: subjectId ? [subjectId] : [],
+          subjectIds: fileSubjectIds,
           gradeLevels: gradeLevel ? [gradeLevel] : [],
           tagNames,
           learningObjectives,

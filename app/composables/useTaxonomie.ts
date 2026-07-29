@@ -86,6 +86,7 @@ export function useTaxonomie() {
     })
   })
   const schlagwortNamen = computed(() => schlagwoerter.value.map((s) => s.name))
+  const fachNamen = computed(() => faecher.value.map((f) => f.name))
 
   function fach(id: string | null | undefined) {
     return id ? faecher.value.find((f) => f.id === id) : undefined
@@ -104,6 +105,7 @@ export function useTaxonomie() {
     lerngruppenOptionen,
     themenOptionen,
     schlagwortNamen,
+    fachNamen,
     fach,
   }
 }

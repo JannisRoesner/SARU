@@ -53,6 +53,7 @@ function toBulkSuggestion(
   return {
     title: result.title,
     materialType: result.materialType,
+    subjectNames: result.subjectNames,
     tagNames: result.tagNames,
     description: result.description,
     learningObjectives: result.learningObjectives,

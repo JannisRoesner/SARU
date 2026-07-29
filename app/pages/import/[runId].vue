@@ -11,7 +11,7 @@ const route = useRoute()
 const runId = computed(() => String(route.params.runId))
 const { darfBearbeiten } = useSitzung()
 const { aufruf, laeuft } = useApi()
-const { fachOptionen, lerngruppenOptionen } = useTaxonomie()
+const { lerngruppenOptionen } = useTaxonomie()
 const { optionenMitAktuell } = useSchulformen()
 
 const jahrgangOptionen = jahrgangsstufenOptionen()
@@ -260,12 +260,11 @@ watch(
               />
             </template>
             <div class="grid gap-4 sm:grid-cols-2">
-              <UiField label="Fach (bestehend)">
-                <UiSelect v-model="mapping.subjectId" platzhalter="Neu anlegen …" :optionen="fachOptionen" />
-              </UiField>
-              <UiField label="Fachname (neu)">
-                <UiInput v-model="mapping.subjectName" :disabled="Boolean(mapping.subjectId)" />
-              </UiField>
+              <UiFachFeld
+                v-model:subject-id="mapping.subjectId"
+                v-model:subject-name="mapping.subjectName"
+                class="sm:col-span-2"
+              />
               <UiField label="Lerngruppe">
                 <UiSelect
                   v-model="mapping.learningGroupId"

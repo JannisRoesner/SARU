@@ -13,7 +13,7 @@ import { sanitizeText } from '../utils/validation'
 import { getSeriesDetail, type SeriesDetail } from '../repositories/series.repository'
 import { queueReindex, removeFromIndex } from './search/indexer'
 import { markMaterialUsed } from './material.service'
-import { resolveCompetencyIds, resolveTagIds } from './taxonomy.service'
+import { resolveCompetencyIds, resolveSubjectIdFromInput, resolveTagIds } from './taxonomy.service'
 
 const log = createLogger('series')
 
@@ -21,6 +21,7 @@ export interface SeriesInput {
   title: string
   description?: string | null
   subjectId?: string | null
+  subjectName?: string | null
   learningGroupId?: string | null
   topicId?: string | null
   startDate?: string | null
@@ -101,9 +102,11 @@ export async function createSeries(
 ): Promise<string> {
   if (!input.title?.trim()) throw invalidInput('Bitte einen Titel für die Reihe angeben.')
 
+  const subjectId = await resolveSubjectIdFromInput(input.subjectId, input.subjectName, db)
+
   const [created] = await db
     .insert(series)
-    .values({ ...seriesColumns(input), title: input.title.trim(), ownerId } as never)
+    .values({ ...seriesColumns({ ...input, subjectId }), title: input.title.trim(), ownerId } as never)
     .returning({ id: series.id })
 
   const seriesId = created!.id
@@ -119,7 +122,15 @@ export async function updateSeries(
   input: Partial<SeriesInput>,
   db: Database = useDatabase(),
 ): Promise<void> {
-  const patch = seriesColumns(input)
+  let patchInput: Partial<SeriesInput> = input
+  if (input.subjectId !== undefined || input.subjectName !== undefined) {
+    patchInput = {
+      ...input,
+      subjectId: await resolveSubjectIdFromInput(input.subjectId, input.subjectName, db),
+    }
+  }
+
+  const patch = seriesColumns(patchInput)
   if (Object.keys(patch).length > 0) {
     const [updated] = await db
       .update(series)

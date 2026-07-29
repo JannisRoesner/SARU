@@ -29,7 +29,7 @@ import { getAiSettings } from '../settings.service'
 import { attachMaterial, createLesson, deleteLesson } from '../lesson.service'
 import { createSeries, deleteSeries } from '../series.service'
 import { deleteFile, resolveStoragePath, storeStagingFile } from '../storage.service'
-import { getOrCreateLearningGroup, getOrCreateSubject, getOrCreateTopic } from '../taxonomy.service'
+import { getOrCreateLearningGroup, getOrCreateSubject, getOrCreateTopic, resolveSubjectIds } from '../taxonomy.service'
 import { waitForIndex } from '../search/indexer'
 import { findAttachmentDuplicates, findLessonDuplicates } from './duplicates'
 import { detectAdapters, detectBestAdapter, getAdapter } from './registry'
@@ -561,6 +561,13 @@ export async function commitImport(
               },
             })
 
+            let materialSubjectIds: string[] = []
+            if (subjectId) {
+              materialSubjectIds = [subjectId]
+            } else if (suggestion.subjectNames.length) {
+              materialSubjectIds = await resolveSubjectIds([], suggestion.subjectNames)
+            }
+
             materialId = await createMaterial(
               {
                 title: suggestion.title || fallbackTitle,
@@ -572,7 +579,7 @@ export async function commitImport(
                 origin: 'import',
                 schoolForm:
                   suggestion.schoolForm ?? mapping.schoolForm ?? null,
-                subjectIds: subjectId ? [subjectId] : [],
+                subjectIds: materialSubjectIds,
                 topicIds: topicId ? [topicId] : [],
                 learningGroupIds: learningGroupId ? [learningGroupId] : [],
                 gradeLevels: mappedGradeLevel ? [mappedGradeLevel] : [],

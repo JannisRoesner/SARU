@@ -8,7 +8,7 @@ useHead({ title: 'Material klassisch anlegen' })
 
 const { darfBearbeiten } = useSitzung()
 const { aufruf, laeuft } = useApi()
-const { fachOptionen, schlagwortNamen } = useTaxonomie()
+const { schlagwortNamen } = useTaxonomie()
 const { optionen: schulformOptionen } = useSchulformen()
 
 if (!darfBearbeiten.value) {
@@ -20,7 +20,7 @@ const formular = reactive({
   description: '',
   materialType: 'arbeitsblatt' as string,
   schoolForm: null as string | null,
-  subjectIds: [] as string[],
+  subjectNames: [] as string[],
   topicIds: [] as string[],
   learningGroupIds: [] as string[],
   gradeLevels: [] as GradeLevel[],
@@ -85,7 +85,7 @@ async function anlegen() {
 </script>
 
 <template>
-  <div class="mx-auto max-w-3xl">
+  <div>
     <LayoutSeitenkopf
       zurueck-to="/materialien/neu"
       zurueck-label="Wege zum Anlegen"
@@ -182,16 +182,7 @@ async function anlegen() {
       <UiCard titel="Einordnung" icon="sitemap" einklappbar einklapp-id="material-neu-einordnung">
         <div class="space-y-4">
           <UiField label="Fächer">
-            <select
-              multiple
-              class="min-h-28 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm"
-              :value="formular.subjectIds"
-              @change="formular.subjectIds = Array.from(($event.target as HTMLSelectElement).selectedOptions).map((o) => o.value)"
-            >
-              <option v-for="fach in fachOptionen" :key="fach.value" :value="fach.value">
-                {{ fach.label }}
-              </option>
-            </select>
+            <MaterialFachAuswahl v-model="formular.subjectNames" />
           </UiField>
           <UiField label="Jahrgangsstufen">
             <UiJahrgangsstufenAuswahl v-model="formular.gradeLevels" />

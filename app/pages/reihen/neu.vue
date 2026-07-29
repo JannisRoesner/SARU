@@ -6,7 +6,7 @@ useHead({ title: 'Reihe starten' })
 
 const { darfBearbeiten } = useSitzung()
 const { aufruf, laeuft } = useApi()
-const { fachOptionen, lerngruppenOptionen, themenOptionen } = useTaxonomie()
+const { lerngruppenOptionen, themenOptionen } = useTaxonomie()
 
 if (!darfBearbeiten.value) await navigateTo('/reihen')
 
@@ -14,6 +14,7 @@ const formular = reactive({
   title: '',
   description: '',
   subjectId: null as string | null,
+  subjectName: '',
   learningGroupId: null as string | null,
   topicId: null as string | null,
   startDate: null as string | null,
@@ -79,9 +80,11 @@ async function anlegen() {
             <UiField label="Ende">
               <UiInput v-model="formular.endDate" type="date" />
             </UiField>
-            <UiField label="Fach">
-              <UiSelect v-model="formular.subjectId" platzhalter="–" :optionen="fachOptionen" />
-            </UiField>
+            <UiFachFeld
+              v-model:subject-id="formular.subjectId"
+              v-model:subject-name="formular.subjectName"
+              class="sm:col-span-2"
+            />
             <UiField label="Lerngruppe">
               <UiSelect
                 v-model="formular.learningGroupId"

@@ -43,6 +43,8 @@ const gradeLevelSchema = z
 
 const taxonomyFields = {
   subjectIds: idList,
+  /** Freitext-Fächer; fehlende werden automatisch angelegt. */
+  subjectNames: nameList,
   topicIds: idList,
   competencyIds: idList,
   learningGroupIds: idList,
@@ -149,6 +151,7 @@ export const lessonCreateSchema = z.object({
   periodTo: z.coerce.number().int().min(0).max(20).nullish(),
   durationMinutes: z.coerce.number().int().min(0).max(600).nullish(),
   subjectId: uuidSchema.nullish(),
+  subjectName: z.string().max(120).optional(),
   learningGroupId: uuidSchema.nullish(),
   topicId: uuidSchema.nullish(),
   seriesId: uuidSchema.nullish(),
@@ -193,6 +196,7 @@ export const seriesCreateSchema = z.object({
   title: z.string().min(1, 'Bitte einen Titel angeben.').max(300),
   description: nullableText(20_000),
   subjectId: uuidSchema.nullish(),
+  subjectName: z.string().max(120).optional(),
   learningGroupId: uuidSchema.nullish(),
   topicId: uuidSchema.nullish(),
   startDate: isoDate.nullish(),
@@ -359,6 +363,7 @@ export const aiMaterialCreateCommitSchema = z.object({
   materialType: z.enum(MATERIAL_TYPES).default('arbeitsblatt'),
   schoolForm: z.enum(SCHOOL_FORMS).nullish(),
   subjectIds: idList,
+  subjectNames: nameList,
   subjectName: z.string().max(120).optional(),
   gradeLevels: z.array(gradeLevelSchema).max(16).optional(),
   tagNames: nameList,

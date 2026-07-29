@@ -11,6 +11,7 @@ export const MAX_BULK_FILES = 40
 export interface BulkUploadFileSuggestion {
   title: string
   materialType: MaterialType
+  subjectNames: string[]
   tagNames: string[]
   description: string
   learningObjectives?: string[]

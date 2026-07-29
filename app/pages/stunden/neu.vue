@@ -6,7 +6,7 @@ useHead({ title: 'Stunde planen' })
 
 const { darfBearbeiten } = useSitzung()
 const { aufruf, laeuft } = useApi()
-const { fachOptionen, lerngruppenOptionen, themenOptionen } = useTaxonomie()
+const { lerngruppenOptionen, themenOptionen } = useTaxonomie()
 
 if (!darfBearbeiten.value) await navigateTo('/stunden')
 
@@ -18,6 +18,7 @@ const formular = reactive({
   periodTo: null as number | null,
   durationMinutes: 45 as number | null,
   subjectId: null as string | null,
+  subjectName: '',
   learningGroupId: null as string | null,
   topicId: null as string | null,
   status: 'entwurf' as string,
@@ -78,9 +79,11 @@ async function anlegen() {
             <UiField label="Bis Stunde">
               <UiInput v-model="formular.periodTo" type="number" min="1" max="12" />
             </UiField>
-            <UiField label="Fach">
-              <UiSelect v-model="formular.subjectId" platzhalter="–" :optionen="fachOptionen" />
-            </UiField>
+            <UiFachFeld
+              v-model:subject-id="formular.subjectId"
+              v-model:subject-name="formular.subjectName"
+              class="sm:col-span-2"
+            />
             <UiField label="Lerngruppe">
               <UiSelect
                 v-model="formular.learningGroupId"

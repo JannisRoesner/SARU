@@ -14,7 +14,7 @@ import { sanitizeText } from '../utils/validation'
 import { getLessonDetail, type LessonDetail } from '../repositories/lesson.repository'
 import { queueReindex, removeFromIndex } from './search/indexer'
 import { markMaterialUsed } from './material.service'
-import { resolveCompetencyIds, resolveTagIds } from './taxonomy.service'
+import { resolveCompetencyIds, resolveSubjectIdFromInput, resolveTagIds } from './taxonomy.service'
 
 const log = createLogger('lessons')
 
@@ -39,6 +39,7 @@ export interface LessonInput {
   periodTo?: number | null
   durationMinutes?: number | null
   subjectId?: string | null
+  subjectName?: string | null
   learningGroupId?: string | null
   topicId?: string | null
   seriesId?: string | null
@@ -125,6 +126,8 @@ export async function createLesson(
 ): Promise<string> {
   if (!input.title?.trim()) throw invalidInput('Bitte einen Titel für die Unterrichtsstunde angeben.')
 
+  const subjectId = await resolveSubjectIdFromInput(input.subjectId, input.subjectName, db)
+
   // Neue Stunden einer Reihe werden hinten angehängt.
   let position = input.positionInSeries ?? null
   if (input.seriesId && position === null) {
@@ -138,7 +141,7 @@ export async function createLesson(
   const [created] = await db
     .insert(lessons)
     .values({
-      ...lessonColumns(input),
+      ...lessonColumns({ ...input, subjectId }),
       title: input.title.trim(),
       positionInSeries: position,
       ownerId,
@@ -166,7 +169,15 @@ export async function updateLesson(
     .limit(1)
   if (!existing) throw notFound('Die Unterrichtsstunde')
 
-  const patch = lessonColumns(input)
+  let patchInput: Partial<LessonInput> = input
+  if (input.subjectId !== undefined || input.subjectName !== undefined) {
+    patchInput = {
+      ...input,
+      subjectId: await resolveSubjectIdFromInput(input.subjectId, input.subjectName, db),
+    }
+  }
+
+  const patch = lessonColumns(patchInput)
   if (Object.keys(patch).length > 0) {
     await db
       .update(lessons)

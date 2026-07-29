@@ -10,7 +10,7 @@ const route = useRoute()
 const id = computed(() => String(route.params.id))
 const { darfBearbeiten } = useSitzung()
 const { aufruf, laeuft } = useApi()
-const { fachOptionen, lerngruppenOptionen, themenOptionen, schlagwortNamen } = useTaxonomie()
+const { lerngruppenOptionen, themenOptionen, schlagwortNamen } = useTaxonomie()
 
 const { data, status, error, refresh } = await useFetch<SeriesDetail>(
   () => `/api/series/${id.value}`,
@@ -22,6 +22,7 @@ const formular = reactive({
   title: '',
   description: null as string | null,
   subjectId: null as string | null,
+  subjectName: '',
   learningGroupId: null as string | null,
   topicId: null as string | null,
   startDate: null as string | null,
@@ -237,9 +238,12 @@ async function reiheLoeschen() {
               <UiField label="Ende">
                 <UiInput v-model="formular.endDate" type="date" :disabled="!darfBearbeiten" />
               </UiField>
-              <UiField label="Fach">
-                <UiSelect v-model="formular.subjectId" platzhalter="–" :disabled="!darfBearbeiten" :optionen="fachOptionen" />
-              </UiField>
+              <UiFachFeld
+                v-model:subject-id="formular.subjectId"
+                v-model:subject-name="formular.subjectName"
+                :disabled="!darfBearbeiten"
+                class="sm:col-span-2"
+              />
               <UiField label="Lerngruppe">
                 <UiSelect v-model="formular.learningGroupId" platzhalter="–" :disabled="!darfBearbeiten" :optionen="lerngruppenOptionen" />
               </UiField>

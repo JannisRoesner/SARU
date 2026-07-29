@@ -36,7 +36,7 @@ const wege = [
 </script>
 
 <template>
-  <div class="mx-auto max-w-3xl">
+  <div>
     <LayoutSeitenkopf
       zurueck-to="/materialien"
       zurueck-label="Alle Materialien"
@@ -45,7 +45,7 @@ const wege = [
       untertitel="Wähle den passenden Weg – alle Vorschläge kannst du vor dem Speichern anpassen."
     />
 
-    <div class="grid gap-4 sm:grid-cols-2">
+    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <NuxtLink
         v-for="weg in wege"
         :key="weg.to"

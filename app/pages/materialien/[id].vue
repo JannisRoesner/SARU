@@ -15,7 +15,7 @@ const route = useRoute()
 const id = computed(() => String(route.params.id))
 const { darfBearbeiten } = useSitzung()
 const { aufruf, laeuft } = useApi()
-const { fachOptionen, schlagwortNamen } = useTaxonomie()
+const { schlagwortNamen } = useTaxonomie()
 const { optionenMitAktuell } = useSchulformen()
 const hinweise = useHinweise()
 
@@ -43,7 +43,7 @@ const formular = reactive({
   source: '' as string | null,
   author: '' as string | null,
   pages: '' as string | null,
-  subjectIds: [] as string[],
+  subjectNames: [] as string[],
   tagNames: [] as string[],
   learningObjectives: [] as string[],
   gradeLevels: [] as GradeLevel[],
@@ -68,7 +68,7 @@ watch(
     formular.source = wert.source
     formular.author = wert.author
     formular.pages = wert.pages
-    formular.subjectIds = wert.subjects.map((s) => s.id)
+    formular.subjectNames = wert.subjects.map((s) => s.name)
     formular.tagNames = wert.tags.map((t) => t.name)
     formular.learningObjectives = [...(wert.learningObjectives ?? [])]
     formular.gradeLevels = [...(wert.gradeLevels ?? [])]
@@ -625,17 +625,10 @@ const loesungBearbeitbar = computed(
                 />
               </UiField>
               <UiField label="Fächer">
-                <select
-                  multiple
-                  class="min-h-24 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm disabled:opacity-60"
+                <MaterialFachAuswahl
+                  v-model="formular.subjectNames"
                   :disabled="!darfBearbeiten"
-                  :value="formular.subjectIds"
-                  @change="formular.subjectIds = Array.from(($event.target as HTMLSelectElement).selectedOptions).map((o) => o.value)"
-                >
-                  <option v-for="fach in fachOptionen" :key="fach.value" :value="fach.value">
-                    {{ fach.label }}
-                  </option>
-                </select>
+                />
               </UiField>
             </div>
           </UiCard>

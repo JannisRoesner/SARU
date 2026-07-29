@@ -29,7 +29,7 @@ import {
   storeStagingFile,
   validateUpload,
 } from '../storage.service'
-import { getOrCreateSubject } from '../taxonomy.service'
+import { getOrCreateSubject, resolveSubjectIds } from '../taxonomy.service'
 import { waitForIndex } from '../search/indexer'
 
 const log = createLogger('ai-material-create')
@@ -84,6 +84,7 @@ export interface AiCreateCommitInput {
   materialType: MaterialType
   schoolForm?: SchoolForm | string | null
   subjectIds?: string[]
+  subjectNames?: string[]
   subjectName?: string | null
   gradeLevels?: GradeLevel[]
   tagNames?: string[]
@@ -163,6 +164,17 @@ export async function analyzeAiMaterialCreate(
         defaultMaterialType: context.defaultMaterialType ?? 'arbeitsblatt',
       },
     })
+
+    if (
+      settings.enabled
+      && settings.chatModel
+      && extractedText.trim()
+      && !suggestions.aiUsed
+    ) {
+      warnings.push(
+        'KI-Vorschläge konnten nicht erzeugt werden (z. B. Modell-Timeout oder ungültige Antwort). Titel stammt aus dem Dateinamen.',
+      )
+    }
 
     const checksum = sha256(file.buffer)
     const detected: AiCreateDetected = {
@@ -249,7 +261,9 @@ export async function commitAiMaterialCreate(
   if (!title) throw invalidInput('Bitte einen Titel angeben.')
 
   let subjectIds = input.subjectIds ?? []
-  if (!subjectIds.length && input.subjectName?.trim()) {
+  if (input.subjectNames?.length) {
+    subjectIds = await resolveSubjectIds([], input.subjectNames)
+  } else if (!subjectIds.length && input.subjectName?.trim()) {
     subjectIds = [await getOrCreateSubject(input.subjectName.trim())]
   }
 
