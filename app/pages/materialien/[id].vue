@@ -347,6 +347,7 @@ const loesungBearbeitbar = computed(
         loesungStruktur.value &&
         darfBearbeiten.value &&
         (data.value?.aiMeta?.fillStrategy === 'pdf_overlay' ||
+          data.value?.aiMeta?.fillStrategy === 'pdf_separate' ||
           data.value?.aiMeta?.sourceAssetId ||
           data.value?.aiMeta?.sourceMaterialId),
     ),

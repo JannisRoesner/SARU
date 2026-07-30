@@ -1,4 +1,5 @@
 import { formatJahrgaenge, type GradeLevel } from '#shared/utils/jahrgangsstufen'
+import type { SolutionFillMode } from './document-fill'
 
 export interface SolutionPromptContext {
   title: string
@@ -24,29 +25,27 @@ export interface SolutionPromptContext {
    */
   blankInventory?: string | null
   detectedBlankCount?: number | null
+  /**
+   * lueckentext = Antworten in Dokumentlücken; offen = Erwartungshorizont ohne Lückenfüllung.
+   * Wird aus der Lückenerkennung abgeleitet, falls nicht gesetzt.
+   */
+  fillMode?: SolutionFillMode | null
 }
 
-export const SOLUTION_PROMPT_VERSION = '5-blank-context'
+export const SOLUTION_PROMPT_VERSION = '6-fill-mode-separate-pdf'
 
-export const SOLUTION_SYSTEM_PROMPT = `Du bist eine erfahrene deutsche Lehrkraft und erstellst Musterlösungen für Unterrichtsmaterialien.
-
-Ziel: Die Antworten werden visuell in das Original-Arbeitsblatt geschrieben (PDF-Seiten bleiben erhalten, Text wird in die Lücken gelegt). Du lieferst strukturierte Antworten; die Platzierung nutzt blankIndex und den Textkontext links/rechts der Lücke.
-
-Regeln:
-- Antworte ausschließlich auf Deutsch.
-- Gib ausschließlich ein JSON-Objekt zurück (kein Markdown drumherum, kein Einleitungstext).
-- Schema:
-{
+const SOLUTION_JSON_SCHEMA = `{
   "summary": "kurzer Überblick in 1–2 Sätzen",
   "answers": [
     {
       "id": "1",
       "label": "Aufgabe 1a",
-      "answer": "ausgefüllte Antwort / Lösungstext (knapp, passend in die Lücke)",
+      "answer": "Lösungstext",
       "page": 1,
       "blankIndex": 0,
       "leftContext": "kurzer Text unmittelbar links der Lücke",
       "rightContext": "kurzer Text unmittelbar rechts der Lücke",
+      "fieldType": "luecke",
       "bbox": { "x": 0.42, "y": 0.28, "w": 0.35, "h": 0.028 }
     }
   ],
@@ -55,14 +54,25 @@ Regeln:
   ],
   "notesForTeacher": "optionale didaktische Hinweise",
   "uncertainties": "falls Aufgaben unklar sind"
-}
+}`
+
+export const SOLUTION_SYSTEM_PROMPT_LUECKENTEXT = `Du bist eine erfahrene deutsche Lehrkraft und erstellst Musterlösungen für Unterrichtsmaterialien.
+
+Ziel: Die Antworten werden visuell in das Original-Arbeitsblatt geschrieben (PDF-Seiten bleiben erhalten, Text wird in die Lücken gelegt). Du lieferst strukturierte Antworten; die Platzierung nutzt blankIndex und den Textkontext links/rechts der Lücke.
+
+Regeln:
+- Antworte ausschließlich auf Deutsch.
+- Gib ausschließlich ein JSON-Objekt zurück (kein Markdown drumherum, kein Einleitungstext).
+- Schema:
+${SOLUTION_JSON_SCHEMA}
 - Nummeriere und benenne Antworten genau wie im Material (Aufgabe 1, a), …).
 - page: 1-basierte Seitenzahl, auf der die Lücke liegt.
+- fieldType: "luecke" für kurze Einwort-/Phrasenantworten; "freitext" nur wenn die Aufgabe ausdrücklich Fließtext verlangt.
 - Semantik zuerst: Jede answer muss im Satzkontext der konkreten Lücke grammatisch und fachlich passen (z. B. „Die ___ des Penis“ → „Eichel“, nicht ein anderes Wort aus der Wortliste).
 - blankIndex:
   - Wenn eine maschinelle Lückenliste im User-Prompt steht: verwende GENAU diese Indizes (0…n-1). Keine eigenen Nummern erfinden, keine Lücke überspringen, keine Extra-Antworten ohne Lücke.
   - Sonst: Reihenfolge aller optischen Lücken im Dokument von oben nach unten, bei Gleichstand links nach rechts, beginnend bei 0.
-  - Lücken sind: Unterstriche, Punktlinien, Antwortlinien, leere Kästen ODER sichtbare Lücken im Fließtext (auch ohne „___“-Zeichen).
+  - Lücken sind: Unterstriche, Punktlinien, Antwortlinien, leere Kästen oder eindeutige Antwortplätze im Satz (nicht normaler Fließtext, nicht Material-/Infotexte).
 - leftContext / rightContext: jeweils wenige Wörter unmittelbar vor bzw. nach der Lücke (wie im Dokument), damit die Zuordnung robust ist.
 - bbox (Fallback, wenn keine Text-Lücken erkannt werden – z. B. Scans):
   - Normierte Koordinaten 0.0–1.0 relativ zur Seite.
@@ -74,19 +84,63 @@ Regeln:
 - formFields: nur bei echten PDF-/Word-Formularfeldern; "name" muss dem Feldnamen entsprechen, soweit erkennbar.
 - Löse jede erkennbare Aufgabe. Überspringe keine Teilaufgabe.
 - Formuliere fachlich korrekt und altersgerecht.
-- Bei offenen Aufgaben: knapper Erwartungshorizont als answer-Text.
+- Erfinde keine Inhalte, die dem Material widersprechen.`
+
+export const SOLUTION_SYSTEM_PROMPT_OFFEN = `Du bist eine erfahrene deutsche Lehrkraft und erstellst Musterlösungen für Unterrichtsmaterialien.
+
+Ziel: Das Material enthält KEINE auszufüllenden Lücken und keine Antwortfelder. Es handelt sich um offene Aufgaben (Beschreiben, Erklären, Erörtern, …). Die Musterlösung erscheint als separates Dokument mit Aufgabennummer und Lösungstext – nicht als Overlay auf dem Original.
+
+Regeln:
+- Antworte ausschließlich auf Deutsch.
+- Gib ausschließlich ein JSON-Objekt zurück (kein Markdown drumherum, kein Einleitungstext).
+- Schema:
+${SOLUTION_JSON_SCHEMA}
+- Nummeriere und benenne Antworten genau wie im Material (Aufgabe 1, a), …) – label = Aufgabennummer/Bezeichnung.
+- page: 1-basierte Seitenzahl der Aufgabenstellung im Original (nur Hinweis, optional).
+- fieldType: immer "freitext".
+- blankIndex: immer null.
+- leftContext / rightContext: immer null.
+- bbox: immer null (kein Einzeichnen ins Original).
+- answer: knapper Erwartungshorizont (Stichpunkte oder kurze Sätze), fachlich korrekt und altersgerecht – kein Roman.
+- formFields: leer lassen, außer es gibt echte PDF-/Word-Formularfelder.
+- Löse jede erkennbare Aufgabe. Überspringe keine Teilaufgabe.
 - Erfinde keine Inhalte, die dem Material widersprechen.
-- Wenn keine Lücken erkennbar sind, liefere trotzdem vollständige answers mit Labels und sinnvollen bbox-Schätzungen nahe der Aufgabenstellung.`
+- Behandle durchgehenden Sachtext, Materialien und Abbildungen NICHT als Lückentext.`
+
+/** @deprecated Nutzen Sie solutionSystemPromptForMode – bleibt als Alias für Lückentext. */
+export const SOLUTION_SYSTEM_PROMPT = SOLUTION_SYSTEM_PROMPT_LUECKENTEXT
+
+export function resolveSolutionFillMode(context: SolutionPromptContext): SolutionFillMode {
+  if (context.fillMode === 'lueckentext' || context.fillMode === 'offen') return context.fillMode
+  return context.blankInventory?.trim() ? 'lueckentext' : 'offen'
+}
+
+export function solutionSystemPromptForMode(mode: SolutionFillMode): string {
+  return mode === 'offen' ? SOLUTION_SYSTEM_PROMPT_OFFEN : SOLUTION_SYSTEM_PROMPT_LUECKENTEXT
+}
 
 export function buildSolutionPrompt(context: SolutionPromptContext): string {
-  const lines: string[] = [
-    'Erstelle eine ausfüllbare Musterlösung für das folgende Unterrichtsmaterial.',
-    'Die Antworten werden maschinell in die Dokumentlücken geschrieben.',
-    'Wichtig: Jede Antwort muss semantisch zum Satzkontext ihrer Lücke passen; blankIndex allein reicht nicht.',
-    '',
-    '## Angaben zum Material',
-  ]
+  const mode = resolveSolutionFillMode(context)
+  const lines: string[] = []
+
+  if (mode === 'offen') {
+    lines.push(
+      'Erstelle eine Musterlösung (Erwartungshorizont) für das folgende Unterrichtsmaterial.',
+      'Es wurden KEINE ausfüllbaren Dokumentlücken/Antwortfelder erkannt – offene Aufgabe.',
+      'Die Lösung wird als separates PDF mit Aufgabennummer und Lösungstext erzeugt (kein Overlay).',
+      'fieldType ist freitext; blankIndex, leftContext, rightContext und bbox sind null.',
+    )
+  } else {
+    lines.push(
+      'Erstelle eine ausfüllbare Musterlösung für das folgende Unterrichtsmaterial.',
+      'Die Antworten werden maschinell in die Dokumentlücken geschrieben.',
+      'Wichtig: Jede Antwort muss semantisch zum Satzkontext ihrer Lücke passen; blankIndex allein reicht nicht.',
+    )
+  }
+
+  lines.push('', '## Angaben zum Material')
   lines.push(`- Titel: ${context.title}`)
+  lines.push(`- Füllmodus: ${mode}`)
 
   if (context.materialType) lines.push(`- Materialart: ${context.materialType}`)
   if (context.sourceFileName) lines.push(`- Dateiname: ${context.sourceFileName}`)
@@ -111,7 +165,7 @@ export function buildSolutionPrompt(context: SolutionPromptContext): string {
     lines.push(context.documentText.trim())
   }
 
-  if (context.blankInventory?.trim()) {
+  if (mode === 'lueckentext' && context.blankInventory?.trim()) {
     lines.push(
       '',
       `## Erkannte Lücken (${context.detectedBlankCount ?? 'n'} Stück) – verbindliche blankIndex-Liste`,
@@ -126,15 +180,23 @@ export function buildSolutionPrompt(context: SolutionPromptContext): string {
     lines.push('', '## Zusätzliche Hinweise der Lehrkraft', '', context.userInstructions.trim())
   }
 
-  lines.push(
-    '',
-    'Die beigefügten Dateien bzw. Seitenbilder zeigen das Material im Original.',
-    'Erkenne Aufgaben, Abbildungen, Lücken und Formularfelder multimodal.',
-    context.blankInventory?.trim()
-      ? 'Für jede erkannte Lücke: answer + page + blankIndex (aus der Liste) + leftContext + rightContext + bbox.'
-      : 'Für jede Lücke: answer + page + blankIndex (Dokumentreihenfolge) + leftContext + rightContext + bbox (normiert 0–1, Ursprung oben links).',
-    'Liefere ausschließlich das JSON-Objekt.',
-  )
+  lines.push('', 'Die beigefügten Dateien bzw. Seitenbilder zeigen das Material im Original.')
+
+  if (mode === 'offen') {
+    lines.push(
+      'Erkenne Aufgabenstellungen multimodal. Materialtexte und GUIs sind Kontext, keine Lücken.',
+      'Für jede Aufgabe: label (Aufgabennummer) + answer (Erwartungshorizont) + page + fieldType="freitext" + blankIndex=null + bbox=null.',
+    )
+  } else {
+    lines.push(
+      'Erkenne Aufgaben, Abbildungen, Lücken und Formularfelder multimodal.',
+      context.blankInventory?.trim()
+        ? 'Für jede erkannte Lücke: answer + page + blankIndex (aus der Liste) + leftContext + rightContext + fieldType + bbox.'
+        : 'Für jede Lücke: answer + page + blankIndex (Dokumentreihenfolge) + leftContext + rightContext + fieldType + bbox (normiert 0–1, Ursprung oben links).',
+    )
+  }
+
+  lines.push('Liefere ausschließlich das JSON-Objekt.')
 
   return lines.join('\n')
 }

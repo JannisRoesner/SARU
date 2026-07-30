@@ -25,7 +25,9 @@ import { chatCompletion, supportsNativePdf, type ChatPart } from './client'
 import { PDFDocument } from 'pdf-lib'
 import {
   alignAnswersToBlanks,
+  buildAnswerListPdf,
   buildSolutionDocx,
+  classifySolutionFillMode,
   detectPdfBlankRegions,
   enrichSolutionPlacements,
   fillDocxDocument,
@@ -37,6 +39,7 @@ import {
   solutionToMarkdown,
   type FilledDocument,
   type PdfBlankRegion,
+  type SolutionFillMode,
   type StructuredSolution,
 } from './document-fill'
 import { kiAutorAnzeige } from '#shared/utils/ki'
@@ -45,8 +48,8 @@ import {
   AI_CONTENT_NOTICE,
   AI_CONTENT_NOTICE_MD,
   SOLUTION_PROMPT_VERSION,
-  SOLUTION_SYSTEM_PROMPT,
   buildSolutionPrompt,
+  solutionSystemPromptForMode,
 } from './prompts'
 import { rasterizePdf } from './rasterize'
 
@@ -150,12 +153,21 @@ export async function generateSolution(
           i: b.blankIndex,
           left: b.leftText,
           right: b.rightText,
+          kind: b.kind,
         })),
       })
     } catch (error) {
       log.warn('PDF-Lückenerkennung vor Prompt fehlgeschlagen', error)
     }
   }
+
+  // Ohne zuverlässige Lücken: offener Erwartungshorizont statt erzwungener Lückentext-Füllung.
+  const fillMode: SolutionFillMode = classifySolutionFillMode(detectedBlanks)
+  log.info('Musterlösungs-Füllmodus', {
+    fillMode,
+    blanks: detectedBlanks.length,
+    source: source?.fileName ?? null,
+  })
 
   const prompt = buildSolutionPrompt({
     title: material.title,
@@ -172,8 +184,12 @@ export async function generateSolution(
     userInstructions: options.userInstructions,
     sourceFileName: source?.fileName ?? null,
     sourceMimeType: source?.mimeType ?? null,
-    blankInventory: detectedBlanks.length ? formatBlankInventory(detectedBlanks) : null,
-    detectedBlankCount: detectedBlanks.length || null,
+    blankInventory:
+      fillMode === 'lueckentext' && detectedBlanks.length
+        ? formatBlankInventory(detectedBlanks)
+        : null,
+    detectedBlankCount: fillMode === 'lueckentext' ? detectedBlanks.length || null : null,
+    fillMode,
   })
 
   if (!documentText && !source && !material.content?.trim()) {
@@ -284,7 +300,10 @@ export async function generateSolution(
       const completion = await chatCompletion(
         settings,
         [
-          { role: 'system', parts: [{ type: 'text', text: SOLUTION_SYSTEM_PROMPT }] },
+          {
+            role: 'system',
+            parts: [{ type: 'text', text: solutionSystemPromptForMode(fillMode) }],
+          },
           { role: 'user', parts },
         ],
         { model, maxOutputTokens: settings.maxOutputTokens },
@@ -292,7 +311,19 @@ export async function generateSolution(
 
       usedModel = completion.model
       structured = parseStructuredSolution(completion.text)
-      if (detectedBlanks.length > 0) {
+      if (fillMode === 'offen') {
+        structured = {
+          ...structured,
+          answers: structured.answers.map((a) => ({
+            ...a,
+            fieldType: 'freitext' as const,
+            blankIndex: null,
+            leftContext: null,
+            rightContext: null,
+            bbox: null,
+          })),
+        }
+      } else if (detectedBlanks.length > 0) {
         structured = alignAnswersToBlanks(structured, detectedBlanks)
         log.info('Antworten an erkannte Lücken ausgerichtet', {
           answers: structured.answers.length,
@@ -301,17 +332,25 @@ export async function generateSolution(
         })
       }
       if (source && PDF_EXTENSIONS.has(source.extension)) {
-        structured = await enrichFromPdfBuffer(source.buffer, structured, detectedBlanks)
+        structured = await enrichFromPdfBuffer(
+          source.buffer,
+          structured,
+          fillMode === 'lueckentext' ? detectedBlanks : [],
+        )
       } else {
         structured = {
           ...structured,
           answers: structured.answers.map((a) => ({
             ...a,
-            fieldType: a.fieldType ?? (a.answer.length > 90 || /\n/.test(a.answer) ? 'freitext' : 'luecke'),
+            fieldType:
+              a.fieldType ??
+              (fillMode === 'offen' || a.answer.length > 90 || /\n/.test(a.answer)
+                ? 'freitext'
+                : 'luecke'),
           })),
         }
       }
-      filled = await buildFilledDocument(source, structured, material.title)
+      filled = await buildFilledDocument(source, structured, material.title, fillMode)
     }
 
     if (!filled) {
@@ -353,6 +392,7 @@ export async function generateSolution(
           sourceAssetId: source?.id ?? null,
           promptVersion: SOLUTION_PROMPT_VERSION,
           reviewed: false,
+          fillMode,
           fillStrategy: filled.strategy,
           hermesUsed,
           sourceFileName: source?.fileName,
@@ -478,8 +518,51 @@ async function buildFilledDocument(
   source: SourceAsset | null,
   solution: StructuredSolution,
   materialTitle: string,
+  fillMode: SolutionFillMode = 'lueckentext',
 ): Promise<FilledDocument> {
   const title = `Musterlösung – ${materialTitle}`
+  const sourceBaseName = source?.fileName ?? materialTitle
+
+  // Offene Aufgabe ohne Antwortfelder: separates blankes PDF (Aufgabennummer + Lösung).
+  if (fillMode === 'offen') {
+    if (source && PDF_EXTENSIONS.has(source.extension)) {
+      const acro = await fillPdfAcroForm(source.buffer, solution)
+      if (acro) {
+        return {
+          buffer: acro.buffer,
+          fileName: solutionFileName(source.fileName, 'pdf'),
+          mimeType: 'application/pdf',
+          strategy: 'pdf_acroform',
+          summary: solution.summary,
+        }
+      }
+    }
+    if (source?.extension === 'docx') {
+      const result = fillDocxDocument(source.buffer, solution, {
+        title,
+        notice: AI_CONTENT_NOTICE,
+      })
+      if (result.strategy === 'docx_inplace') {
+        return {
+          buffer: result.buffer,
+          fileName: solutionFileName(source.fileName, 'docx'),
+          mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          strategy: result.strategy,
+          summary: solution.summary,
+        }
+      }
+    }
+
+    const buffer = await buildAnswerListPdf(title, solution, { notice: AI_CONTENT_NOTICE })
+    log.info('Separates Musterlösungs-PDF erzeugt', { answers: solution.answers.length })
+    return {
+      buffer,
+      fileName: solutionFileName(sourceBaseName, 'pdf'),
+      mimeType: 'application/pdf',
+      strategy: 'pdf_separate',
+      summary: solution.summary,
+    }
+  }
 
   if (source && OFFICE_EXTENSIONS.has(source.extension)) {
     // ODT/DOC: als DOCX-Lösung mit Anhang oder – bei DOCX – In-Place-Füllung.
@@ -687,7 +770,26 @@ export async function updateSolutionStructure(
   let reRendered = false
   let newStrategy = fillStrategy
 
-  if (wantsRender && source && PDF_EXTENSIONS.has(source.extension)) {
+  const storedFillMode: SolutionFillMode =
+    meta.fillMode === 'offen' || meta.fillStrategy === 'pdf_separate'
+      ? 'offen'
+      : 'lueckentext'
+
+  if (wantsRender && storedFillMode === 'offen') {
+    const filled = await buildFilledDocument(
+      source,
+      structured,
+      sourceMaterial.title,
+      'offen',
+    )
+    await replaceHauptAsset(
+      material,
+      { buffer: filled.buffer, fileName: filled.fileName, mimeType: filled.mimeType },
+      db,
+    )
+    reRendered = true
+    newStrategy = filled.strategy
+  } else if (wantsRender && source && PDF_EXTENSIONS.has(source.extension)) {
     // Antworten mit blankIndex an Geometrie ausrichten; manuell verschobene
     // (blankIndex = null) behalten ihre bbox. Anschließend preferBBox zeichnen.
     let blanks: PdfBlankRegion[] = []
@@ -710,7 +812,12 @@ export async function updateSolutionStructure(
     reRendered = true
     newStrategy = 'pdf_overlay'
   } else if (wantsRender && source && OFFICE_EXTENSIONS.has(source.extension)) {
-    const filled = await buildFilledDocument(source, structured, sourceMaterial.title)
+    const filled = await buildFilledDocument(
+      source,
+      structured,
+      sourceMaterial.title,
+      storedFillMode,
+    )
     await replaceHauptAsset(
       material,
       { buffer: filled.buffer, fileName: filled.fileName, mimeType: filled.mimeType },

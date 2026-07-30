@@ -5,12 +5,16 @@ import {
   alignAnswersToBlanks,
   blankRegionToBBox,
   buildSolutionDocx,
+  classifySolutionFillMode,
   detectPdfBlankRegions,
   enrichSolutionPlacements,
   fillDocxDocument,
   fillPdfAcroForm,
+  filterReliableBlanks,
   formatBlankInventory,
   inferAnswerFieldType,
+  buildAnswerListPdf,
+  looksLikeClozeGap,
   overlayPdfAnswers,
   parseStructuredSolution,
   sanitizePdfText,
@@ -18,6 +22,11 @@ import {
   topLeftNormToPdfBaseline,
   type PdfBlankRegion,
 } from '../../server/services/ai/document-fill'
+import {
+  buildSolutionPrompt,
+  resolveSolutionFillMode,
+  solutionSystemPromptForMode,
+} from '../../server/services/ai/prompts'
 import { overlayFieldType, overlayFontSizePx } from '../../shared/utils/solution-overlay'
 
 function minimalDocxWithBody(bodyXml: string): Buffer {
@@ -417,6 +426,157 @@ describe('detectPdfBlankRegions', () => {
     expect(blanks[0]!.width).toBeGreaterThan(50)
     expect(blanks[0]!.leftText).toContain('Die')
     expect(blanks[0]!.rightText).toContain('des Penis')
+    expect(classifySolutionFillMode(blanks)).toBe('lueckentext')
+  })
+
+  it('erkennt in durchgehendem Fließtext keine Lücken (offene Aufgabe)', async () => {
+    const pdf = await PDFDocument.create()
+    const font = await pdf.embedFont(StandardFonts.Helvetica)
+    const page = pdf.addPage([595.28, 841.89])
+    const lines = [
+      'Beschreiben Sie die in der GUI dargestellten Komponenten im Sachzusammenhang.',
+      'Material 1: Zur Unterstützung der Fluglotsen soll eine Software erstellt werden,',
+      'die das Nachtflugverbot zwischen 23:00 Uhr und 05:00 Uhr umsetzt. Verspätete',
+      'Flugzeuge, deren geplante Ankunftszeit vor 23:00 Uhr liegt, dürfen bis 24:00 Uhr',
+      'landen. Danach werden sie umgeleitet, sofern keine manuelle Ausnahmegenehmigung',
+      'vorliegt. Jeder Flug wird durch eine Flugnummer eindeutig identifiziert.',
+    ]
+    let y = 720
+    for (const line of lines) {
+      page.drawText(line, { x: 50, y, size: 11, font })
+      y -= 18
+    }
+    // Simulierter Blocksatz: viele Wort-Runs mit mäßigen Abständen auf einer Zeile.
+    const words = ['Jeder', 'Flug', 'wird', 'durch', 'eine', 'Flugnummer', 'eindeutig', 'identifiziert.']
+    let x = 50
+    for (const word of words) {
+      page.drawText(word, { x, y: 580, size: 11, font })
+      x += font.widthOfTextAtSize(word, 11) + 18
+    }
+    const source = Buffer.from(await pdf.save())
+
+    const blanks = await detectPdfBlankRegions(source)
+    expect(blanks).toHaveLength(0)
+    expect(classifySolutionFillMode(blanks)).toBe('offen')
+  })
+})
+
+describe('looksLikeClozeGap / filterReliableBlanks', () => {
+  it('akzeptiert typische Lückentext-Kontexte und verwirft Fließtext-Hälften', () => {
+    expect(
+      looksLikeClozeGap({
+        kind: 'gap',
+        leftText: 'Die',
+        rightText: 'des Penis ist bedeckt.',
+        width: 80,
+      }),
+    ).toBe(true)
+    expect(
+      looksLikeClozeGap({
+        kind: 'gap',
+        leftText: 'ist sie sehr',
+        rightText: 'und steht vorne.',
+        width: 90,
+      }),
+    ).toBe(true)
+    expect(
+      looksLikeClozeGap({
+        kind: 'gap',
+        leftText: 'die das Nachtflugverbot zwischen 23:00 Uhr und',
+        rightText: '05:00 Uhr umsetzt. Verspätete Flugzeuge werden umgeleitet.',
+        width: 40,
+      }),
+    ).toBe(false)
+  })
+
+  it('filtert unzuverlässige Gaps aus der Inventarliste', () => {
+    const filtered = filterReliableBlanks([
+      {
+        pageIndex: 0,
+        blankIndex: 0,
+        x: 70,
+        y: 500,
+        width: 80,
+        height: 12,
+        kind: 'underscore',
+        leftText: 'Die',
+        rightText: 'ist',
+      },
+      {
+        pageIndex: 0,
+        blankIndex: 1,
+        x: 100,
+        y: 400,
+        width: 50,
+        height: 12,
+        kind: 'gap',
+        leftText: 'lange Sachtextpassage über Nachtflugverbote und Ausnahmen',
+        rightText: 'weitere lange Sachtextpassage ohne echte Antwortlücke hier',
+      },
+    ])
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0]!.kind).toBe('underscore')
+    expect(filtered[0]!.blankIndex).toBe(0)
+  })
+})
+
+describe('solution fill mode prompts', () => {
+  it('wählt offenen Prompt ohne Lückeninventar', () => {
+    const prompt = buildSolutionPrompt({
+      title: 'Nachtflugverbot',
+      subjects: ['Informatik'],
+      gradeLevels: [],
+      topics: [],
+      competencies: [],
+      learningObjectives: [],
+      fillMode: 'offen',
+      blankInventory: null,
+    })
+    expect(resolveSolutionFillMode({ title: 'x', subjects: [], gradeLevels: [], topics: [], competencies: [], learningObjectives: [], fillMode: 'offen' })).toBe('offen')
+    expect(prompt).toContain('separates PDF')
+    expect(prompt).toContain('Füllmodus: offen')
+    expect(prompt).not.toContain('verbindliche blankIndex-Liste')
+    expect(solutionSystemPromptForMode('offen')).toContain('separates Dokument')
+    expect(solutionSystemPromptForMode('offen')).not.toContain('sichtbare Lücken im Fließtext')
+  })
+
+  it('erzeugt ein separates PDF mit Aufgabennummer und Lösung', async () => {
+    const buffer = await buildAnswerListPdf(
+      'Musterlösung – Nachtflugverbot',
+      {
+        summary: 'Erwartungshorizont zur GUI-Beschreibung.',
+        answers: [
+          {
+            id: '1',
+            label: 'Aufgabe 1',
+            answer: 'Flugnummer-Feld zur Identifikation; Buttons Pruefen/Erteilen.',
+            fieldType: 'freitext',
+          },
+        ],
+        formFields: [],
+      },
+      { notice: 'Von künstlicher Intelligenz erstellt.' },
+    )
+    expect(buffer.subarray(0, 5).toString('utf8')).toBe('%PDF-')
+    const pdf = await PDFDocument.load(buffer)
+    expect(pdf.getPageCount()).toBeGreaterThanOrEqual(1)
+  })
+
+  it('behält Lückentext-Prompt mit Inventar', () => {
+    const prompt = buildSolutionPrompt({
+      title: 'Lückentext',
+      subjects: [],
+      gradeLevels: [],
+      topics: [],
+      competencies: [],
+      learningObjectives: [],
+      fillMode: 'lueckentext',
+      blankInventory: '0: „Die ___ des Penis“ (Seite 1)',
+      detectedBlankCount: 1,
+    })
+    expect(prompt).toContain('verbindliche blankIndex-Liste')
+    expect(prompt).toContain('Die ___ des Penis')
+    expect(solutionSystemPromptForMode('lueckentext')).toContain('in die Lücken gelegt')
   })
 })
 

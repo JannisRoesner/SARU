@@ -51,6 +51,8 @@ export type FillStrategy =
   | 'docx_appended'
   | 'pdf_acroform'
   | 'pdf_overlay'
+  /** Separates blankes PDF mit Aufgabennummer + Lösung (offene Aufgaben). */
+  | 'pdf_separate'
   | 'docx_from_structure'
   | 'hermes'
 
@@ -532,6 +534,13 @@ const MAX_GAP_PAGE_FRACTION = 0.38
 /** eng: nur echte Baseline-Gleichheit; verhindert, dass schräg liegende Overlays Zeilen mergen. */
 const LINE_Y_TOLERANCE_FACTOR = 0.22
 
+/** Füllmodus: echte Lücken vs. offene Aufgaben ohne Antwortplätze im Dokument. */
+export type SolutionFillMode = 'lueckentext' | 'offen'
+
+/** Typische Wörter unmittelbar vor einer Lücke in Deutsch-Lückentexten. */
+const CLOZE_LEFT_TOKEN =
+  /^(der|die|das|den|dem|des|ein|eine|einen|einem|einer|eines|und|oder|mit|von|zu|im|am|zum|zur|ist|sind|wird|werden|hat|haben|nicht|kein|keine|als|bei|nach|vor|für|über|unter|beim|vom|sehr|auch|nur|noch|schon|mehr|weniger|ca|bzw)$/i
+
 interface PdfTextRun {
   str: string
   x: number
@@ -756,6 +765,61 @@ function looksLikeSentenceFragment(text: string): boolean {
   return /[\p{L}\p{N}]{3,}/u.test(trimmed) && trimmed.length >= 3
 }
 
+function medianPositive(values: number[]): number {
+  const sorted = values.filter((v) => v > 0).sort((a, b) => a - b)
+  if (sorted.length === 0) return 0
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 0
+    ? (sorted[mid - 1]! + sorted[mid]!) / 2
+    : sorted[mid]!
+}
+
+/** Links der Lücke endet typischerweise mit Artikel/Präposition oder kurzem Fragment. */
+function looksLikeClozeLeft(text: string): boolean {
+  const trimmed = text.trim()
+  if (!trimmed || /[.!?…]\s*$/.test(trimmed)) return false
+  if (/[,;:–—\-]$/.test(trimmed)) return true
+  const words = trimmed.split(/\s+/).filter(Boolean)
+  const last = words[words.length - 1] ?? ''
+  if (CLOZE_LEFT_TOKEN.test(last)) return true
+  // Kurzes linkes Fragment („Die“, „ist sie sehr“) – typisch für Lückentexte.
+  if (trimmed.length <= 24) return true
+  return last.length <= 4
+}
+
+/**
+ * Prüft, ob eine Gap-Region wie eine echte Antwortlücke aussieht
+ * (vs. Blocksatz-/Spaltenabstand in Fließtext).
+ */
+export function looksLikeClozeGap(blank: Pick<PdfBlankRegion, 'kind' | 'leftText' | 'rightText' | 'width'>): boolean {
+  if (blank.kind === 'underscore') return true
+  const left = (blank.leftText ?? '').trim()
+  const right = (blank.rightText ?? '').trim()
+  if (!left || !right) return false
+  // Abgeschlossener Satz links → Layout, keine Lücke.
+  if (/[.!?…]\s*$/.test(left)) return false
+  // Nummerierte Folgeaufgabe rechts → eher Spalten-/Absatzlayout.
+  if (/^\d+[\.)]/.test(right)) return false
+  // Zwei lange Fließtext-Hälften mit Abstand → kein Lückentext.
+  if (left.length > 36 && right.length > 36) return false
+  return looksLikeClozeLeft(left)
+}
+
+/**
+ * Behält zuverlässige Lücken (Unterstriche + cloze-ähnliche Gaps).
+ * Reine Layout-Abstände in Fließtext entfallen – verhindert „Lücken“ in offenen Aufgaben.
+ */
+export function filterReliableBlanks(blanks: PdfBlankRegion[]): PdfBlankRegion[] {
+  const reliable = blanks.filter((blank) =>
+    blank.kind === 'underscore' ? true : looksLikeClozeGap(blank),
+  )
+  return reliable.map((blank, blankIndex) => ({ ...blank, blankIndex }))
+}
+
+export function classifySolutionFillMode(blanks: PdfBlankRegion[]): SolutionFillMode {
+  return blanks.length > 0 ? 'lueckentext' : 'offen'
+}
+
 function detectGapBlanksOnLine(
   pageIndex: number,
   line: PdfTextRun[],
@@ -775,6 +839,13 @@ function detectGapBlanksOnLine(
   const maxGap = pageWidth * MAX_GAP_PAGE_FRACTION
   const lineHeight = Math.max(...content.map((r) => r.height), 10)
 
+  // Blocksatz: viele Wort-Runs mit ähnlichen Abständen ≠ Antwortlücken.
+  const interGaps: number[] = []
+  for (let i = 0; i < content.length - 1; i++) {
+    interGaps.push(content[i + 1]!.x - content[i]!.xEnd)
+  }
+  const medianGap = medianPositive(interGaps)
+
   for (let i = 0; i < content.length - 1; i++) {
     const left = content[i]!
     const right = content[i + 1]!
@@ -786,6 +857,24 @@ function detectGapBlanksOnLine(
     if (!looksLikeSentenceFragment(left.str) || !rightOk) continue
     // Zwei Kurztitel mit riesigem Abstand → eher Layout (z. B. Kopfzeile) als Lücke.
     if (left.str.trim().length < 8 && right.str.trim().length < 8 && gap > 120) continue
+
+    const leftJoined = content
+      .slice(0, i + 1)
+      .map((r) => r.str)
+      .join('')
+    const rightJoined = content
+      .slice(i + 1)
+      .map((r) => r.str)
+      .join('')
+
+    // In dichten Zeilen nur Ausreißer-Abstände akzeptieren (nicht Blocksatz-Wortabstände).
+    const isOutlier =
+      medianGap <= 0 || content.length <= 3 || gap >= Math.max(MIN_GAP_PT, medianGap * 2.2)
+    if (!isOutlier) continue
+    if (!looksLikeClozeGap({ kind: 'gap', leftText: leftJoined, rightText: rightJoined, width: gap })) {
+      continue
+    }
+
     pushBlank(into, {
       pageIndex,
       x: left.xEnd + 1,
@@ -793,14 +882,8 @@ function detectGapBlanksOnLine(
       width: gap - 2,
       height: lineHeight,
       kind: 'gap',
-      leftText: content
-        .slice(0, i + 1)
-        .map((r) => r.str)
-        .join(''),
-      rightText: content
-        .slice(i + 1)
-        .map((r) => r.str)
-        .join(''),
+      leftText: leftJoined,
+      rightText: rightJoined,
     })
   }
 
@@ -810,12 +893,21 @@ function detectGapBlanksOnLine(
   const startsWithPunct = /^[.!?,;:]/.test(first.str.trim())
   const lonelyShort =
     content.length === 1 && first.str.trim().length <= 32 && !startsWithPunct
+  const wrapLeft = previousLineText.trim()
+  const wrapRight = content.map((r) => r.str).join('')
   if (
     !lonelyShort &&
     startGap >= MIN_GAP_PT &&
     startGap <= maxGap &&
     looksLikeSentenceFragment(first.str) &&
-    (startsWithPunct || (content.length >= 2 && startGap >= MIN_GAP_PT * 1.5))
+    (startsWithPunct || (content.length >= 2 && startGap >= MIN_GAP_PT * 1.5)) &&
+    // Ohne linken Kontext der Vorzeile nur bei Satzzeichen-Fortsetzung (klare Lücke).
+    (startsWithPunct || looksLikeClozeGap({
+      kind: 'gap',
+      leftText: wrapLeft || '…',
+      rightText: wrapRight,
+      width: startGap,
+    }))
   ) {
     pushBlank(into, {
       pageIndex,
@@ -826,7 +918,7 @@ function detectGapBlanksOnLine(
       kind: 'gap',
       // Vorherige Zeile als linker Kontext (Lücke oft über Zeilenumbruch).
       leftText: previousLineText,
-      rightText: content.map((r) => r.str).join(''),
+      rightText: wrapRight,
     })
   }
 }
@@ -913,7 +1005,9 @@ export async function detectPdfBlankRegions(source: Buffer): Promise<PdfBlankReg
       return a.x - b.x
     })
 
-    return raw.map((blank, blankIndex) => ({ ...blank, blankIndex }))
+    const indexed = raw.map((blank, blankIndex) => ({ ...blank, blankIndex }))
+    // Layout-Abstände in Fließtext verwerfen – sonst werden offene Aufgaben wie Lückentexte behandelt.
+    return filterReliableBlanks(indexed)
   } finally {
     await task.destroy()
   }
@@ -1186,14 +1280,22 @@ function resolvePlacements(
     }
 
     // 1) PDF-Geometrie (zuverlässiger als Vision-bbox bei getippten Lückentexten).
-    if (!blank && blanks.length > 0) {
+    // Freitext nicht in Gap-„Lücken“ im Fließtext legen – das sind oft Layout-Abstände.
+    const canUseGeometry = (candidate: PdfBlankRegion | undefined): candidate is PdfBlankRegion =>
+      Boolean(
+        candidate &&
+          !usedBlankIndexes.has(candidate.blankIndex) &&
+          !(fieldType === 'freitext' && candidate.kind === 'gap'),
+      )
+
+    if (!canUseGeometry(blank) && blanks.length > 0 && fieldType !== 'freitext') {
       while (sequentialBlank < blanks.length && usedBlankIndexes.has(sequentialBlank)) {
         sequentialBlank += 1
       }
       blank = blanks[sequentialBlank]
     }
 
-    if (blank && !usedBlankIndexes.has(blank.blankIndex)) {
+    if (canUseGeometry(blank)) {
       usedBlankIndexes.add(blank.blankIndex)
       if (blank.blankIndex === sequentialBlank) sequentialBlank += 1
       placements.push(placementFromBlank(blank, text, fieldType))
@@ -1317,7 +1419,10 @@ export async function overlayPdfAnswers(
   }
 }
 
-/** @deprecated Nur noch für Tests/Hilfszwecke – Produktionspfad nutzt overlayPdfAnswers. */
+/**
+ * Erzeugt ein separates, blankes PDF mit Aufgabennummer und Musterlösung.
+ * Für offene Aufgaben ohne Lücken/Antwortfelder im Originalmaterial.
+ */
 export async function buildAnswerListPdf(
   title: string,
   solution: StructuredSolution,
@@ -1326,63 +1431,77 @@ export async function buildAnswerListPdf(
   const pdf = await PDFDocument.create()
   const font = await pdf.embedFont(StandardFonts.Helvetica)
   const fontBold = await pdf.embedFont(StandardFonts.HelveticaBold)
-  let page = pdf.addPage([595.28, 841.89])
-  let y = 800
-  const margin = 50
-  const maxWidth = 495
+  const pageWidth = 595.28
+  const pageHeight = 841.89
+  const margin = 56
+  const maxWidth = pageWidth - margin * 2
+  let page = pdf.addPage([pageWidth, pageHeight])
+  let y = pageHeight - margin
 
-  const drawWrapped = (text: string, size: number, bold = false) => {
+  const ensureSpace = (needed: number) => {
+    if (y - needed >= margin) return
+    page = pdf.addPage([pageWidth, pageHeight])
+    y = pageHeight - margin
+  }
+
+  const drawWrapped = (text: string, size: number, bold = false, color = rgb(0.12, 0.14, 0.18)) => {
     const active = bold ? fontBold : font
     const safe = sanitizePdfText(text)
-    const words = safe.split(/\s+/)
-    let line = ''
-    const flush = () => {
-      if (!line) return
-      if (y < 60) {
-        page = pdf.addPage([595.28, 841.89])
-        y = 800
+    const paragraphs = safe.split(/\n+/).filter((p) => p.trim().length > 0)
+    if (paragraphs.length === 0) return
+
+    for (const paragraph of paragraphs) {
+      const words = paragraph.split(/\s+/).filter(Boolean)
+      let line = ''
+      const flush = () => {
+        if (!line) return
+        ensureSpace(size + 4)
+        page.drawText(line, { x: margin, y, size, font: active, color })
+        y -= size + 4
+        line = ''
       }
-      page.drawText(line, { x: margin, y, size, font: active, color: rgb(0.1, 0.1, 0.1) })
-      y -= size + 6
-      line = ''
-    }
-    for (const word of words) {
-      const next = line ? `${line} ${word}` : word
-      if (active.widthOfTextAtSize(next, size) > maxWidth) {
-        flush()
-        line = word
-      } else {
-        line = next
+      for (const word of words) {
+        const next = line ? `${line} ${word}` : word
+        if (active.widthOfTextAtSize(next, size) > maxWidth) {
+          flush()
+          line = word
+        } else {
+          line = next
+        }
       }
+      flush()
     }
-    flush()
   }
 
   drawWrapped(title, 16, true)
-  y -= 8
+  y -= 6
   if (options.notice) {
-    drawWrapped(options.notice, 10)
-    y -= 6
-  }
-  if (solution.summary) {
-    drawWrapped(solution.summary, 11)
+    drawWrapped(options.notice, 9, false, rgb(0.35, 0.38, 0.42))
     y -= 10
+  }
+  if (solution.summary?.trim()) {
+    drawWrapped(solution.summary.trim(), 11)
+    y -= 14
   }
 
   for (const answer of solution.answers) {
-    const pageHint = answer.page ? ` (S. ${answer.page})` : ''
-    drawWrapped(`${answer.label}${pageHint}`, 12, true)
+    ensureSpace(40)
+    drawWrapped(answer.label || 'Aufgabe', 12, true, SOLUTION_INK)
+    y -= 2
     drawWrapped(answer.answer, 11)
-    y -= 8
+    y -= 12
   }
 
-  if (solution.notesForTeacher) {
+  if (solution.notesForTeacher?.trim()) {
+    ensureSpace(36)
     drawWrapped('Hinweise für die Lehrkraft', 12, true)
-    drawWrapped(solution.notesForTeacher, 11)
+    drawWrapped(solution.notesForTeacher.trim(), 11)
+    y -= 10
   }
-  if (solution.uncertainties) {
+  if (solution.uncertainties?.trim()) {
+    ensureSpace(36)
     drawWrapped('Unklarheiten', 12, true)
-    drawWrapped(solution.uncertainties, 11)
+    drawWrapped(solution.uncertainties.trim(), 11)
   }
 
   return Buffer.from(await pdf.save())

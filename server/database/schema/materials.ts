@@ -65,6 +65,8 @@ export interface AiMeta {
   reviewedBy?: string
   /** Strategie der dokumentbasierten Musterlösung (docx_inplace, pdf_acroform, …). */
   fillStrategy?: string
+  /** lueckentext = Antworten in Dokumentlücken; offen = Erwartungshorizont ohne Lückenfüllung. */
+  fillMode?: 'lueckentext' | 'offen'
   hermesUsed?: boolean
   sourceFileName?: string
   /** text_layer | vision – Herkunft des für Metadaten genutzten Extrakts. */
