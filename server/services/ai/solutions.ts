@@ -1,4 +1,6 @@
-import { readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { eq } from 'drizzle-orm'
 import { useDatabase } from '../../database/client'
 import { aiJobs, materialAssets, materialVariants } from '../../database/schema'
@@ -15,6 +17,7 @@ import {
   updateMaterial,
 } from '../material.service'
 import { extensionOf, resolveStoragePath } from '../storage.service'
+import { convertOfficeFileToPdf } from '../office-convert.service'
 import {
   getAiSettings,
   getHermesSettings,
@@ -28,11 +31,13 @@ import {
   buildAnswerListPdf,
   buildSolutionDocx,
   classifySolutionFillMode,
+  detectDocxBlanks,
   detectPdfBlankRegions,
   enrichSolutionPlacements,
   fillDocxDocument,
   fillPdfAcroForm,
   formatBlankInventory,
+  formatTextBlankInventory,
   overlayPdfAnswers,
   parseStructuredSolution,
   solutionFileName,
@@ -41,6 +46,7 @@ import {
   type PdfBlankRegion,
   type SolutionFillMode,
   type StructuredSolution,
+  type TextBlankInfo,
 } from './document-fill'
 import { kiAutorAnzeige } from '#shared/utils/ki'
 import { tryHermesDocumentFill } from './hermes'
@@ -61,6 +67,19 @@ const MAX_VISION_PAGES = 8
 
 const OFFICE_EXTENSIONS = new Set(['docx', 'odt', 'doc', 'rtf'])
 const PDF_EXTENSIONS = new Set(['pdf'])
+/** Office-Formate, die LibreOffice für Vision/Vorschau nach PDF wandeln kann. */
+const OFFICE_VISION_EXTENSIONS = new Set([
+  'docx',
+  'doc',
+  'odt',
+  'rtf',
+  'pptx',
+  'ppt',
+  'odp',
+  'xlsx',
+  'xls',
+  'ods',
+])
 
 export interface GenerateSolutionOptions {
   /** Nur diese Variante berücksichtigen; sonst die Standardfassung. */
@@ -142,8 +161,9 @@ export async function generateSolution(
         .slice(0, 60_000)
     : ''
 
-  // PDF: Lücken + Kontext vor dem Modellaufruf erkennen, damit blankIndex nicht geraten wird.
+  // Lücken vor dem Modellaufruf erkennen (PDF-Geometrie oder DOCX-Textebene).
   let detectedBlanks: PdfBlankRegion[] = []
+  let docxBlanks: TextBlankInfo[] = []
   if (source && PDF_EXTENSIONS.has(source.extension)) {
     try {
       detectedBlanks = await detectPdfBlankRegions(source.buffer)
@@ -159,15 +179,37 @@ export async function generateSolution(
     } catch (error) {
       log.warn('PDF-Lückenerkennung vor Prompt fehlgeschlagen', error)
     }
+  } else if (source?.extension === 'docx') {
+    try {
+      docxBlanks = detectDocxBlanks(source.buffer)
+      log.info('DOCX-Lücken für Prompt erkannt', {
+        count: docxBlanks.length,
+        sample: docxBlanks.slice(0, 3),
+      })
+    } catch (error) {
+      log.warn('DOCX-Lückenerkennung vor Prompt fehlgeschlagen', error)
+    }
   }
 
+  const blankCount = detectedBlanks.length || docxBlanks.length
   // Ohne zuverlässige Lücken: offener Erwartungshorizont statt erzwungener Lückentext-Füllung.
-  const fillMode: SolutionFillMode = classifySolutionFillMode(detectedBlanks)
+  const fillMode: SolutionFillMode = classifySolutionFillMode(
+    detectedBlanks.length ? detectedBlanks : docxBlanks,
+  )
   log.info('Musterlösungs-Füllmodus', {
     fillMode,
-    blanks: detectedBlanks.length,
+    blanks: blankCount,
     source: source?.fileName ?? null,
   })
+
+  const blankInventory =
+    fillMode === 'lueckentext'
+      ? detectedBlanks.length
+        ? formatBlankInventory(detectedBlanks)
+        : docxBlanks.length
+          ? formatTextBlankInventory(docxBlanks)
+          : null
+      : null
 
   const prompt = buildSolutionPrompt({
     title: material.title,
@@ -184,11 +226,8 @@ export async function generateSolution(
     userInstructions: options.userInstructions,
     sourceFileName: source?.fileName ?? null,
     sourceMimeType: source?.mimeType ?? null,
-    blankInventory:
-      fillMode === 'lueckentext' && detectedBlanks.length
-        ? formatBlankInventory(detectedBlanks)
-        : null,
-    detectedBlankCount: fillMode === 'lueckentext' ? detectedBlanks.length || null : null,
+    blankInventory,
+    detectedBlankCount: fillMode === 'lueckentext' ? blankCount || null : null,
     fillMode,
   })
 
@@ -538,18 +577,17 @@ async function buildFilledDocument(
       }
     }
     if (source?.extension === 'docx') {
+      // Word bleibt Word: Lücken blau füllen oder Lösungsteil anhängen – kein PDF-Overlay.
       const result = fillDocxDocument(source.buffer, solution, {
         title,
         notice: AI_CONTENT_NOTICE,
       })
-      if (result.strategy === 'docx_inplace') {
-        return {
-          buffer: result.buffer,
-          fileName: solutionFileName(source.fileName, 'docx'),
-          mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-          strategy: result.strategy,
-          summary: solution.summary,
-        }
+      return {
+        buffer: result.buffer,
+        fileName: solutionFileName(source.fileName, 'docx'),
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        strategy: result.strategy,
+        summary: solution.summary,
       }
     }
 
@@ -565,11 +603,16 @@ async function buildFilledDocument(
   }
 
   if (source && OFFICE_EXTENSIONS.has(source.extension)) {
-    // ODT/DOC: als DOCX-Lösung mit Anhang oder – bei DOCX – In-Place-Füllung.
+    // DOCX: Antworten direkt in die Textlücken (blaue Schrift) – bleibt Word-Dokument.
     if (source.extension === 'docx') {
       const result = fillDocxDocument(source.buffer, solution, {
         title,
         notice: AI_CONTENT_NOTICE,
+      })
+      log.info('DOCX-Musterlösung befüllt', {
+        strategy: result.strategy,
+        filled: result.filled,
+        answers: solution.answers.length,
       })
       return {
         buffer: result.buffer,
@@ -686,7 +729,33 @@ async function collectVisionParts(
         continue
       }
 
-      // Office-Dateien: für Vision-Pipeline nicht direkt nutzbar (Text kommt separat).
+      const ext = extensionOf(asset.fileName ?? '')
+      if (OFFICE_VISION_EXTENSIONS.has(ext)) {
+        const pdfBuffer = await convertOfficeBufferToPdf(buffer, asset.fileName ?? `datei.${ext}`)
+        if (!pdfBuffer) {
+          skipped.push(`${asset.fileName} (Office→PDF nicht möglich – Text kommt separat)`)
+          continue
+        }
+        if (supportsNativePdf(provider)) {
+          parts.push({
+            type: 'file',
+            mimeType: 'application/pdf',
+            base64: pdfBuffer.toString('base64'),
+            fileName: (asset.fileName ?? 'material').replace(/\.[^.]+$/, '') + '.pdf',
+          })
+        } else {
+          const pages = await rasterizePdf(pdfBuffer, { maxPages: MAX_VISION_PAGES })
+          if (pages.length === 0) {
+            skipped.push(`${asset.fileName} (Bildumwandlung nach Office→PDF nicht möglich)`)
+            continue
+          }
+          for (const page of pages) {
+            parts.push({ type: 'image', mimeType: page.mimeType, base64: page.base64 })
+          }
+        }
+        continue
+      }
+
       skipped.push(`${asset.fileName} (Format wird nicht als Bild übergeben)`)
     } catch (error) {
       log.warn('Anhang konnte nicht gelesen werden', { assetId: asset.id, error })
@@ -695,6 +764,26 @@ async function collectVisionParts(
   }
 
   return { parts, skipped }
+}
+
+/** Schreibt einen Office-Puffer temporär und konvertiert ihn per LibreOffice nach PDF. */
+async function convertOfficeBufferToPdf(
+  buffer: Buffer,
+  fileName: string,
+): Promise<Buffer | null> {
+  const workDir = await mkdtemp(join(tmpdir(), 'saru-sol-office-'))
+  const safe =
+    fileName.replace(/[^\w.\-()+äöüÄÖÜß ]/g, '_').slice(0, 120) || `datei.${extensionOf(fileName)}`
+  const inputPath = join(workDir, safe)
+  try {
+    await writeFile(inputPath, buffer)
+    return await convertOfficeFileToPdf(inputPath)
+  } catch (error) {
+    log.warn('Office→PDF für Musterlösung fehlgeschlagen', { fileName, error })
+    return null
+  } finally {
+    await rm(workDir, { recursive: true, force: true }).catch(() => {})
+  }
 }
 
 async function enrichFromPdfBuffer(

@@ -276,7 +276,15 @@ export function buildSolutionDocx(
   return Buffer.from(packed)
 }
 
+/** Lückenmuster in Word-Text (auch über Run-Grenzen hinweg zusammengefügt). */
 const BLANK_PATTERN = /(?:_{3,}|\.{3,}|…{2,}|\[[\s_.…]{2,}\])/g
+
+/** Infos zu Text-Lücken in DOCX (ohne PDF-Geometrie). */
+export interface TextBlankInfo {
+  blankIndex: number
+  leftText: string
+  rightText: string
+}
 
 function orderedAnswerTexts(solution: StructuredSolution): string[] {
   const byBlank = [...solution.answers]
@@ -287,15 +295,169 @@ function orderedAnswerTexts(solution: StructuredSolution): string[] {
   return solution.answers.map((a) => a.answer)
 }
 
+interface DocxTextNode {
+  /** Index des Match-Starts im XML. */
+  xmlStart: number
+  open: string
+  text: string
+  close: string
+  /** Start-Offset dieses Knotens im zusammengefügten Klartext. */
+  plainStart: number
+}
+
+function collectDocxTextNodes(xml: string): DocxTextNode[] {
+  const nodes: DocxTextNode[] = []
+  const re = /(<w:t(?:\s[^>]*)?>)([\s\S]*?)(<\/w:t>)/g
+  let match: RegExpExecArray | null
+  let plainStart = 0
+  while ((match = re.exec(xml)) != null) {
+    const open = match[1]!
+    const text = match[2]!
+    const close = match[3]!
+    nodes.push({
+      xmlStart: match.index,
+      open,
+      text,
+      close,
+      plainStart,
+    })
+    plainStart += text.length
+  }
+  return nodes
+}
+
+function decodeXmlText(value: string): string {
+  return value
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&apos;', "'")
+    .replaceAll('&amp;', '&')
+}
+
+/**
+ * Findet Unterstrich-/Punktlücken in DOCX-document.xml, auch wenn Word die
+ * Unterstriche auf mehrere <w:t>-Runs aufgeteilt hat.
+ */
+export function detectDocxBlanks(source: Buffer): TextBlankInfo[] {
+  const files = unzipSync(new Uint8Array(source))
+  const docEntry = files['word/document.xml']
+  if (!docEntry) return []
+  const xml = strFromU8(docEntry)
+  const nodes = collectDocxTextNodes(xml)
+  const plain = nodes.map((n) => decodeXmlText(n.text)).join('')
+  const blanks: TextBlankInfo[] = []
+  const pattern = new RegExp(BLANK_PATTERN.source, 'g')
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(plain)) != null) {
+    const start = match.index
+    const end = start + match[0].length
+    blanks.push({
+      blankIndex: blanks.length,
+      leftText: plain.slice(Math.max(0, start - 56), start).replace(/\s+/g, ' ').trim(),
+      rightText: plain.slice(end, end + 56).replace(/\s+/g, ' ').trim(),
+    })
+  }
+  return blanks
+}
+
+export function formatTextBlankInventory(blanks: TextBlankInfo[]): string {
+  if (blanks.length === 0) return ''
+  return blanks
+    .map((blank) => {
+      const left = blank.leftText || '…'
+      const right = blank.rightText || '…'
+      return `${blank.blankIndex}: „${left} ___ ${right}“`
+    })
+    .join('\n')
+}
+
+/** Blaue Tinte für eingefügte Musterlösungs-Antworten in Word (ähnlich PDF-Overlay). */
+const SOLUTION_DOCX_COLOR = '1F4E9B'
+
+function docxTextRun(text: string, asAnswer = false): string {
+  if (!text) return ''
+  const color = asAnswer
+    ? `<w:rPr><w:color w:val="${SOLUTION_DOCX_COLOR}"/><w:b/></w:rPr>`
+    : ''
+  return `<w:r>${color}<w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r>`
+}
+
+/**
+ * Füllt Lücken in einem Absatz: Klartext über alle <w:t> zusammenfügen
+ * (Word splittet Unterstriche oft auf mehrere Runs), Antworten in blauer Schrift einsetzen.
+ */
+function fillBlanksInParagraphXml(
+  paragraphXml: string,
+  answers: string[],
+  cursor: { index: number },
+): { xml: string; replaced: number } {
+  const nodes = collectDocxTextNodes(paragraphXml)
+  if (nodes.length === 0) return { xml: paragraphXml, replaced: 0 }
+
+  const plain = nodes.map((n) => decodeXmlText(n.text)).join('')
+  if (!new RegExp(BLANK_PATTERN.source).test(plain)) {
+    return { xml: paragraphXml, replaced: 0 }
+  }
+
+  const openTag = paragraphXml.match(/^<w:p\b[^>]*>/)?.[0]
+  if (!openTag) return { xml: paragraphXml, replaced: 0 }
+  const pPr = paragraphXml.match(/<w:pPr\b[\s\S]*?<\/w:pPr>/)?.[0] ?? ''
+
+  type Segment = { text: string; answer: boolean }
+  const segments: Segment[] = []
+  const pattern = new RegExp(BLANK_PATTERN.source, 'g')
+  let replaced = 0
+  let last = 0
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(plain)) != null) {
+    if (match.index > last) {
+      segments.push({ text: plain.slice(last, match.index), answer: false })
+    }
+    const value = answers[cursor.index]
+    if (value == null) {
+      segments.push({ text: match[0], answer: false })
+    } else {
+      cursor.index += 1
+      replaced += 1
+      segments.push({ text: value, answer: true })
+    }
+    last = match.index + match[0].length
+  }
+  if (last < plain.length) {
+    segments.push({ text: plain.slice(last), answer: false })
+  }
+  if (replaced === 0) return { xml: paragraphXml, replaced: 0 }
+
+  const runs = segments.map((seg) => docxTextRun(seg.text, seg.answer)).join('')
+  return {
+    xml: `${openTag}${pPr}${runs}</w:p>`,
+    replaced,
+  }
+}
+
+/** Ersetzt Lücken dokumentweit, absatzweise (robust gegen Word-Run-Splitting). */
+function fillBlanksAcrossDocxRuns(xml: string, answers: string[]): { xml: string; replaced: number } {
+  const cursor = { index: 0 }
+  let replaced = 0
+  const next = xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (paragraphXml) => {
+    const result = fillBlanksInParagraphXml(paragraphXml, answers, cursor)
+    replaced += result.replaced
+    return result.xml
+  })
+  return { xml: next, replaced }
+}
+
 /**
  * Füllt Lücken in einem DOCX: Content Controls (Alias/Tag) und Unterstrich-/Punktmuster.
+ * Lücken dürfen über mehrere Word-Runs verteilt sein.
  * Wenn nichts ersetzt werden kann, wird eine Abschnitts-Musterlösung angehängt.
  */
 export function fillDocxDocument(
   source: Buffer,
   solution: StructuredSolution,
   options: { title?: string; notice?: string } = {},
-): { buffer: Buffer; strategy: 'docx_inplace' | 'docx_appended' } {
+): { buffer: Buffer; strategy: 'docx_inplace' | 'docx_appended'; filled: number } {
   const files = unzipSync(new Uint8Array(source))
   const docEntry = files['word/document.xml']
   if (!docEntry) {
@@ -304,6 +466,7 @@ export function fillDocxDocument(
         notice: options.notice,
       }),
       strategy: 'docx_appended',
+      filled: 0,
     }
   }
 
@@ -334,29 +497,23 @@ export function fillDocxDocument(
       replaced += 1
       const content = inner.replace(
         /<w:sdtContent>([\s\S]*?)<\/w:sdtContent>/,
-        `<w:sdtContent><w:r><w:t xml:space="preserve">${escapeXml(value)}</w:t></w:r></w:sdtContent>`,
+        `<w:sdtContent>${docxTextRun(value, true)}</w:sdtContent>`,
       )
       return `<w:sdt>${content}</w:sdt>`
     },
   )
 
-  // Unterstrich-/Platzhalter-Lücken in Textläufen der Reihe nach füllen.
-  let blankCursor = 0
-  xml = xml.replace(/(<w:t(?:\s[^>]*)?>)([\s\S]*?)(<\/w:t>)/g, (_full, open, text, close) => {
-    if (!/(?:_{3,}|\.{3,}|…{2,}|\[[\s_.…]{2,}\])/.test(text)) return `${open}${text}${close}`
-    const next = text.replace(BLANK_PATTERN, () => {
-      const value = answers[blankCursor]
-      if (value == null) return '___'
-      blankCursor += 1
-      replaced += 1
-      return value
-    })
-    return `${open}${next}${close}`
-  })
+  const across = fillBlanksAcrossDocxRuns(xml, answers)
+  xml = across.xml
+  replaced += across.replaced
 
   if (replaced > 0) {
     files['word/document.xml'] = strToU8(xml)
-    return { buffer: Buffer.from(zipSync(files, { level: 6 })), strategy: 'docx_inplace' }
+    return {
+      buffer: Buffer.from(zipSync(files, { level: 6 })),
+      strategy: 'docx_inplace',
+      filled: replaced,
+    }
   }
 
   // Keine Lücken gefunden → Abschnitt anhängen, Original bleibt lesbar.
@@ -371,7 +528,11 @@ export function fillDocxDocument(
     `${appendix}</w:body>`,
   )
   files['word/document.xml'] = strToU8(injected)
-  return { buffer: Buffer.from(zipSync(files, { level: 6 })), strategy: 'docx_appended' }
+  return {
+    buffer: Buffer.from(zipSync(files, { level: 6 })),
+    strategy: 'docx_appended',
+    filled: 0,
+  }
 }
 
 /** Füllt AcroForm-Felder, sofern vorhanden. */

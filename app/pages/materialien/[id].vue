@@ -340,6 +340,7 @@ const loesungStruktur = computed<StoredStructuredSolution | null>(() => {
   return raw
 })
 
+/** PDF-Overlay-Editor nur bei PDF-Strategien – Word-Lösungen werden im Dokument selbst befüllt. */
 const loesungBearbeitbar = computed(
   () =>
     Boolean(
@@ -347,9 +348,7 @@ const loesungBearbeitbar = computed(
         loesungStruktur.value &&
         darfBearbeiten.value &&
         (data.value?.aiMeta?.fillStrategy === 'pdf_overlay' ||
-          data.value?.aiMeta?.fillStrategy === 'pdf_separate' ||
-          data.value?.aiMeta?.sourceAssetId ||
-          data.value?.aiMeta?.sourceMaterialId),
+          data.value?.aiMeta?.fillStrategy === 'pdf_separate'),
     ),
 )
 

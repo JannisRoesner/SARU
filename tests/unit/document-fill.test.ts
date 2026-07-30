@@ -6,12 +6,14 @@ import {
   blankRegionToBBox,
   buildSolutionDocx,
   classifySolutionFillMode,
+  detectDocxBlanks,
   detectPdfBlankRegions,
   enrichSolutionPlacements,
   fillDocxDocument,
   fillPdfAcroForm,
   filterReliableBlanks,
   formatBlankInventory,
+  formatTextBlankInventory,
   inferAnswerFieldType,
   buildAnswerListPdf,
   looksLikeClozeGap,
@@ -319,6 +321,7 @@ describe('fillDocxDocument', () => {
     const xml = strFromU8(unzipSync(new Uint8Array(filled.buffer))['word/document.xml']!)
     expect(xml).toContain('Zellkern')
     expect(xml).toContain('Mitochondrium')
+    expect(xml).toContain('w:val="1F4E9B"')
     expect(xml).not.toContain('______')
   })
 
@@ -337,6 +340,61 @@ describe('fillDocxDocument', () => {
     const xml = strFromU8(unzipSync(new Uint8Array(filled.buffer))['word/document.xml']!)
     expect(xml).toContain('Musterlösung (KI)')
     expect(xml).toContain('Korrekte Antwort')
+  })
+
+  it('füllt Unterstriche, die Word auf mehrere Runs aufteilt', () => {
+    // Typisch: „Die“ | „___“ | „___“ | „ des Penis“ in getrennten <w:t>.
+    const blanked = minimalDocxWithBody(`
+      <w:p>
+        <w:r><w:t>Die </w:t></w:r>
+        <w:r><w:t>___</w:t></w:r>
+        <w:r><w:t>___</w:t></w:r>
+        <w:r><w:t> des Penis</w:t></w:r>
+      </w:p>
+      <w:p>
+        <w:r><w:t>ist sie sehr </w:t></w:r>
+        <w:r><w:t>....</w:t></w:r>
+        <w:r><w:t>.</w:t></w:r>
+      </w:p>
+    `)
+
+    const detected = detectDocxBlanks(blanked)
+    expect(detected.length).toBeGreaterThanOrEqual(2)
+    expect(formatTextBlankInventory(detected)).toContain('Die')
+    expect(classifySolutionFillMode(detected)).toBe('lueckentext')
+
+    const filled = fillDocxDocument(blanked, {
+      summary: 'Test',
+      answers: [
+        { id: '1', label: '1', answer: 'Eichel', blankIndex: 0 },
+        { id: '2', label: '2', answer: 'lang', blankIndex: 1 },
+      ],
+      formFields: [],
+    })
+
+    expect(filled.strategy).toBe('docx_inplace')
+    expect(filled.filled).toBeGreaterThanOrEqual(2)
+    const xml = strFromU8(unzipSync(new Uint8Array(filled.buffer))['word/document.xml']!)
+    expect(xml).toContain('Eichel')
+    expect(xml).toContain('lang')
+    expect(xml).toContain('w:val="1F4E9B"')
+    expect(xml).not.toMatch(/_{3,}/)
+  })
+
+  it('schreibt Einfach-Lücken in blauer Schrift ins DOCX', () => {
+    const blanked = minimalDocxWithBody(`
+      <w:p><w:r><w:t>Frage: ______</w:t></w:r></w:p>
+    `)
+    const filled = fillDocxDocument(blanked, {
+      summary: 'Test',
+      answers: [{ id: '1', label: '1', answer: 'Meiose' }],
+      formFields: [],
+    })
+    expect(filled.strategy).toBe('docx_inplace')
+    const xml = strFromU8(unzipSync(new Uint8Array(filled.buffer))['word/document.xml']!)
+    expect(xml).toContain('Meiose')
+    expect(xml).toContain('<w:color w:val="1F4E9B"/>')
+    expect(xml).not.toContain('______')
   })
 })
 
