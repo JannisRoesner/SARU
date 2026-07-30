@@ -31,24 +31,17 @@ import {
 } from '../storage.service'
 import { getOrCreateSubject, resolveSubjectIds } from '../taxonomy.service'
 import { waitForIndex } from '../search/indexer'
+import {
+  aiMaterialFormatsLabel,
+  isAiMaterialFileExtension,
+} from '#shared/utils/ai-material-formats'
 
 const log = createLogger('ai-material-create')
 
 export const AI_CREATE_ADAPTER_ID = 'ai-material-create'
 export const AI_CREATE_ADAPTER_VERSION = '1'
 
-const ALLOWED_EXTENSIONS = new Set([
-  'pdf',
-  'docx',
-  'pptx',
-  'xlsx',
-  'odt',
-  'odp',
-  'ods',
-  'txt',
-  'md',
-  'csv',
-])
+const LEGACY_OFFICE = new Set(['doc', 'ppt', 'xls'])
 
 export interface AiCreateAnalyzeResult {
   analyzeId: string
@@ -110,9 +103,9 @@ export async function analyzeAiMaterialCreate(
 ): Promise<AiCreateAnalyzeResult> {
   const fileName = sanitizeFileName(file.fileName)
   const ext = extensionOf(fileName)
-  if (!ALLOWED_EXTENSIONS.has(ext)) {
+  if (!isAiMaterialFileExtension(ext)) {
     throw invalidInput(
-      'Für den KI-Assistenten sind PDF- und Office-/Textdokumente erlaubt (kein Moodle-Kursarchiv).',
+      `Für den KI-Assistenten sind ${aiMaterialFormatsLabel()} erlaubt (kein Moodle-Kursarchiv).`,
     )
   }
   await validateUpload(file.buffer, fileName)
@@ -144,6 +137,11 @@ export async function analyzeAiMaterialCreate(
           ? 'Kein Text gefunden – Vorschläge basieren ggf. nur auf dem Dateinamen.'
           : 'Keine Textebene und KI/Vision deaktiviert – Titel aus Dateiname.',
       )
+      if (LEGACY_OFFICE.has(ext)) {
+        warnings.push(
+          'Ältere Office-Dateien (.doc, .ppt, .xls) benötigen LibreOffice auf dem Server für die Textextraktion.',
+        )
+      }
     } else if (extractionMethod === 'vision') {
       warnings.push('Text per Vision/OCR aus Scan ermittelt.')
     }

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { materialTypes } from '#shared/utils/labels'
+import { aiMaterialAcceptAttribute, aiMaterialFormatsLabel } from '#shared/utils/ai-material-formats'
 import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
 import type { MaterialDetail } from '~~/server/repositories/material.repository'
 import type { MaterialType } from '#shared/types/domain'
@@ -67,8 +68,8 @@ const formular = reactive({
   learningObjectives: [] as string[],
 })
 
-const ACCEPT =
-  '.pdf,.docx,.pptx,.xlsx,.odt,.odp,.ods,.txt,.md,.csv,application/pdf'
+const ACCEPT = aiMaterialAcceptAttribute()
+const FORMAT_HINWEIS = aiMaterialFormatsLabel()
 
 async function dateiAnalysieren(files: FileList | null | undefined) {
   if (analysiertLaeuft.value) return
@@ -205,7 +206,7 @@ async function zuruecksetzen() {
           <UiIcon name="cloud-arrow-up" class="mb-3 text-3xl text-primary" />
           <p class="font-medium text-ink">Datei hier ablegen</p>
           <p class="mt-1 text-sm text-ink-muted">
-            PDF, Word, PowerPoint, Tabellen oder Text – Moodle-Archive bitte separat
+            {{ FORMAT_HINWEIS }} – Moodle-Archive bitte separat
           </p>
           <label class="mt-4 inline-flex cursor-pointer">
             <input

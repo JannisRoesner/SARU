@@ -38,9 +38,21 @@ export const ALLOWED_TYPES: AllowedType[] = [
     sniffable: true,
   },
   {
+    label: 'Präsentation (alt)',
+    extensions: ['ppt'],
+    mimeTypes: ['application/vnd.ms-powerpoint'],
+    sniffable: true,
+  },
+  {
     label: 'Tabelle',
     extensions: ['xlsx'],
     mimeTypes: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+    sniffable: true,
+  },
+  {
+    label: 'Tabelle (alt)',
+    extensions: ['xls'],
+    mimeTypes: ['application/vnd.ms-excel'],
     sniffable: true,
   },
   {

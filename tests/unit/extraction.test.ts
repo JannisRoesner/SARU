@@ -34,7 +34,14 @@ describe('isExtractable', () => {
   it('erkennt unterstützte Dokumentformate', () => {
     expect(isExtractable('Arbeitsblatt.pdf')).toBe(true)
     expect(isExtractable('Entwurf.DOCX')).toBe(true)
+    expect(isExtractable('Alt.doc')).toBe(true)
     expect(isExtractable('Folien.pptx')).toBe(true)
+    expect(isExtractable('Folien.ppt')).toBe(true)
+    expect(isExtractable('Tabelle.xlsx')).toBe(true)
+    expect(isExtractable('Tabelle.xls')).toBe(true)
+    expect(isExtractable('Text.odt')).toBe(true)
+    expect(isExtractable('Praes.odp')).toBe(true)
+    expect(isExtractable('Daten.ods')).toBe(true)
   })
 
   it('lehnt nicht indizierbare Formate ab', () => {

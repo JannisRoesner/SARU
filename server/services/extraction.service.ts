@@ -4,6 +4,11 @@ import { oeffentlicheFehlermeldung } from '#shared/utils/public-error'
 import { createLogger } from '../utils/logger'
 import { loadPdfjs } from '../utils/pdfjs'
 import { extensionOf, resolveStoragePath } from './storage.service'
+import { convertOfficeFileToPdf } from './office-convert.service'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { AI_MATERIAL_FILE_EXTENSIONS } from '#shared/utils/ai-material-formats'
 
 const log = createLogger('extraction')
 
@@ -17,7 +22,9 @@ export interface ExtractionResult {
 /** Obergrenze für indizierten Text – schützt Datenbank und Embedding-Kosten. */
 const MAX_TEXT_LENGTH = 400_000
 
-const EXTRACTABLE = new Set(['pdf', 'docx', 'pptx', 'xlsx', 'odt', 'odp', 'ods', 'txt', 'md', 'csv'])
+const EXTRACTABLE = new Set<string>([
+  ...AI_MATERIAL_FILE_EXTENSIONS,
+])
 
 export function isExtractable(fileName: string): boolean {
   return EXTRACTABLE.has(extensionOf(fileName))
@@ -56,6 +63,10 @@ export async function extractText(buffer: Buffer, fileName: string): Promise<Ext
       case 'odp':
       case 'ods':
         return extractOoxml(buffer, /^content\.xml$/)
+      case 'doc':
+      case 'ppt':
+      case 'xls':
+        return await extractLegacyOffice(buffer, fileName)
       default:
         return { status: 'erfolgreich', text: truncate(buffer.toString('utf8')) }
     }
@@ -182,6 +193,28 @@ async function extractDocx(buffer: Buffer): Promise<ExtractionResult> {
   const mammoth = await import('mammoth')
   const result = await mammoth.extractRawText({ buffer })
   return { status: 'erfolgreich', text: truncate(result.value) }
+}
+
+/** Konvertiert .doc/.ppt/.xls per LibreOffice nach PDF und extrahiert die Textebene. */
+async function extractLegacyOffice(buffer: Buffer, fileName: string): Promise<ExtractionResult> {
+  const workDir = await mkdtemp(join(tmpdir(), 'saru-legacy-office-'))
+  const safeName = fileName.replace(/[^\w.\-()+äöüÄÖÜß ]/g, '_').slice(0, 120) || `datei.${extensionOf(fileName)}`
+  const inputPath = join(workDir, safeName)
+  try {
+    await writeFile(inputPath, buffer)
+    const pdfBuffer = await convertOfficeFileToPdf(inputPath)
+    if (!pdfBuffer) {
+      return {
+        status: 'nicht_unterstuetzt',
+        text: '',
+        error:
+          'Für ältere Office-Dateien (.doc, .ppt, .xls) ist LibreOffice auf dem Server nötig.',
+      }
+    }
+    return await extractPdf(pdfBuffer)
+  } finally {
+    await rm(workDir, { recursive: true, force: true }).catch(() => {})
+  }
 }
 
 /** Liest Text aus den XML-Teilen eines ZIP-basierten Office-Formats. */
