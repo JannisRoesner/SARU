@@ -698,10 +698,6 @@ const LINE_Y_TOLERANCE_FACTOR = 0.22
 /** Füllmodus: echte Lücken vs. offene Aufgaben ohne Antwortplätze im Dokument. */
 export type SolutionFillMode = 'lueckentext' | 'offen'
 
-/** Typische Wörter unmittelbar vor einer Lücke in Deutsch-Lückentexten. */
-const CLOZE_LEFT_TOKEN =
-  /^(der|die|das|den|dem|des|ein|eine|einen|einem|einer|eines|und|oder|mit|von|zu|im|am|zum|zur|ist|sind|wird|werden|hat|haben|nicht|kein|keine|als|bei|nach|vor|für|über|unter|beim|vom|sehr|auch|nur|noch|schon|mehr|weniger|ca|bzw)$/i
-
 interface PdfTextRun {
   str: string
   x: number
@@ -926,15 +922,6 @@ function looksLikeSentenceFragment(text: string): boolean {
   return /[\p{L}\p{N}]{3,}/u.test(trimmed) && trimmed.length >= 3
 }
 
-function medianPositive(values: number[]): number {
-  const sorted = values.filter((v) => v > 0).sort((a, b) => a - b)
-  if (sorted.length === 0) return 0
-  const mid = Math.floor(sorted.length / 2)
-  return sorted.length % 2 === 0
-    ? (sorted[mid - 1]! + sorted[mid]!) / 2
-    : sorted[mid]!
-}
-
 /** Run besteht nur aus Lückenfüllern (Unterstriche/Punkte), oft je Zeichen ein eigener Run. */
 function isBlankFillerRun(text: string): boolean {
   const trimmed = text.replace(/\s+/g, '')
@@ -942,66 +929,33 @@ function isBlankFillerRun(text: string): boolean {
   return /^[_.…·•]+$/.test(trimmed)
 }
 
-/** Links der Lücke endet typischerweise mit Artikel/Präposition oder kurzem Fragment. */
-function looksLikeClozeLeft(text: string): boolean {
-  const trimmed = text.trim()
-  if (!trimmed || /[.!?…]\s*$/.test(trimmed)) return false
-  if (/[,;:–—\-]$/.test(trimmed)) return true
-  const words = trimmed.split(/\s+/).filter(Boolean)
-  const last = words[words.length - 1] ?? ''
-  if (CLOZE_LEFT_TOKEN.test(last)) return true
-  // Zahl vor Lücke („20.000 ___“) – typisch für Lückentexte.
-  if (/^\d[\d.,]*$/.test(last)) return true
-  // Kurzes linkes Fragment („Die“, „ist sie sehr“) – typisch für Lückentexte.
-  if (trimmed.length <= 28) return true
-  return last.length <= 5
-}
-
 /**
- * Prüft, ob eine Gap-Region wie eine echte Antwortlücke aussieht
- * (vs. Blocksatz-/Spaltenabstand in Fließtext).
+ * Offene Aufgaben (Beschreiben/Erklären…) ohne Wortliste/Unterstriche.
+ * Layout-Gaps im Fließtext sollen dann nicht den Lückentext-Modus auslösen.
  */
-export function looksLikeClozeGap(blank: Pick<PdfBlankRegion, 'kind' | 'leftText' | 'rightText' | 'width'>): boolean {
-  if (blank.kind === 'underscore') return true
-  const left = (blank.leftText ?? '').trim()
-  let right = (blank.rightText ?? '').trim()
-  if (!left) return false
-  // Zeilenende: rechter Kontext darf fehlen oder nur Satzzeichen sein („Jungen ___.“).
-  const rightPunctOnly = !right || /^[.:;!?…,–—\-)\]]+$/.test(right)
-  if (!right) right = '…'
-  // Abgeschlossener Satz links → Layout, keine Lücke.
-  if (/[.!?…]\s*$/.test(left)) return false
-  // Nummerierte Folgeaufgabe rechts → eher Spalten-/Absatzlayout.
-  if (/^\d+[\.)]/.test(right)) return false
-
-  const leftWords = left.split(/\s+/).filter(Boolean)
-  const rightWords = rightPunctOnly ? [] : right.split(/\s+/).filter(Boolean)
-  const last = leftWords[leftWords.length - 1] ?? ''
-  const leftTail = leftWords.slice(-3).join(' ')
-
-  // Langer Fließtext links und rechts: nur bei starkem Cloze-Cue am linken Rand behalten.
-  if (leftWords.length >= 6 && rightWords.length >= 6) {
-    return (
-      /^(der|die|das|den|dem|des|ein|eine|einen|einem|einer|eines|sehr)$/i.test(last) ||
-      /^\d[\d.,]*$/.test(last)
-    )
+export function looksLikeOpenEndedTaskText(text: string): boolean {
+  const t = text.trim()
+  if (!t) return false
+  if (/\b(wortliste|lückentext|fülle?\s+(die\s+)?lücken|lücken\s+mit|_____|_{3,})\b/i.test(t)) {
+    return false
   }
-
-  return looksLikeClozeLeft(leftTail || left)
+  return /\b(beschreiben sie|erklären sie|erläutern sie|erörtern sie|vergleichen sie|diskutieren sie|nehmen sie stellung|begründen sie)\b/i.test(
+    t,
+  )
 }
 
 /**
- * Behält zuverlässige Lücken (Unterstriche + cloze-ähnliche Gaps).
- * Reine Layout-Abstände in Fließtext entfallen – verhindert „Lücken“ in offenen Aufgaben.
+ * Füllmodus: Unterstriche/erkannte Lücken → Lückentext.
+ * Offene Aufgaben am Aufgabentext erkennen – nicht über aggressive Gap-Filter
+ * (die echte Cloze-Lücken wie „bei allen Jungen ___“ verwerfen).
  */
-export function filterReliableBlanks(blanks: PdfBlankRegion[]): PdfBlankRegion[] {
-  const reliable = blanks.filter((blank) =>
-    blank.kind === 'underscore' ? true : looksLikeClozeGap(blank),
-  )
-  return reliable.map((blank, blankIndex) => ({ ...blank, blankIndex }))
-}
-
-export function classifySolutionFillMode(blanks: PdfBlankRegion[]): SolutionFillMode {
+export function classifySolutionFillMode(
+  blanks: Array<Pick<PdfBlankRegion, 'kind'>>,
+  documentText?: string | null,
+): SolutionFillMode {
+  const underscoreCount = blanks.filter((b) => b.kind === 'underscore').length
+  if (underscoreCount > 0) return 'lueckentext'
+  if (looksLikeOpenEndedTaskText(documentText ?? '')) return 'offen'
   return blanks.length > 0 ? 'lueckentext' : 'offen'
 }
 
@@ -1107,18 +1061,6 @@ function detectGapBlanksOnLine(
     semantic.push({ run: content[i]!, index: i })
   }
 
-  // Blocksatz: Abstände zwischen semantischen Nachbarn (ohne Füller dazwischen).
-  const interGaps: number[] = []
-  for (let s = 0; s < semantic.length - 1; s++) {
-    const left = semantic[s]!
-    const right = semantic[s + 1]!
-    // Nur direkte Nachbarn ohne Füller dazwischen für Median (Blocksatz-Wortabstand).
-    if (right.index === left.index + 1) {
-      interGaps.push(right.run.x - left.run.xEnd)
-    }
-  }
-  const medianGap = medianPositive(interGaps)
-
   for (let s = 0; s < semantic.length - 1; s++) {
     const left = semantic[s]!
     const right = semantic[s + 1]!
@@ -1126,18 +1068,16 @@ function detectGapBlanksOnLine(
     const hasFillerBetween = right.index > left.index + 1
     if (!hasFillerBetween && (gap < MIN_GAP_PT || gap > maxGap)) continue
     if (hasFillerBetween) {
-      // Füller-Runs zwischen Wörtern = Unterstrich-Lücke; Breite der Füllerregion.
       const fillerFirst = content[left.index + 1]!
       const fillerLast = content[right.index - 1]!
       const fillerWidth = fillerLast.xEnd - fillerFirst.x
       if (fillerWidth < MIN_GAP_PT * 0.5 && gap < MIN_GAP_PT) continue
-    } else if (gap > maxGap) {
-      continue
     }
 
     const rightOk =
       looksLikeSentenceFragment(right.run.str) || /^[–—\-.,;:!?)]/.test(right.run.str.trim())
     if (!looksLikeSentenceFragment(left.run.str) || !rightOk) continue
+    // Zwei Kurztitel mit riesigem Abstand → eher Layout (z. B. Kopfzeile) als Lücke.
     if (
       !hasFillerBetween &&
       left.run.str.trim().length < 8 &&
@@ -1155,20 +1095,6 @@ function detectGapBlanksOnLine(
       .slice(right.index)
       .map((r) => r.str)
       .join('')
-
-    // Mit Füller dazwischen immer cloze; sonst nur Ausreißer-Abstände (kein Blocksatz).
-    const isOutlier =
-      hasFillerBetween ||
-      medianGap <= 0 ||
-      semantic.length <= 3 ||
-      gap >= Math.max(MIN_GAP_PT, medianGap * 1.8)
-    if (!isOutlier) continue
-    if (
-      !hasFillerBetween &&
-      !looksLikeClozeGap({ kind: 'gap', leftText: leftJoined, rightText: rightJoined, width: gap })
-    ) {
-      continue
-    }
 
     const blankX = hasFillerBetween ? content[left.index + 1]!.x : left.run.xEnd + 1
     const blankWidth = hasFillerBetween
@@ -1193,21 +1119,12 @@ function detectGapBlanksOnLine(
   const startsWithPunct = /^[.!?,;:]/.test(first.str.trim())
   const lonelyShort =
     content.length === 1 && first.str.trim().length <= 32 && !startsWithPunct
-  const wrapLeft = previousLineText.trim()
-  const wrapRight = content.map((r) => r.str).join('')
   if (
     !lonelyShort &&
     startGap >= MIN_GAP_PT &&
     startGap <= maxGap &&
     looksLikeSentenceFragment(first.str) &&
-    (startsWithPunct || (content.length >= 2 && startGap >= MIN_GAP_PT * 1.5)) &&
-    (startsWithPunct ||
-      looksLikeClozeGap({
-        kind: 'gap',
-        leftText: wrapLeft || '…',
-        rightText: wrapRight,
-        width: startGap,
-      }))
+    (startsWithPunct || (content.length >= 2 && startGap >= MIN_GAP_PT * 1.5))
   ) {
     pushBlank(into, {
       pageIndex,
@@ -1217,11 +1134,12 @@ function detectGapBlanksOnLine(
       height: lineHeight,
       kind: 'gap',
       leftText: previousLineText,
-      rightText: wrapRight,
+      rightText: content.map((r) => r.str).join(''),
     })
   }
 
-  // Zeilenende-Lücke: letztes Wort, optional Unterstriche, optional nur Satzzeichen danach.
+  // Zeilenende-Lücke: letztes Wort, optional Unterstriche, optional nur Satzzeichen danach
+  // („bei allen Jungen ___ .“ – oft gezeichnete Linie ohne Unterstrich-Text).
   const lastSem = semantic[semantic.length - 1]
   if (lastSem) {
     const after = content.slice(lastSem.index + 1)
@@ -1237,15 +1155,9 @@ function detectGapBlanksOnLine(
         .slice(0, lastSem.index + 1)
         .map((r) => r.str)
         .join('')
-      const rightJoined = punct.map((r) => r.str).join('') || ''
-      if (
-        looksLikeClozeGap({
-          kind: fillers.length ? 'underscore' : 'gap',
-          leftText: leftJoined,
-          rightText: rightJoined || '.',
-          width: MIN_GAP_PT,
-        })
-      ) {
+      // Kein abgeschlossener Satz vor der Lücke.
+      if (!/[.!?…]\s*$/.test(leftJoined.trim())) {
+        const rightJoined = punct.map((r) => r.str).join('') || ''
         const blankX = fillers.length ? fillers[0]!.x : lastSem.run.xEnd + 1
         const blankEnd = fillers.length
           ? fillers[fillers.length - 1]!.xEnd
@@ -1352,9 +1264,7 @@ export async function detectPdfBlankRegions(source: Buffer): Promise<PdfBlankReg
       return a.x - b.x
     })
 
-    const indexed = raw.map((blank, blankIndex) => ({ ...blank, blankIndex }))
-    // Layout-Abstände in Fließtext verwerfen – sonst werden offene Aufgaben wie Lückentexte behandelt.
-    return filterReliableBlanks(indexed)
+    return raw.map((blank, blankIndex) => ({ ...blank, blankIndex }))
   } finally {
     await task.destroy()
   }

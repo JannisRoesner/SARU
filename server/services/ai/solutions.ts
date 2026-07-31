@@ -195,9 +195,10 @@ export async function generateSolution(
   }
 
   const blankCount = detectedBlanks.length || docxBlanks.length
-  // Ohne zuverlässige Lücken: offener Erwartungshorizont statt erzwungener Lückentext-Füllung.
+  // Offene Aufgaben am Aufgabentext; Lückentext bei Unterstrichen/Gaps – nicht über Gap-Filter.
   const fillMode: SolutionFillMode = classifySolutionFillMode(
     detectedBlanks.length ? detectedBlanks : docxBlanks,
+    documentText || material.content,
   )
   log.info('Musterlösungs-Füllmodus', {
     fillMode,

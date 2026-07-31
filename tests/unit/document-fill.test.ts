@@ -11,12 +11,11 @@ import {
   enrichSolutionPlacements,
   fillDocxDocument,
   fillPdfAcroForm,
-  filterReliableBlanks,
   formatBlankInventory,
   formatTextBlankInventory,
   inferAnswerFieldType,
   buildAnswerListPdf,
-  looksLikeClozeGap,
+  looksLikeOpenEndedTaskText,
   overlayPdfAnswers,
   parseStructuredSolution,
   sanitizePdfText,
@@ -551,118 +550,65 @@ describe('detectPdfBlankRegions', () => {
     expect(blanks[0]!.rightText.toLowerCase()).toContain('des')
   })
 
-  it('erkennt in durchgehendem Fließtext keine Lücken (offene Aufgabe)', async () => {
+  it('erkennt Zeilenende-Lücke vor Satzzeichen (Jungen ___ .)', async () => {
     const pdf = await PDFDocument.create()
     const font = await pdf.embedFont(StandardFonts.Helvetica)
     const page = pdf.addPage([595.28, 841.89])
-    const lines = [
-      'Beschreiben Sie die in der GUI dargestellten Komponenten im Sachzusammenhang.',
-      'Material 1: Zur Unterstützung der Fluglotsen soll eine Software erstellt werden,',
-      'die das Nachtflugverbot zwischen 23:00 Uhr und 05:00 Uhr umsetzt. Verspätete',
-      'Flugzeuge, deren geplante Ankunftszeit vor 23:00 Uhr liegt, dürfen bis 24:00 Uhr',
-      'landen. Danach werden sie umgeleitet, sofern keine manuelle Ausnahmegenehmigung',
-      'vorliegt. Jeder Flug wird durch eine Flugnummer eindeutig identifiziert.',
-    ]
-    let y = 720
-    for (const line of lines) {
-      page.drawText(line, { x: 50, y, size: 11, font })
-      y -= 18
-    }
-    // Simulierter Blocksatz: viele Wort-Runs mit mäßigen Abständen auf einer Zeile.
-    const words = ['Jeder', 'Flug', 'wird', 'durch', 'eine', 'Flugnummer', 'eindeutig', 'identifiziert.']
-    let x = 50
-    for (const word of words) {
-      page.drawText(word, { x, y: 580, size: 11, font })
-      x += font.widthOfTextAtSize(word, 11) + 18
-    }
+    // Gezeichnete Linie ohne Unterstrich-Text – typisch für exportierte Arbeitsblätter.
+    page.drawText('ist genetisch bedingt und bei allen Jungen', { x: 50, y: 500, size: 12, font })
+    page.drawText('.', { x: 420, y: 500, size: 12, font })
+    page.drawText('Bei einigen ist sie sehr', { x: 50, y: 480, size: 12, font })
+    page.drawText('und steht vorne.', { x: 280, y: 480, size: 12, font })
     const source = Buffer.from(await pdf.save())
 
     const blanks = await detectPdfBlankRegions(source)
-    expect(blanks).toHaveLength(0)
-    expect(classifySolutionFillMode(blanks)).toBe('offen')
+    expect(blanks.some((b) => /jungen/i.test(b.leftText))).toBe(true)
+    expect(blanks.some((b) => /sehr/i.test(b.leftText))).toBe(true)
+    expect(classifySolutionFillMode(blanks, 'Wortliste: lang, sensibel')).toBe('lueckentext')
+  })
+
+  it('wählt bei offenen Aufgaben trotz Layout-Gaps den offenen Modus', async () => {
+    const pdf = await PDFDocument.create()
+    const font = await pdf.embedFont(StandardFonts.Helvetica)
+    const page = pdf.addPage([595.28, 841.89])
+    page.drawText('Beschreiben Sie die in der GUI dargestellten Komponenten.', {
+      x: 50,
+      y: 720,
+      size: 11,
+      font,
+    })
+    // Großer Abstand – wäre als Gap erkennbar, soll aber nicht Lückentext erzwingen.
+    page.drawText('Material', { x: 50, y: 680, size: 11, font })
+    page.drawText('Nachtflugverbot', { x: 200, y: 680, size: 11, font })
+    const source = Buffer.from(await pdf.save())
+
+    const blanks = await detectPdfBlankRegions(source)
+    const text =
+      'Beschreiben Sie die in der GUI dargestellten Komponenten im Sachzusammenhang. Material zum Nachtflugverbot.'
+    expect(looksLikeOpenEndedTaskText(text)).toBe(true)
+    expect(classifySolutionFillMode(blanks, text)).toBe('offen')
   })
 })
 
-describe('looksLikeClozeGap / filterReliableBlanks', () => {
-  it('akzeptiert typische Lückentext-Kontexte und verwirft Fließtext-Hälften', () => {
+describe('classifySolutionFillMode', () => {
+  it('erkennt offene Aufgaben am Aufgabentext und Lückentexte an Unterstrichen', () => {
+    expect(looksLikeOpenEndedTaskText('Beschreiben Sie die Komponenten.')).toBe(true)
+    expect(looksLikeOpenEndedTaskText('Wortliste: A, B. Fülle die Lücken.')).toBe(false)
     expect(
-      looksLikeClozeGap({
-        kind: 'gap',
-        leftText: 'Die',
-        rightText: 'des Penis ist bedeckt.',
-        width: 80,
-      }),
-    ).toBe(true)
+      classifySolutionFillMode(
+        [{ kind: 'gap' }],
+        'Beschreiben Sie die GUI im Sachzusammenhang.',
+      ),
+    ).toBe('offen')
     expect(
-      looksLikeClozeGap({
-        kind: 'gap',
-        leftText: 'ist sie sehr',
-        rightText: 'und steht vorne.',
-        width: 90,
-      }),
-    ).toBe(true)
-    expect(
-      looksLikeClozeGap({
-        kind: 'gap',
-        leftText: 'etwa 20.000',
-        rightText: '- so viele wie an den Fingerspitzen.',
-        width: 70,
-      }),
-    ).toBe(true)
-    expect(
-      looksLikeClozeGap({
-        kind: 'gap',
-        leftText: 'Bei allen Jungen. Bei einigen ist sie sehr',
-        rightText: 'und steht vorne etwas über. Die Vorhaut besteht aus zwei',
-        width: 80,
-      }),
-    ).toBe(true)
-    expect(
-      looksLikeClozeGap({
-        kind: 'gap',
-        leftText: 'bei allen Jungen',
-        rightText: '.',
-        width: 80,
-      }),
-    ).toBe(true)
-    expect(
-      looksLikeClozeGap({
-        kind: 'gap',
-        leftText: 'die das Nachtflugverbot zwischen 23:00 Uhr und',
-        rightText: '05:00 Uhr umsetzt. Verspätete Flugzeuge werden umgeleitet.',
-        width: 40,
-      }),
-    ).toBe(false)
-  })
-
-  it('filtert unzuverlässige Gaps aus der Inventarliste', () => {
-    const filtered = filterReliableBlanks([
-      {
-        pageIndex: 0,
-        blankIndex: 0,
-        x: 70,
-        y: 500,
-        width: 80,
-        height: 12,
-        kind: 'underscore',
-        leftText: 'Die',
-        rightText: 'ist',
-      },
-      {
-        pageIndex: 0,
-        blankIndex: 1,
-        x: 100,
-        y: 400,
-        width: 50,
-        height: 12,
-        kind: 'gap',
-        leftText: 'lange Sachtextpassage über Nachtflugverbote und Ausnahmen',
-        rightText: 'weitere lange Sachtextpassage ohne echte Antwortlücke hier',
-      },
-    ])
-    expect(filtered).toHaveLength(1)
-    expect(filtered[0]!.kind).toBe('underscore')
-    expect(filtered[0]!.blankIndex).toBe(0)
+      classifySolutionFillMode(
+        [{ kind: 'underscore' }],
+        'Beschreiben Sie die GUI im Sachzusammenhang.',
+      ),
+    ).toBe('lueckentext')
+    expect(classifySolutionFillMode([{ kind: 'gap' }], 'Wortliste: Eichel, lang')).toBe(
+      'lueckentext',
+    )
   })
 })
 
