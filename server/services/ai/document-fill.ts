@@ -960,20 +960,22 @@ function looksLikeClozeLeft(text: string): boolean {
 /**
  * Prüft, ob eine Gap-Region wie eine echte Antwortlücke aussieht
  * (vs. Blocksatz-/Spaltenabstand in Fließtext).
- * Bewertet den rechten Rand des linken Kontexts (nicht den ganzen Zeilenanfang).
  */
 export function looksLikeClozeGap(blank: Pick<PdfBlankRegion, 'kind' | 'leftText' | 'rightText' | 'width'>): boolean {
   if (blank.kind === 'underscore') return true
   const left = (blank.leftText ?? '').trim()
-  const right = (blank.rightText ?? '').trim()
-  if (!left || !right) return false
+  let right = (blank.rightText ?? '').trim()
+  if (!left) return false
+  // Zeilenende: rechter Kontext darf fehlen oder nur Satzzeichen sein („Jungen ___.“).
+  const rightPunctOnly = !right || /^[.:;!?…,–—\-)\]]+$/.test(right)
+  if (!right) right = '…'
   // Abgeschlossener Satz links → Layout, keine Lücke.
   if (/[.!?…]\s*$/.test(left)) return false
   // Nummerierte Folgeaufgabe rechts → eher Spalten-/Absatzlayout.
   if (/^\d+[\.)]/.test(right)) return false
 
   const leftWords = left.split(/\s+/).filter(Boolean)
-  const rightWords = right.split(/\s+/).filter(Boolean)
+  const rightWords = rightPunctOnly ? [] : right.split(/\s+/).filter(Boolean)
   const last = leftWords[leftWords.length - 1] ?? ''
   const leftTail = leftWords.slice(-3).join(' ')
 
@@ -1218,6 +1220,52 @@ function detectGapBlanksOnLine(
       rightText: wrapRight,
     })
   }
+
+  // Zeilenende-Lücke: letztes Wort, optional Unterstriche, optional nur Satzzeichen danach.
+  const lastSem = semantic[semantic.length - 1]
+  if (lastSem) {
+    const after = content.slice(lastSem.index + 1)
+    const fillers = after.filter((r) => isBlankFillerRun(r.str))
+    const punct = after.filter(
+      (r) => !isBlankFillerRun(r.str) && /^[.:;!?…,–—\-)\]]+$/.test(r.str.trim()),
+    )
+    const other = after.filter(
+      (r) => !isBlankFillerRun(r.str) && !/^[.:;!?…,–—\-)\]]+$/.test(r.str.trim()),
+    )
+    if (other.length === 0 && (fillers.length > 0 || punct.length > 0)) {
+      const leftJoined = content
+        .slice(0, lastSem.index + 1)
+        .map((r) => r.str)
+        .join('')
+      const rightJoined = punct.map((r) => r.str).join('') || ''
+      if (
+        looksLikeClozeGap({
+          kind: fillers.length ? 'underscore' : 'gap',
+          leftText: leftJoined,
+          rightText: rightJoined || '.',
+          width: MIN_GAP_PT,
+        })
+      ) {
+        const blankX = fillers.length ? fillers[0]!.x : lastSem.run.xEnd + 1
+        const blankEnd = fillers.length
+          ? fillers[fillers.length - 1]!.xEnd
+          : punct[0]
+            ? punct[0].x
+            : lastSem.run.xEnd + MIN_GAP_PT * 2
+        const blankWidth = Math.max(MIN_GAP_PT, blankEnd - blankX)
+        pushBlank(into, {
+          pageIndex,
+          x: blankX,
+          y: lastSem.run.y,
+          width: blankWidth,
+          height: lineHeight,
+          kind: fillers.length ? 'underscore' : 'gap',
+          leftText: leftJoined,
+          rightText: rightJoined,
+        })
+      }
+    }
+  }
 }
 
 /**
@@ -1379,7 +1427,7 @@ export function scoreAnswerBlankMatch(
 
 /**
  * Ordnet KI-Antworten den geometrisch erkannten Lücken zu.
- * Bevorzugt Kontext-Match, dann blankIndex, dann Dokumentreihenfolge.
+ * Geometrie/Kontext der erkannten Lücke hat Vorrang vor Modell-Metadaten.
  */
 export function alignAnswersToBlanks(
   solution: StructuredSolution,
@@ -1387,66 +1435,110 @@ export function alignAnswersToBlanks(
 ): StructuredSolution {
   if (blanks.length === 0 || solution.answers.length === 0) return solution
 
-  const used = new Set<number>()
-  const aligned: SolutionAnswer[] = []
-  const pending = [...solution.answers]
+  const usedAnswers = new Set<number>()
+  const byBlank = new Map<number, SolutionAnswer>()
 
-  const take = (answer: SolutionAnswer, blankIndex: number) => {
+  const assign = (answerIndex: number, blankIndex: number) => {
+    if (byBlank.has(blankIndex) || usedAnswers.has(answerIndex)) return false
+    const answer = solution.answers[answerIndex]
     const blank = blanks.find((b) => b.blankIndex === blankIndex)
-    used.add(blankIndex)
-    aligned.push({
+    if (!answer || !blank) return false
+    usedAnswers.add(answerIndex)
+    byBlank.set(blankIndex, {
       ...answer,
+      id: String(blankIndex + 1),
+      label: `Lücke ${blankIndex + 1}`,
       blankIndex,
-      page: answer.page && answer.page > 0 ? answer.page : (blank?.pageIndex ?? 0) + 1,
-      leftContext: answer.leftContext ?? blank?.leftText ?? null,
-      rightContext: answer.rightContext ?? blank?.rightText ?? null,
+      page: blank.pageIndex + 1,
+      // Immer Geometrie-Kontext – Modell-Kontext war oft vertauscht und verwirrte die UI.
+      leftContext: blank.leftText || null,
+      rightContext: blank.rightText || null,
+      fieldType: answer.fieldType ?? 'luecke',
+    })
+    return true
+  }
+
+  // 1) Beste Kontext-Treffer zuerst (absteigend nach Score).
+  const pairs: Array<{ answerIndex: number; blankIndex: number; score: number }> = []
+  for (let ai = 0; ai < solution.answers.length; ai++) {
+    const answer = solution.answers[ai]!
+    if (!answer.leftContext && !answer.rightContext) continue
+    for (const blank of blanks) {
+      const score = scoreAnswerBlankMatch(answer, blank)
+      if (score >= 3) pairs.push({ answerIndex: ai, blankIndex: blank.blankIndex, score })
+    }
+  }
+  pairs.sort((a, b) => b.score - a.score)
+  for (const pair of pairs) {
+    assign(pair.answerIndex, pair.blankIndex)
+  }
+
+  // 2) Modell-blankIndex, sofern noch frei.
+  for (let ai = 0; ai < solution.answers.length; ai++) {
+    if (usedAnswers.has(ai)) continue
+    const idx = solution.answers[ai]!.blankIndex
+    if (typeof idx !== 'number' || idx < 0 || idx >= blanks.length) continue
+    assign(ai, idx)
+  }
+
+  // 3) Rest in Dokumentreihenfolge auf freie Lücken.
+  let answerCursor = 0
+  for (const blank of blanks) {
+    if (byBlank.has(blank.blankIndex)) continue
+    while (answerCursor < solution.answers.length && usedAnswers.has(answerCursor)) {
+      answerCursor += 1
+    }
+    if (answerCursor >= solution.answers.length) break
+    assign(answerCursor, blank.blankIndex)
+  }
+
+  // Fehlende Lücken: Platzhalter, damit Overlay/Editor vollständig bleiben.
+  for (const blank of blanks) {
+    if (byBlank.has(blank.blankIndex)) continue
+    byBlank.set(blank.blankIndex, {
+      id: String(blank.blankIndex + 1),
+      label: `Lücke ${blank.blankIndex + 1}`,
+      answer: '???',
+      blankIndex: blank.blankIndex,
+      page: blank.pageIndex + 1,
+      leftContext: blank.leftText || null,
+      rightContext: blank.rightText || null,
+      fieldType: 'luecke',
     })
   }
 
-  // 1) Starke Kontext-Treffer (auch wenn blankIndex falsch/vertauscht ist).
-  const contextAssigned = new Set<SolutionAnswer>()
-  for (const answer of pending) {
-    if (!answer.leftContext && !answer.rightContext) continue
-    let best: { blankIndex: number; score: number } | null = null
-    for (const blank of blanks) {
-      if (used.has(blank.blankIndex)) continue
-      const score = scoreAnswerBlankMatch(answer, blank)
-      if (score < 3) continue
-      if (!best || score > best.score) best = { blankIndex: blank.blankIndex, score }
-    }
-    if (best) {
-      take(answer, best.blankIndex)
-      contextAssigned.add(answer)
-    }
-  }
-  const afterContext = pending.filter((a) => !contextAssigned.has(a))
+  const answers = [...byBlank.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, answer]) => answer)
 
-  // 2) Modell-blankIndex, sofern gültig und frei.
-  const indexAssigned = new Set<SolutionAnswer>()
-  for (const answer of afterContext) {
-    const idx = answer.blankIndex
-    if (typeof idx !== 'number' || idx < 0 || idx >= blanks.length || used.has(idx)) {
-      continue
-    }
-    take(answer, idx)
-    indexAssigned.add(answer)
-  }
-  const afterIndex = afterContext.filter((a) => !indexAssigned.has(a))
+  return { ...solution, answers }
+}
 
-  // 3) Rest in Dokumentreihenfolge auf freie Lücken.
-  let cursor = 0
-  for (const answer of afterIndex) {
-    while (cursor < blanks.length && used.has(cursor)) cursor += 1
-    if (cursor >= blanks.length) {
-      aligned.push(answer)
-      continue
-    }
-    take(answer, cursor)
-    cursor += 1
-  }
+/** Kompakte Darstellung für Logs (alle Lücken, nicht nur Sample). */
+export function summarizeBlanksForLog(blanks: PdfBlankRegion[]): Array<Record<string, unknown>> {
+  return blanks.map((b) => ({
+    i: b.blankIndex,
+    kind: b.kind,
+    page: b.pageIndex + 1,
+    left: b.leftText,
+    right: b.rightText,
+    x: Math.round(b.x),
+    y: Math.round(b.y),
+    w: Math.round(b.width),
+  }))
+}
 
-  aligned.sort((a, b) => (a.blankIndex ?? 999) - (b.blankIndex ?? 999))
-  return { ...solution, answers: aligned }
+export function summarizeAnswersForLog(
+  answers: SolutionAnswer[],
+): Array<Record<string, unknown>> {
+  return answers.map((a) => ({
+    id: a.id,
+    label: a.label,
+    answer: a.answer,
+    blankIndex: a.blankIndex ?? null,
+    left: a.leftContext ?? null,
+    right: a.rightContext ?? null,
+  }))
 }
 
 function placementFromBlank(

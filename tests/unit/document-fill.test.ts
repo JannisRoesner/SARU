@@ -620,6 +620,14 @@ describe('looksLikeClozeGap / filterReliableBlanks', () => {
     expect(
       looksLikeClozeGap({
         kind: 'gap',
+        leftText: 'bei allen Jungen',
+        rightText: '.',
+        width: 80,
+      }),
+    ).toBe(true)
+    expect(
+      looksLikeClozeGap({
+        kind: 'gap',
         leftText: 'die das Nachtflugverbot zwischen 23:00 Uhr und',
         rightText: '05:00 Uhr umsetzt. Verspätete Flugzeuge werden umgeleitet.',
         width: 40,
@@ -793,6 +801,68 @@ describe('alignAnswersToBlanks', () => {
     expect(aligned.answers.find((a) => a.answer === 'Eichel')?.blankIndex).toBe(0)
     expect(aligned.answers.find((a) => a.answer === 'unterschiedlich')?.blankIndex).toBe(1)
     expect(aligned.answers.find((a) => a.answer === 'lang')?.blankIndex).toBe(2)
+    // Geometrie-Kontext überschreibt Modell-Kontext; Labels folgen Dokumentreihenfolge.
+    expect(aligned.answers[0]!.label).toBe('Lücke 1')
+    expect(aligned.answers[0]!.leftContext).toBe('Die')
+    expect(aligned.answers[2]!.leftContext).toBe('ist sie sehr')
+  })
+
+  it('korrigiert vertauschten Kontext: Antwort landet auf Geometrie-Lücke, nicht Modell-Label', () => {
+    const aligned = alignAnswersToBlanks(
+      {
+        summary: 'S',
+        answers: [
+          {
+            id: 'x',
+            label: 'Aufgabe 1d',
+            answer: 'Schleimhaut',
+            blankIndex: 0,
+            leftContext: 'Die innere Vorhaut ist eine',
+            rightContext: 'Sie bildet ein',
+          },
+          {
+            id: 'y',
+            label: 'Aufgabe 1a',
+            answer: 'Eichel',
+            blankIndex: 1,
+            leftContext: 'Die',
+            rightContext: 'des Penis',
+          },
+        ],
+        formFields: [],
+      },
+      [
+        {
+          pageIndex: 0,
+          blankIndex: 0,
+          x: 70,
+          y: 500,
+          width: 80,
+          height: 14,
+          kind: 'gap',
+          leftText: 'Die',
+          rightText: 'des Penis ist',
+        },
+        {
+          pageIndex: 0,
+          blankIndex: 1,
+          x: 100,
+          y: 400,
+          width: 80,
+          height: 14,
+          kind: 'gap',
+          leftText: 'ist eine',
+          rightText: 'Sie bildet ein',
+        },
+      ],
+    )
+
+    expect(aligned.answers[0]!.answer).toBe('Eichel')
+    expect(aligned.answers[0]!.label).toBe('Lücke 1')
+    expect(aligned.answers[0]!.leftContext).toBe('Die')
+    expect(aligned.answers[1]!.answer).toBe('Schleimhaut')
+    expect(aligned.answers[1]!.label).toBe('Lücke 2')
+    expect(aligned.answers[1]!.leftContext).toBe('ist eine')
   })
 
   it('formatiert eine lesbare Lückenliste für den Prompt', () => {

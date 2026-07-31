@@ -32,7 +32,7 @@ export interface SolutionPromptContext {
   fillMode?: SolutionFillMode | null
 }
 
-export const SOLUTION_PROMPT_VERSION = '6-fill-mode-separate-pdf'
+export const SOLUTION_PROMPT_VERSION = '6-fill-mode-align-logs'
 
 const SOLUTION_JSON_SCHEMA = `{
   "summary": "kurzer Überblick in 1–2 Sätzen",
@@ -65,15 +65,16 @@ Regeln:
 - Gib ausschließlich ein JSON-Objekt zurück (kein Markdown drumherum, kein Einleitungstext).
 - Schema:
 ${SOLUTION_JSON_SCHEMA}
-- Nummeriere und benenne Antworten genau wie im Material (Aufgabe 1, a), …).
+- Nummeriere Antworten als „Lücke 1“, „Lücke 2“, … in exakt derselben Reihenfolge wie blankIndex (0 → Lücke 1).
 - page: 1-basierte Seitenzahl, auf der die Lücke liegt.
 - fieldType: "luecke" für kurze Einwort-/Phrasenantworten; "freitext" nur wenn die Aufgabe ausdrücklich Fließtext verlangt.
 - Semantik zuerst: Jede answer muss im Satzkontext der konkreten Lücke grammatisch und fachlich passen (z. B. „Die ___ des Penis“ → „Eichel“, nicht ein anderes Wort aus der Wortliste).
+- Gibt es eine Wortliste: Antworten möglichst daraus wählen; keine erfundenen Wörter außerhalb der Liste, sofern die Liste vollständig wirkt.
 - blankIndex:
   - Wenn eine maschinelle Lückenliste im User-Prompt steht: verwende GENAU diese Indizes (0…n-1). Keine eigenen Nummern erfinden, keine Lücke überspringen, keine Extra-Antworten ohne Lücke.
   - Sonst: Reihenfolge aller optischen Lücken im Dokument von oben nach unten, bei Gleichstand links nach rechts, beginnend bei 0.
   - Lücken sind: Unterstriche, Punktlinien, Antwortlinien, leere Kästen oder eindeutige Antwortplätze im Satz (nicht normaler Fließtext, nicht Material-/Infotexte).
-- leftContext / rightContext: jeweils wenige Wörter unmittelbar vor bzw. nach der Lücke (wie im Dokument), damit die Zuordnung robust ist.
+- leftContext / rightContext: jeweils wenige Wörter unmittelbar vor bzw. nach der Lücke (wie in der Lückenliste bzw. im Dokument).
 - bbox (Fallback, wenn keine Text-Lücken erkannt werden – z. B. Scans):
   - Normierte Koordinaten 0.0–1.0 relativ zur Seite.
   - Ursprung oben links (wie auf dem Seitenbild): x nach rechts, y nach unten.

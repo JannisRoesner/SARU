@@ -42,6 +42,8 @@ import {
   parseStructuredSolution,
   solutionFileName,
   solutionToMarkdown,
+  summarizeAnswersForLog,
+  summarizeBlanksForLog,
   type FilledDocument,
   type PdfBlankRegion,
   type SolutionFillMode,
@@ -169,12 +171,9 @@ export async function generateSolution(
       detectedBlanks = await detectPdfBlankRegions(source.buffer)
       log.info('PDF-Lücken für Prompt erkannt', {
         count: detectedBlanks.length,
-        sample: detectedBlanks.slice(0, 3).map((b) => ({
-          i: b.blankIndex,
-          left: b.leftText,
-          right: b.rightText,
-          kind: b.kind,
-        })),
+        underscores: detectedBlanks.filter((b) => b.kind === 'underscore').length,
+        gaps: detectedBlanks.filter((b) => b.kind === 'gap').length,
+        blanks: summarizeBlanksForLog(detectedBlanks),
       })
     } catch (error) {
       log.warn('PDF-Lückenerkennung vor Prompt fehlgeschlagen', error)
@@ -184,7 +183,11 @@ export async function generateSolution(
       docxBlanks = detectDocxBlanks(source.buffer)
       log.info('DOCX-Lücken für Prompt erkannt', {
         count: docxBlanks.length,
-        sample: docxBlanks.slice(0, 3),
+        blanks: docxBlanks.map((b) => ({
+          i: b.blankIndex,
+          left: b.leftText,
+          right: b.rightText,
+        })),
       })
     } catch (error) {
       log.warn('DOCX-Lückenerkennung vor Prompt fehlgeschlagen', error)
@@ -350,6 +353,10 @@ export async function generateSolution(
 
       usedModel = completion.model
       structured = parseStructuredSolution(completion.text)
+      log.info('Modell-Antworten (roh)', {
+        count: structured.answers.length,
+        answers: summarizeAnswersForLog(structured.answers),
+      })
       if (fillMode === 'offen') {
         structured = {
           ...structured,
@@ -367,7 +374,32 @@ export async function generateSolution(
         log.info('Antworten an erkannte Lücken ausgerichtet', {
           answers: structured.answers.length,
           blanks: detectedBlanks.length,
-          blankIndexes: structured.answers.map((a) => a.blankIndex),
+          mapping: structured.answers.map((a) => ({
+            blankIndex: a.blankIndex,
+            label: a.label,
+            answer: a.answer,
+            left: a.leftContext,
+            right: a.rightContext,
+          })),
+        })
+      } else if (docxBlanks.length > 0) {
+        // DOCX: Labels/Kontext an Inventar-Reihenfolge angleichen.
+        structured = {
+          ...structured,
+          answers: structured.answers
+            .slice(0, docxBlanks.length)
+            .map((a, i) => ({
+              ...a,
+              id: String(i + 1),
+              label: `Lücke ${i + 1}`,
+              blankIndex: i,
+              leftContext: docxBlanks[i]?.leftText ?? a.leftContext,
+              rightContext: docxBlanks[i]?.rightText ?? a.rightContext,
+              fieldType: a.fieldType ?? 'luecke',
+            })),
+        }
+        log.info('DOCX-Antworten an Lückeninventar gebunden', {
+          mapping: summarizeAnswersForLog(structured.answers),
         })
       }
       if (source && PDF_EXTENSIONS.has(source.extension)) {
