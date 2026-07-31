@@ -30,11 +30,9 @@ import {
   alignAnswersToBlanks,
   buildAnswerListPdf,
   buildSolutionDocx,
-  classifySolutionFillMode,
   detectDocxBlanks,
   detectPdfBlankRegions,
   enrichSolutionPlacements,
-  fillDocxDocument,
   fillPdfAcroForm,
   formatBlankInventory,
   formatTextBlankInventory,
@@ -60,6 +58,19 @@ import {
   solutionSystemPromptForMode,
 } from './prompts'
 import { rasterizePdf } from './rasterize'
+import { analyzeDocxTargets } from './solutions/docx-analyzer'
+import { logPipeline } from './solutions/logging'
+import { buildSolutionPlan } from './solutions/orchestrator'
+import { buildClozeRepairPrompt } from './solutions/repair/cloze-repair'
+import { renderPdfSolution } from './solutions/renderers/pdf-renderer'
+import { renderDocxSolution } from './solutions/renderers/docx-renderer'
+import { assignCandidatesGlobally } from './solutions/solvers/cloze-solver'
+import { applyFreeTextTaskMeta } from './solutions/solvers/free-text-solver'
+import type { CandidateBank, TaskBlock } from './solutions/types'
+import {
+  sanitizeOutOfBankAnswers,
+  validateClozeAnswers,
+} from './solutions/validators/cloze-validator'
 
 const log = createLogger('ai:solutions')
 
@@ -194,15 +205,40 @@ export async function generateSolution(
     }
   }
 
-  const blankCount = detectedBlanks.length || docxBlanks.length
-  // Offene Aufgaben am Aufgabentext; Lückentext bei Unterstrichen/Gaps – nicht über Gap-Filter.
-  const fillMode: SolutionFillMode = classifySolutionFillMode(
-    detectedBlanks.length ? detectedBlanks : docxBlanks,
-    documentText || material.content,
-  )
+  const textForAnalysis = documentText || material.content || ''
+
+  let docxNative: ReturnType<typeof analyzeDocxTargets> = {
+    nativeFields: [],
+    targets: [],
+    fullText: '',
+  }
+  if (source?.extension === 'docx') {
+    try {
+      docxNative = analyzeDocxTargets(source.buffer)
+    } catch (error) {
+      log.warn('DOCX-Zielanalyse fehlgeschlagen', error)
+    }
+  }
+
+  const plan = buildSolutionPlan({
+    documentText: textForAnalysis || docxNative.fullText,
+    pdfBlanks: detectedBlanks,
+    docxBlanks,
+    nativeFields: docxNative.nativeFields,
+  })
+  const { tasks, candidateBank, fillMode, blankCount, document: documentModel } = plan
+
   log.info('Musterlösungs-Füllmodus', {
     fillMode,
     blanks: blankCount,
+    tasks: tasks.length,
+    candidateBank: candidateBank
+      ? {
+          count: candidateBank.candidates.length,
+          reusePolicy: candidateBank.reusePolicy,
+          words: candidateBank.candidates.map((c) => c.value),
+        }
+      : null,
     source: source?.fileName ?? null,
   })
 
@@ -233,6 +269,7 @@ export async function generateSolution(
     blankInventory,
     detectedBlankCount: fillMode === 'lueckentext' ? blankCount || null : null,
     fillMode,
+    candidateBank,
   })
 
   if (!documentText && !source && !material.content?.trim()) {
@@ -260,6 +297,53 @@ export async function generateSolution(
     .returning({ id: aiJobs.id })
 
   const jobId = job!.id
+  const runId = jobId
+
+  logPipeline('solution.run.started', {
+    jobId,
+    runId,
+    materialId,
+    fillMode,
+    blankCount,
+    taskCount: tasks.length,
+  })
+  logPipeline('document.normalized', {
+    jobId,
+    runId,
+    textBlocks: documentModel.textBlocks.length,
+    nativeFields: documentModel.nativeFields.length,
+    pages: documentModel.pages.length,
+  })
+  if (candidateBank) {
+    logPipeline('candidate_bank.detected', {
+      jobId,
+      runId,
+      count: candidateBank.candidates.length,
+      reusePolicy: candidateBank.reusePolicy,
+      source: candidateBank.source,
+      words: candidateBank.candidates.map((c) => c.value),
+    })
+  }
+  for (const task of tasks) {
+    logPipeline('task.detected', {
+      jobId,
+      runId,
+      taskId: task.id,
+      page: task.page,
+      kind: task.kind,
+      targets: task.targets.length,
+    })
+    logPipeline('task.classified', {
+      jobId,
+      runId,
+      taskId: task.id,
+      page: task.page,
+      kind: task.kind,
+      confidence: task.confidence,
+      reasons: task.evidence,
+      renderMode: task.renderMode,
+    })
+  }
 
   try {
     let filled: FilledDocument | null = null
@@ -403,6 +487,35 @@ export async function generateSolution(
           mapping: summarizeAnswersForLog(structured.answers),
         })
       }
+
+      // Wortlisten-Validierung + optional ein Repair-Pass + globale Zuordnung.
+      if (fillMode === 'lueckentext' && candidateBank && blankCount > 0) {
+        structured = await enforceCandidateBankConstraints({
+          structured,
+          candidateBank,
+          blankCount,
+          blanks: detectedBlanks.length
+            ? detectedBlanks
+            : docxBlanks,
+          settings,
+          model,
+          jobId,
+          runId,
+        })
+      }
+
+      structured = applyFreeTextTaskMeta(structured, tasks)
+
+      for (const task of tasks) {
+        logPipeline('task.solved', {
+          jobId,
+          runId,
+          taskId: task.id,
+          kind: task.kind,
+          answers: structured.answers.length,
+        })
+      }
+
       if (source && PDF_EXTENSIONS.has(source.extension)) {
         structured = await enrichFromPdfBuffer(
           source.buffer,
@@ -422,7 +535,7 @@ export async function generateSolution(
           })),
         }
       }
-      filled = await buildFilledDocument(source, structured, material.title, fillMode)
+      filled = await buildFilledDocument(source, structured, material.title, fillMode, tasks)
     }
 
     if (!filled) {
@@ -509,6 +622,15 @@ export async function generateSolution(
       })
       .where(eq(aiJobs.id, jobId))
 
+    logPipeline('solution.run.completed', {
+      jobId,
+      runId,
+      materialId,
+      solutionMaterialId,
+      strategy: filled.strategy,
+      hermesUsed,
+      durationMs: Date.now() - startedAt,
+    })
     log.info('Musterlösung erzeugt', {
       materialId,
       solutionMaterialId,
@@ -586,17 +708,136 @@ async function loadPrimarySourceAsset(variantId: string): Promise<SourceAsset | 
   }
 }
 
+/**
+ * Validiert gegen die Wortliste, führt max. einen Repair-Pass aus und
+ * erzwingt bei reusePolicy „once“ eine globale bijektive Zuordnung.
+ */
+async function enforceCandidateBankConstraints(args: {
+  structured: StructuredSolution
+  candidateBank: CandidateBank
+  blankCount: number
+  blanks: Array<PdfBlankRegion | TextBlankInfo>
+  settings: AiSettings
+  model: string
+  jobId: string
+  runId: string
+}): Promise<StructuredSolution> {
+  const { candidateBank, blankCount, blanks, settings, model, jobId, runId } = args
+  let structured = args.structured
+  const clozeTaskId = 'p1-t1'
+
+  let validation = validateClozeAnswers(structured, candidateBank, blankCount)
+  if (!validation.valid) {
+    logPipeline('task.validation_failed', {
+      jobId,
+      runId,
+      taskId: clozeTaskId,
+      violations: validation.violations,
+    })
+    logPipeline('task.repair_started', {
+      jobId,
+      runId,
+      taskId: clozeTaskId,
+      reason: 'candidate_bank_constraints',
+    })
+
+    const repairPrompt = buildClozeRepairPrompt({
+      bank: candidateBank,
+      blanks,
+      validation,
+      previousAnswers: structured,
+    })
+
+    try {
+      const repairCompletion = await chatCompletion(
+        settings,
+        [
+          {
+            role: 'system',
+            parts: [{ type: 'text', text: solutionSystemPromptForMode('lueckentext') }],
+          },
+          { role: 'user', parts: [{ type: 'text', text: repairPrompt }] },
+        ],
+        { model, maxOutputTokens: settings.maxOutputTokens },
+      )
+      const repaired = parseStructuredSolution(repairCompletion.text)
+      const pdfBlanks = blanks.filter((b): b is PdfBlankRegion => 'pageIndex' in b)
+      structured =
+        pdfBlanks.length > 0
+          ? alignAnswersToBlanks(repaired, pdfBlanks)
+          : {
+              ...repaired,
+              answers: repaired.answers.slice(0, blankCount).map((a, i) => ({
+                ...a,
+                blankIndex: i,
+                leftContext: blanks[i] && 'leftText' in blanks[i]! ? blanks[i]!.leftText : a.leftContext,
+                rightContext:
+                  blanks[i] && 'rightText' in blanks[i]! ? blanks[i]!.rightText : a.rightContext,
+              })),
+            }
+      validation = validateClozeAnswers(structured, candidateBank, blankCount)
+    } catch (error) {
+      log.warn('Wortlisten-Repair fehlgeschlagen', error)
+    }
+  }
+
+  if (validation.valid) {
+    logPipeline('task.validation_passed', {
+      jobId,
+      runId,
+      taskId: clozeTaskId,
+      answers: structured.answers.length,
+    })
+  } else {
+    logPipeline('task.validation_failed', {
+      jobId,
+      runId,
+      taskId: clozeTaskId,
+      violations: validation.violations,
+      afterRepair: true,
+    })
+    structured = sanitizeOutOfBankAnswers(structured, candidateBank, validation)
+  }
+
+  // Globale Zuordnung bei once-Policy (auch nach erfolgreichem Repair).
+  if (candidateBank.reusePolicy === 'once') {
+    const frames = blanks.map((b) => ({
+      blankIndex: b.blankIndex,
+      leftText: 'leftText' in b ? b.leftText : '',
+      rightText: 'rightText' in b ? b.rightText : '',
+      page: 'pageIndex' in b ? b.pageIndex + 1 : 1,
+    }))
+    structured = assignCandidatesGlobally(structured, candidateBank, frames)
+    // Nach Matching erneut prüfen – bei Erfolg Unsicherheiten bereinigen.
+    const afterAssign = validateClozeAnswers(structured, candidateBank, blankCount)
+    if (afterAssign.valid) {
+      logPipeline('task.validation_passed', {
+        jobId,
+        runId,
+        taskId: clozeTaskId,
+        via: 'global_assignment',
+      })
+    }
+  }
+
+  return structured
+}
+
 async function buildFilledDocument(
   source: SourceAsset | null,
   solution: StructuredSolution,
   materialTitle: string,
   fillMode: SolutionFillMode = 'lueckentext',
+  tasks: TaskBlock[] = [],
 ): Promise<FilledDocument> {
   const title = `Musterlösung – ${materialTitle}`
   const sourceBaseName = source?.fileName ?? materialTitle
+  const hasMixedRender =
+    tasks.some((t) => t.renderMode === 'overlay' || t.renderMode === 'native') &&
+    tasks.some((t) => t.renderMode === 'appendix')
 
   // Offene Aufgabe ohne Antwortfelder: separates blankes PDF (Aufgabennummer + Lösung).
-  if (fillMode === 'offen') {
+  if (fillMode === 'offen' && !hasMixedRender) {
     if (source && PDF_EXTENSIONS.has(source.extension)) {
       const acro = await fillPdfAcroForm(source.buffer, solution)
       if (acro) {
@@ -610,18 +851,13 @@ async function buildFilledDocument(
       }
     }
     if (source?.extension === 'docx') {
-      // Word bleibt Word: Lücken blau füllen oder Lösungsteil anhängen – kein PDF-Overlay.
-      const result = fillDocxDocument(source.buffer, solution, {
+      const rendered = renderDocxSolution(source.buffer, solution, {
         title,
         notice: AI_CONTENT_NOTICE,
+        sourceFileName: source.fileName,
+        tasks,
       })
-      return {
-        buffer: result.buffer,
-        fileName: solutionFileName(source.fileName, 'docx'),
-        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        strategy: result.strategy,
-        summary: solution.summary,
-      }
+      return rendered
     }
 
     const buffer = await buildAnswerListPdf(title, solution, { notice: AI_CONTENT_NOTICE })
@@ -636,27 +872,24 @@ async function buildFilledDocument(
   }
 
   if (source && OFFICE_EXTENSIONS.has(source.extension)) {
-    // DOCX: Antworten direkt in die Textlücken (blaue Schrift) – bleibt Word-Dokument.
     if (source.extension === 'docx') {
-      const result = fillDocxDocument(source.buffer, solution, {
+      const rendered = renderDocxSolution(source.buffer, solution, {
         title,
         notice: AI_CONTENT_NOTICE,
+        sourceFileName: source.fileName,
+        tasks,
       })
       log.info('DOCX-Musterlösung befüllt', {
-        strategy: result.strategy,
-        filled: result.filled,
+        strategy: rendered.strategy,
         answers: solution.answers.length,
       })
-      return {
-        buffer: result.buffer,
-        fileName: solutionFileName(source.fileName, 'docx'),
-        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        strategy: result.strategy,
-        summary: solution.summary,
-      }
+      logPipeline('render.task_completed', {
+        strategy: rendered.strategy,
+        tasks: tasks.length,
+      })
+      return rendered
     }
 
-    // Andere Office-Formate: neues DOCX mit Lösungen (Collabora kann es öffnen).
     const buffer = buildSolutionDocx(title, solution, { notice: AI_CONTENT_NOTICE })
     return {
       buffer,
@@ -668,6 +901,29 @@ async function buildFilledDocument(
   }
 
   if (source && PDF_EXTENSIONS.has(source.extension)) {
+    // Aufgabenbasiert: Overlay + optionaler Anhang (pdf_hybrid).
+    if (tasks.length > 0) {
+      const rendered = await renderPdfSolution(source.buffer, solution, {
+        title,
+        notice: AI_CONTENT_NOTICE,
+        sourceFileName: source.fileName,
+        tasks,
+      })
+      log.info('PDF-Musterlösung gerendert', {
+        strategy: rendered.strategy,
+        answers: solution.answers.length,
+        tasks: tasks.length,
+      })
+      logPipeline('render.task_completed', {
+        strategy: rendered.strategy,
+        tasks: tasks.length,
+      })
+      return {
+        ...rendered,
+        fileName: solutionFileName(source.fileName, 'pdf'),
+      }
+    }
+
     const acro = await fillPdfAcroForm(source.buffer, solution)
     if (acro) {
       return {
@@ -679,7 +935,6 @@ async function buildFilledDocument(
       }
     }
 
-    // PDFs ohne AcroForm: Originalseiten behalten und Lösungen als Text-Overlay einzeichnen.
     const overlay = await overlayPdfAnswers(source.buffer, solution)
     log.info('PDF-Overlay erzeugt', {
       overlays: overlay.overlays,
@@ -696,7 +951,6 @@ async function buildFilledDocument(
     }
   }
 
-  // Keine Datei: DOCX aus Struktur erzeugen.
   const buffer = buildSolutionDocx(title, solution, { notice: AI_CONTENT_NOTICE })
   return {
     buffer,

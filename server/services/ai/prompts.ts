@@ -1,5 +1,7 @@
 import { formatJahrgaenge, type GradeLevel } from '#shared/utils/jahrgangsstufen'
 import type { SolutionFillMode } from './document-fill'
+import { formatCandidateBankForPrompt } from './solutions/candidate-bank'
+import type { CandidateBank } from './solutions/types'
 
 export interface SolutionPromptContext {
   title: string
@@ -30,9 +32,11 @@ export interface SolutionPromptContext {
    * Wird aus der Lückenerkennung abgeleitet, falls nicht gesetzt.
    */
   fillMode?: SolutionFillMode | null
+  /** Strukturierte Wortliste – verbindlich wenn gesetzt. */
+  candidateBank?: CandidateBank | null
 }
 
-export const SOLUTION_PROMPT_VERSION = '6-fill-mode-align-logs'
+export const SOLUTION_PROMPT_VERSION = '7-candidate-bank-task-pipeline'
 
 const SOLUTION_JSON_SCHEMA = `{
   "summary": "kurzer Überblick in 1–2 Sätzen",
@@ -68,8 +72,11 @@ ${SOLUTION_JSON_SCHEMA}
 - Nummeriere Antworten als „Lücke 1“, „Lücke 2“, … in exakt derselben Reihenfolge wie blankIndex (0 → Lücke 1).
 - page: 1-basierte Seitenzahl, auf der die Lücke liegt.
 - fieldType: "luecke" für kurze Einwort-/Phrasenantworten; "freitext" nur wenn die Aufgabe ausdrücklich Fließtext verlangt.
-- Semantik zuerst: Jede answer muss im Satzkontext der konkreten Lücke grammatisch und fachlich passen (z. B. „Die ___ des Penis“ → „Eichel“, nicht ein anderes Wort aus der Wortliste).
-- Gibt es eine Wortliste: Antworten möglichst daraus wählen; keine erfundenen Wörter außerhalb der Liste, sofern die Liste vollständig wirkt.
+- Semantik zuerst: Jede answer muss im Satzkontext der konkreten Lücke grammatisch und fachlich passen (z. B. „Die ___ der Pflanze“ → „Wurzel“, nicht ein beliegiges anderes Wort).
+- Wortliste / Candidate Bank:
+  - Wenn im User-Prompt eine „Verbindliche Wortliste (Kandidaten)“ steht: Antworten AUSSCHLIESSLICH aus diesen Begriffen. Keine erfundenen Wörter.
+  - Bei gleicher Anzahl von Kandidaten und Lücken: jeden Begriff GENAU einmal verwenden (bijektive Zuordnung).
+  - Ohne verbindliche Liste: Antworten möglichst aus einer im Dokument sichtbaren Wortliste wählen.
 - blankIndex:
   - Wenn eine maschinelle Lückenliste im User-Prompt steht: verwende GENAU diese Indizes (0…n-1). Keine eigenen Nummern erfinden, keine Lücke überspringen, keine Extra-Antworten ohne Lücke.
   - Sonst: Reihenfolge aller optischen Lücken im Dokument von oben nach unten, bei Gleichstand links nach rechts, beginnend bei 0.
@@ -81,7 +88,7 @@ ${SOLUTION_JSON_SCHEMA}
   - x/y = obere linke Ecke der konkreten Lücke im Satz (nicht die Wortliste, nicht der Leerraum darüber/darunter).
   - w/h = Breite/Höhe der Lückenregion (Unterstrich/Lücke selbst).
   - Niemals Positionen in großen Weißflächen schätzen, die keine Lücke sind.
-- answer: möglichst kurz und lückengerecht (Einzelwort, Zahl, kurzer Satz) – kein Aufsatz, außer die Aufgabe verlangt Fließtext. Nicht an Wortlisten-Reihenfolge kleben – die Wortliste ist nur ein Fundus.
+- answer: möglichst kurz und lückengerecht (Einzelwort, Zahl, kurzer Satz) – kein Aufsatz, außer die Aufgabe verlangt Fließtext. Nicht an die Reihenfolge der Wortliste kleben – ordne nach Satzkontext.
 - formFields: nur bei echten PDF-/Word-Formularfeldern; "name" muss dem Feldnamen entsprechen, soweit erkennbar.
 - Löse jede erkennbare Aufgabe. Überspringe keine Teilaufgabe.
 - Formuliere fachlich korrekt und altersgerecht.
@@ -164,6 +171,17 @@ export function buildSolutionPrompt(context: SolutionPromptContext): string {
   if (context.documentText?.trim()) {
     lines.push('', '## Inhalt des Materials (automatisch aus der Datei extrahiert)', '')
     lines.push(context.documentText.trim())
+  }
+
+  if (mode === 'lueckentext' && context.candidateBank) {
+    lines.push(
+      '',
+      '## Verbindliche Wortliste (Kandidaten)',
+      formatCandidateBankForPrompt(context.candidateBank),
+      context.candidateBank.reusePolicy === 'once'
+        ? 'VERBINDLICH: ausschließlich diese Begriffe, jeden genau einmal.'
+        : 'VERBINDLICH: ausschließlich diese Begriffe (Wiederholung nur wenn nötig).',
+    )
   }
 
   if (mode === 'lueckentext' && context.blankInventory?.trim()) {

@@ -53,6 +53,8 @@ export type FillStrategy =
   | 'pdf_overlay'
   /** Separates blankes PDF mit Aufgabennummer + Lösung (offene Aufgaben). */
   | 'pdf_separate'
+  /** Originalseiten mit Overlay + angehängte Lösungsseiten für offene Aufgaben. */
+  | 'pdf_hybrid'
   | 'docx_from_structure'
   | 'hermes'
 
@@ -384,8 +386,9 @@ function docxTextRun(text: string, asAnswer = false): string {
 }
 
 /**
- * Füllt Lücken in einem Absatz: Klartext über alle <w:t> zusammenfügen
- * (Word splittet Unterstriche oft auf mehrere Runs), Antworten in blauer Schrift einsetzen.
+ * Füllt Lücken in einem Absatz. Bevorzugt minimale Run-Ersetzung:
+ * Runs außerhalb der Lücke bleiben inkl. rPr erhalten; nur Lücken-Runs
+ * werden durch blaue Antwort-Runs ersetzt. Fallback: Absatz neu aufbauen.
  */
 function fillBlanksInParagraphXml(
   paragraphXml: string,
@@ -395,45 +398,103 @@ function fillBlanksInParagraphXml(
   const nodes = collectDocxTextNodes(paragraphXml)
   if (nodes.length === 0) return { xml: paragraphXml, replaced: 0 }
 
-  const plain = nodes.map((n) => decodeXmlText(n.text)).join('')
+  const plainDecoded = nodes.map((n) => decodeXmlText(n.text))
+  const plain = plainDecoded.join('')
   if (!new RegExp(BLANK_PATTERN.source).test(plain)) {
     return { xml: paragraphXml, replaced: 0 }
   }
 
+  const pattern = new RegExp(BLANK_PATTERN.source, 'g')
+  const blanks: Array<{ start: number; end: number; value: string | null }> = []
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(plain)) != null) {
+    const value = answers[cursor.index] ?? null
+    if (value != null) cursor.index += 1
+    blanks.push({
+      start: match.index,
+      end: match.index + match[0].length,
+      value,
+    })
+  }
+  const replaced = blanks.filter((b) => b.value != null).length
+  if (replaced === 0) return { xml: paragraphXml, replaced: 0 }
+
+  // Minimale Ersetzung: Zeichenbereiche markieren, Runs nur bei Überlappung anfassen.
+  const minimal = tryMinimalBlankReplace(paragraphXml, nodes, plainDecoded, blanks)
+  if (minimal) return { xml: minimal, replaced }
+
+  // Fallback: Absatz aus Segmenten neu aufbauen (pPr bleibt).
   const openTag = paragraphXml.match(/^<w:p\b[^>]*>/)?.[0]
   if (!openTag) return { xml: paragraphXml, replaced: 0 }
   const pPr = paragraphXml.match(/<w:pPr\b[\s\S]*?<\/w:pPr>/)?.[0] ?? ''
-
   type Segment = { text: string; answer: boolean }
   const segments: Segment[] = []
-  const pattern = new RegExp(BLANK_PATTERN.source, 'g')
-  let replaced = 0
   let last = 0
-  let match: RegExpExecArray | null
-  while ((match = pattern.exec(plain)) != null) {
-    if (match.index > last) {
-      segments.push({ text: plain.slice(last, match.index), answer: false })
+  for (const blank of blanks) {
+    if (blank.start > last) {
+      segments.push({ text: plain.slice(last, blank.start), answer: false })
     }
-    const value = answers[cursor.index]
-    if (value == null) {
-      segments.push({ text: match[0], answer: false })
-    } else {
-      cursor.index += 1
-      replaced += 1
-      segments.push({ text: value, answer: true })
-    }
-    last = match.index + match[0].length
+    segments.push({
+      text: blank.value ?? plain.slice(blank.start, blank.end),
+      answer: blank.value != null,
+    })
+    last = blank.end
   }
-  if (last < plain.length) {
-    segments.push({ text: plain.slice(last), answer: false })
-  }
-  if (replaced === 0) return { xml: paragraphXml, replaced: 0 }
-
+  if (last < plain.length) segments.push({ text: plain.slice(last), answer: false })
   const runs = segments.map((seg) => docxTextRun(seg.text, seg.answer)).join('')
-  return {
-    xml: `${openTag}${pPr}${runs}</w:p>`,
-    replaced,
+  return { xml: `${openTag}${pPr}${runs}</w:p>`, replaced }
+}
+
+/**
+ * Ersetzt nur die <w:r>-Blöcke, die mit Lücken überlappen; andere Runs bleiben.
+ * Gelingt nur, wenn jede Lücke genau eine zusammenhängende Run-Sequenz abdeckt.
+ */
+function tryMinimalBlankReplace(
+  paragraphXml: string,
+  nodes: DocxTextNode[],
+  plainDecoded: string[],
+  blanks: Array<{ start: number; end: number; value: string | null }>,
+): string | null {
+  // Map plain offsets → node index
+  const nodeRanges = nodes.map((n, i) => ({
+    i,
+    start: n.plainStart,
+    end: n.plainStart + plainDecoded[i]!.length,
+    node: n,
+  }))
+
+  // Finde für jede Lücke die betroffenen Node-Indizes.
+  const replacements: Array<{ fromXml: number; toXml: number; insert: string }> = []
+  for (const blank of blanks) {
+    if (blank.value == null) continue
+    const touched = nodeRanges.filter((r) => r.start < blank.end && r.end > blank.start)
+    if (touched.length === 0) return null
+    // Nur ersetzen, wenn die Lücke die betroffenen Nodes vollständig abdeckt
+    // (kein Teilwort außerhalb der Lücke im ersten/letzten Run).
+    const first = touched[0]!
+    const last = touched[touched.length - 1]!
+    if (first.start < blank.start || last.end > blank.end) {
+      // Teil-Run: zu riskant → Fallback
+      return null
+    }
+    const firstXml = paragraphXml.lastIndexOf('<w:r', first.node.xmlStart)
+    const lastClose = paragraphXml.indexOf('</w:r>', last.node.xmlStart)
+    if (firstXml < 0 || lastClose < 0) return null
+    const toXml = lastClose + '</w:r>'.length
+    replacements.push({
+      fromXml: firstXml,
+      toXml,
+      insert: docxTextRun(blank.value, true),
+    })
   }
+
+  // Von hinten nach vorne einsetzen, damit Offsets stabil bleiben.
+  replacements.sort((a, b) => b.fromXml - a.fromXml)
+  let out = paragraphXml
+  for (const rep of replacements) {
+    out = out.slice(0, rep.fromXml) + rep.insert + out.slice(rep.toXml)
+  }
+  return out
 }
 
 /** Ersetzt Lücken dokumentweit, absatzweise (robust gegen Word-Run-Splitting). */
@@ -449,14 +510,19 @@ function fillBlanksAcrossDocxRuns(xml: string, answers: string[]): { xml: string
 }
 
 /**
- * Füllt Lücken in einem DOCX: Content Controls (Alias/Tag) und Unterstrich-/Punktmuster.
- * Lücken dürfen über mehrere Word-Runs verteilt sein.
- * Wenn nichts ersetzt werden kann, wird eine Abschnitts-Musterlösung angehängt.
+ * Füllt Lücken in einem DOCX: Content Controls (Alias/Tag), Bookmarks und
+ * Unterstrich-/Punktmuster (minimal-invasive Run-Ersetzung wo möglich).
+ * Offene Antworten können zusätzlich als Lösungsabschnitt mit Bookmark angehängt werden.
  */
 export function fillDocxDocument(
   source: Buffer,
   solution: StructuredSolution,
-  options: { title?: string; notice?: string } = {},
+  options: {
+    title?: string
+    notice?: string
+    /** Zusätzliche Freitext-Antworten als Anhang, auch wenn In-place gefüllt wurde. */
+    appendOpenAnswers?: boolean
+  } = {},
 ): { buffer: Buffer; strategy: 'docx_inplace' | 'docx_appended'; filled: number } {
   const files = unzipSync(new Uint8Array(source))
   const docEntry = files['word/document.xml']
@@ -495,6 +561,7 @@ export function fillDocxDocument(
             : null
       if (!value) return full
       replaced += 1
+      // Nur sdtContent ersetzen – sdtPr und umgebende Struktur bleiben.
       const content = inner.replace(
         /<w:sdtContent>([\s\S]*?)<\/w:sdtContent>/,
         `<w:sdtContent>${docxTextRun(value, true)}</w:sdtContent>`,
@@ -503,35 +570,50 @@ export function fillDocxDocument(
     },
   )
 
+  // Bookmarks: Text zwischen bookmarkStart/End ersetzen, wenn Name zur Antwort passt.
+  xml = xml.replace(
+    /<w:bookmarkStart([^>]*w:name="([^"]+)"[^>]*)\/>\s*([\s\S]*?)<w:bookmarkEnd[^>]*\/>/g,
+    (full, _attrs: string, name: string, inner: string) => {
+      if (name.startsWith('_')) return full
+      const match =
+        solution.answers.find((a) => a.label.toLowerCase() === name.toLowerCase()) ??
+        solution.answers.find((a) => a.id === name) ??
+        solution.answers.find((a) => `task-${a.id}` === name.toLowerCase())
+      if (!match?.answer) return full
+      replaced += 1
+      return `<w:bookmarkStart w:id="0" w:name="${escapeXml(name)}"/>${docxTextRun(match.answer, true)}<w:bookmarkEnd w:id="0"/>`
+    },
+  )
+
   const across = fillBlanksAcrossDocxRuns(xml, answers)
   xml = across.xml
   replaced += across.replaced
 
-  if (replaced > 0) {
-    files['word/document.xml'] = strToU8(xml)
-    return {
-      buffer: Buffer.from(zipSync(files, { level: 6 })),
-      strategy: 'docx_inplace',
-      filled: replaced,
-    }
+  const openAnswers = solution.answers.filter(
+    (a) => a.fieldType === 'freitext' || (a.blankIndex == null && (a.answer?.length ?? 0) > 40),
+  )
+  const shouldAppend =
+    replaced === 0 || (options.appendOpenAnswers && openAnswers.length > 0)
+
+  if (shouldAppend) {
+    const appendixAnswers =
+      replaced === 0 ? solution : { ...solution, answers: openAnswers }
+    const bookmarkId = 9000
+    const appendix = [
+      `<w:bookmarkStart w:id="${bookmarkId}" w:name="saru-loesung"/>`,
+      '<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Musterlösung (KI)</w:t></w:r></w:p>',
+      options.notice ? paragraphsToDocxXml(options.notice) : '',
+      paragraphsToDocxXml(solutionToMarkdown(appendixAnswers)),
+      `<w:bookmarkEnd w:id="${bookmarkId}"/>`,
+    ].join('')
+    xml = xml.replace(/<\/w:body>/i, `${appendix}</w:body>`)
   }
 
-  // Keine Lücken gefunden → Abschnitt anhängen, Original bleibt lesbar.
-  const appendix = [
-    '<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Musterlösung (KI)</w:t></w:r></w:p>',
-    options.notice ? paragraphsToDocxXml(options.notice) : '',
-    paragraphsToDocxXml(solutionToMarkdown(solution)),
-  ].join('')
-
-  const injected = xml.replace(
-    /<\/w:body>/i,
-    `${appendix}</w:body>`,
-  )
-  files['word/document.xml'] = strToU8(injected)
+  files['word/document.xml'] = strToU8(xml)
   return {
     buffer: Buffer.from(zipSync(files, { level: 6 })),
-    strategy: 'docx_appended',
-    filled: 0,
+    strategy: replaced > 0 ? 'docx_inplace' : 'docx_appended',
+    filled: replaced,
   }
 }
 
