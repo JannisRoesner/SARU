@@ -487,6 +487,70 @@ describe('detectPdfBlankRegions', () => {
     expect(classifySolutionFillMode(blanks)).toBe('lueckentext')
   })
 
+  it('erkennt Unterstriche, die als einzelne Runs gesplittet sind (wie in vielen PDFs)', async () => {
+    const pdf = await PDFDocument.create()
+    const font = await pdf.embedFont(StandardFonts.Helvetica)
+    const page = pdf.addPage([595.28, 841.89])
+    // Zeile 1: Die ______ des Penis (Unterstriche als ein String – und zusätzlich gesplittet)
+    page.drawText('Die ', { x: 50, y: 500, size: 12, font })
+    page.drawText('______', { x: 72, y: 500, size: 12, font })
+    page.drawText(' des Penis', { x: 120, y: 500, size: 12, font })
+
+    // Zeile 2: zwei Abstands-Lücken auf einer Zeile (ohne Unterstrich-Glyphen)
+    page.drawText('bei allen Jungen', { x: 50, y: 470, size: 12, font })
+    page.drawText('. Bei einigen ist sie sehr', { x: 220, y: 470, size: 12, font })
+    page.drawText('und steht vorne.', { x: 420, y: 470, size: 12, font })
+
+    // Zeile 3: Zahl vor Lücke
+    page.drawText('etwa 20.000', { x: 50, y: 440, size: 12, font })
+    page.drawText('- so viele.', { x: 200, y: 440, size: 12, font })
+
+    const source = Buffer.from(await pdf.save())
+    const blanks = await detectPdfBlankRegions(source)
+    expect(blanks.length).toBeGreaterThanOrEqual(4)
+    const lefts = blanks.map((b) => b.leftText.toLowerCase())
+    expect(lefts.some((t) => t.includes('die'))).toBe(true)
+    expect(lefts.some((t) => t.includes('jungen'))).toBe(true)
+    expect(lefts.some((t) => t.includes('sehr'))).toBe(true)
+    expect(lefts.some((t) => /20\.?000/.test(t))).toBe(true)
+  })
+
+  it('erkennt aufeinanderfolgende Einzel-Unterstrich-Runs als eine Lücke', async () => {
+    const pdf = await PDFDocument.create()
+    const font = await pdf.embedFont(StandardFonts.Helvetica)
+    const page = pdf.addPage([595.28, 841.89])
+    page.drawText('Die', { x: 40, y: 500, size: 14, font })
+    // Einzeln gezeichnete Unterstriche mit Abstand – typisch nach Export aus Word.
+    const positions = [70, 82, 94, 106, 118, 130]
+    for (const x of positions) {
+      page.drawText('_', { x, y: 500, size: 14, font })
+    }
+    page.drawText('des', { x: 150, y: 500, size: 14, font })
+    const source = Buffer.from(await pdf.save())
+
+    const { loadPdfjs } = await import('../../server/utils/pdfjs')
+    const pdfjs = await loadPdfjs()
+    const task = pdfjs.getDocument({
+      data: new Uint8Array(source),
+      useSystemFonts: false,
+      disableFontFace: true,
+      verbosity: 0,
+    })
+    const doc = await task.promise
+    const page1 = await doc.getPage(1)
+    const text = await page1.getTextContent()
+    const strs = text.items.filter((i) => 'str' in i).map((i) => (i as { str: string }).str)
+    await task.destroy()
+
+    // Sanity: pdf.js liefert die Unterstriche (einzeln oder zusammengeführt).
+    expect(strs.join('')).toContain('_')
+
+    const blanks = await detectPdfBlankRegions(source)
+    expect(blanks.length).toBeGreaterThanOrEqual(1)
+    expect(blanks[0]!.leftText.toLowerCase()).toContain('die')
+    expect(blanks[0]!.rightText.toLowerCase()).toContain('des')
+  })
+
   it('erkennt in durchgehendem Fließtext keine Lücken (offene Aufgabe)', async () => {
     const pdf = await PDFDocument.create()
     const font = await pdf.embedFont(StandardFonts.Helvetica)
@@ -535,6 +599,22 @@ describe('looksLikeClozeGap / filterReliableBlanks', () => {
         leftText: 'ist sie sehr',
         rightText: 'und steht vorne.',
         width: 90,
+      }),
+    ).toBe(true)
+    expect(
+      looksLikeClozeGap({
+        kind: 'gap',
+        leftText: 'etwa 20.000',
+        rightText: '- so viele wie an den Fingerspitzen.',
+        width: 70,
+      }),
+    ).toBe(true)
+    expect(
+      looksLikeClozeGap({
+        kind: 'gap',
+        leftText: 'Bei allen Jungen. Bei einigen ist sie sehr',
+        rightText: 'und steht vorne etwas über. Die Vorhaut besteht aus zwei',
+        width: 80,
       }),
     ).toBe(true)
     expect(
