@@ -1,6 +1,7 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib'
 import { createLogger } from '../../utils/logger'
+import { extractJsonObject } from '../../utils/json-parse'
 import { loadPdfjs } from '../../utils/pdfjs'
 
 const log = createLogger('ai:document-fill')
@@ -135,6 +136,214 @@ function parseBBox(raw: unknown): SolutionBBox | null {
   }
 }
 
+function mapAnswerEntry(entry: unknown, index: number): SolutionAnswer | null {
+  if (!entry || typeof entry !== 'object') return null
+  const row = entry as Record<string, unknown>
+  const answer = String(row.answer ?? row.value ?? '').trim()
+  if (!answer) return null
+  // Roh-JSON darf nie als Lückentext landen (typisch nach fehlgeschlagenem Parse).
+  if (answer.startsWith('{') && /"answers"\s*:/.test(answer)) return null
+
+  const nestedBBox = parseBBox(row.bbox ?? row.box ?? row.rect)
+  const flatBBox =
+    nestedBBox ??
+    parseBBox({
+      x: row.x,
+      y: row.y,
+      w: row.w ?? row.width,
+      h: row.h ?? row.height,
+    })
+  const leftContext = String(
+    row.leftContext ?? row.contextBefore ?? row.before ?? '',
+  ).trim()
+  const rightContext = String(
+    row.rightContext ?? row.contextAfter ?? row.after ?? '',
+  ).trim()
+  const fieldRaw = String(row.fieldType ?? row.type ?? '').toLowerCase()
+  const fieldType: SolutionFieldType | null =
+    fieldRaw === 'freitext' || fieldRaw === 'textarea' || fieldRaw === 'long'
+      ? 'freitext'
+      : fieldRaw === 'luecke' || fieldRaw === 'blank' || fieldRaw === 'short'
+        ? 'luecke'
+        : null
+  const targetIdRaw = String(row.targetId ?? row.target ?? '').trim()
+  return {
+    id: String(row.id ?? index + 1),
+    label: String(row.label ?? row.task ?? `Aufgabe ${index + 1}`),
+    answer,
+    page: typeof row.page === 'number' ? row.page : null,
+    blankIndex: typeof row.blankIndex === 'number' ? row.blankIndex : null,
+    leftContext: leftContext || null,
+    rightContext: rightContext || null,
+    bbox: flatBBox,
+    fieldType,
+    targetId: targetIdRaw || null,
+  }
+}
+
+function structuredSolutionFromParsed(
+  parsed: Record<string, unknown>,
+  fallbackText: string,
+): StructuredSolution {
+  const answersRaw = Array.isArray(parsed.answers) ? parsed.answers : []
+  const fieldsRaw = Array.isArray(parsed.formFields) ? parsed.formFields : []
+
+  const answers: SolutionAnswer[] = []
+  for (const [index, entry] of answersRaw.entries()) {
+    const mapped = mapAnswerEntry(entry, index)
+    if (mapped) answers.push(mapped)
+  }
+
+  const formFields: SolutionFormField[] = fieldsRaw
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null
+      const row = entry as Record<string, unknown>
+      const name = String(row.name ?? '').trim()
+      const value = String(row.value ?? '').trim()
+      if (!name || !value) return null
+      return { name, value }
+    })
+    .filter((row): row is SolutionFormField => row !== null)
+
+  const diagramMarks = parseDiagramMarks(parsed.diagramMarks)
+
+  if (answers.length === 0 && formFields.length === 0 && diagramMarks.length === 0) {
+    const fallback = String(parsed.summary ?? parsed.text ?? fallbackText).trim()
+    // Kein JSON-Dump als einzige „Antwort“ – sonst landet er in der ersten Lücke.
+    const safeFallback =
+      fallback.startsWith('{') && /"answers"\s*:/.test(fallback) ? '' : fallback
+    return {
+      summary: 'Automatisch erstellte Musterlösung.',
+      answers: safeFallback ? [{ id: '1', label: 'Lösung', answer: safeFallback }] : [],
+      formFields: [],
+    }
+  }
+
+  return {
+    summary: String(parsed.summary ?? 'Automatisch erstellte Musterlösung.').trim(),
+    answers,
+    formFields,
+    notesForTeacher: parsed.notesForTeacher ? String(parsed.notesForTeacher) : null,
+    uncertainties: parsed.uncertainties ? String(parsed.uncertainties) : null,
+    diagramMarks: diagramMarks.length > 0 ? diagramMarks : null,
+  }
+}
+
+/**
+ * Rekonstruiert eine abgeschnittene Lösungs-JSON (häufig bei vielen Lücken /
+ * kleinem max_tokens): vollständige Answer-Objekte aus dem answers-Array bergen.
+ */
+export function recoverTruncatedSolutionJson(text: string): Record<string, unknown> | null {
+  const answersKey = text.match(/"answers"\s*:\s*\[/)
+  if (!answersKey || answersKey.index == null) return null
+
+  const arrayBodyStart = answersKey.index + answersKey[0].length
+  const answers: unknown[] = []
+  let i = arrayBodyStart
+  while (i < text.length) {
+    while (i < text.length && /[\s,]/.test(text[i]!)) i += 1
+    if (i >= text.length || text[i] === ']') break
+    if (text[i] !== '{') break
+
+    let depth = 0
+    let inString = false
+    let escaped = false
+    const start = i
+    for (; i < text.length; i++) {
+      const char = text[i]!
+      if (inString) {
+        if (escaped) escaped = false
+        else if (char === '\\') escaped = true
+        else if (char === '"') inString = false
+        continue
+      }
+      if (char === '"') {
+        inString = true
+        continue
+      }
+      if (char === '{') depth += 1
+      else if (char === '}') {
+        depth -= 1
+        if (depth === 0) {
+          i += 1
+          const slice = text.slice(start, i)
+          try {
+            answers.push(JSON.parse(slice))
+          } catch {
+            // Unvollständiges Objekt am Truncation-Punkt – abbrechen.
+            i = text.length
+          }
+          break
+        }
+      }
+    }
+    if (depth !== 0) break
+  }
+
+  if (answers.length === 0) return null
+
+  const summaryMatch = text.match(/"summary"\s*:\s*"((?:\\.|[^"\\])*)"/)
+  let summary = 'Automatisch erstellte Musterlösung (teilweise rekonstruiert).'
+  if (summaryMatch?.[1]) {
+    try {
+      summary = JSON.parse(`"${summaryMatch[1]}"`) as string
+    } catch {
+      summary = summaryMatch[1]
+    }
+  }
+
+  const diagramKey = text.match(/"diagramMarks"\s*:\s*\[/)
+  let diagramMarks: unknown[] | undefined
+  if (diagramKey && diagramKey.index != null) {
+    const marks: unknown[] = []
+    let j = diagramKey.index + diagramKey[0].length
+    while (j < text.length) {
+      while (j < text.length && /[\s,]/.test(text[j]!)) j += 1
+      if (j >= text.length || text[j] === ']') break
+      if (text[j] !== '{') break
+      let depth = 0
+      let inString = false
+      let escaped = false
+      const start = j
+      for (; j < text.length; j++) {
+        const char = text[j]!
+        if (inString) {
+          if (escaped) escaped = false
+          else if (char === '\\') escaped = true
+          else if (char === '"') inString = false
+          continue
+        }
+        if (char === '"') {
+          inString = true
+          continue
+        }
+        if (char === '{') depth += 1
+        else if (char === '}') {
+          depth -= 1
+          if (depth === 0) {
+            j += 1
+            try {
+              marks.push(JSON.parse(text.slice(start, j)))
+            } catch {
+              j = text.length
+            }
+            break
+          }
+        }
+      }
+      if (depth !== 0) break
+    }
+    if (marks.length > 0) diagramMarks = marks
+  }
+
+  return {
+    summary,
+    answers,
+    formFields: [],
+    ...(diagramMarks ? { diagramMarks } : {}),
+  }
+}
+
 /** Extrahiert strukturierte Lösung aus LLM-Text (JSON oder Markdown-Fence). */
 export function parseStructuredSolution(raw: string): StructuredSolution {
   const trimmed = raw.trim()
@@ -142,7 +351,7 @@ export function parseStructuredSolution(raw: string): StructuredSolution {
   const candidate = fenced?.[1]?.trim() ?? trimmed
   const start = candidate.indexOf('{')
   const end = candidate.lastIndexOf('}')
-  if (start < 0 || end <= start) {
+  if (start < 0) {
     return {
       summary: 'Automatisch erstellte Musterlösung (Freitext).',
       answers: [{ id: '1', label: 'Lösung', answer: trimmed }],
@@ -150,86 +359,46 @@ export function parseStructuredSolution(raw: string): StructuredSolution {
     }
   }
 
+  const slice =
+    end > start ? candidate.slice(start, end + 1) : candidate.slice(start)
+
   try {
-    const parsed = JSON.parse(candidate.slice(start, end + 1)) as Record<string, unknown>
-    const answersRaw = Array.isArray(parsed.answers) ? parsed.answers : []
-    const fieldsRaw = Array.isArray(parsed.formFields) ? parsed.formFields : []
-
-    const answers: SolutionAnswer[] = []
-    for (const [index, entry] of answersRaw.entries()) {
-      if (!entry || typeof entry !== 'object') continue
-      const row = entry as Record<string, unknown>
-      const answer = String(row.answer ?? row.value ?? '').trim()
-      if (!answer) continue
-      const nestedBBox = parseBBox(row.bbox ?? row.box ?? row.rect)
-      const flatBBox =
-        nestedBBox ??
-        parseBBox({
-          x: row.x,
-          y: row.y,
-          w: row.w ?? row.width,
-          h: row.h ?? row.height,
+    const parsed = JSON.parse(slice) as Record<string, unknown>
+    return structuredSolutionFromParsed(parsed, trimmed)
+  } catch (error) {
+    const extracted = extractJsonObject(candidate)
+    if (extracted) {
+      const recovered = structuredSolutionFromParsed(extracted, trimmed)
+      if (recovered.answers.length > 0 || recovered.formFields.length > 0) {
+        log.info('Strukturierte Lösung über toleranten JSON-Parser gelesen', {
+          answers: recovered.answers.length,
         })
-      const leftContext = String(
-        row.leftContext ?? row.contextBefore ?? row.before ?? '',
-      ).trim()
-      const rightContext = String(
-        row.rightContext ?? row.contextAfter ?? row.after ?? '',
-      ).trim()
-      const fieldRaw = String(row.fieldType ?? row.type ?? '').toLowerCase()
-      const fieldType: SolutionFieldType | null =
-        fieldRaw === 'freitext' || fieldRaw === 'textarea' || fieldRaw === 'long'
-          ? 'freitext'
-          : fieldRaw === 'luecke' || fieldRaw === 'blank' || fieldRaw === 'short'
-            ? 'luecke'
-            : null
-      const targetIdRaw = String(row.targetId ?? row.target ?? '').trim()
-      answers.push({
-        id: String(row.id ?? index + 1),
-        label: String(row.label ?? row.task ?? `Aufgabe ${index + 1}`),
-        answer,
-        page: typeof row.page === 'number' ? row.page : null,
-        blankIndex: typeof row.blankIndex === 'number' ? row.blankIndex : null,
-        leftContext: leftContext || null,
-        rightContext: rightContext || null,
-        bbox: flatBBox,
-        fieldType,
-        targetId: targetIdRaw || null,
-      })
-    }
-
-    const formFields: SolutionFormField[] = fieldsRaw
-      .map((entry) => {
-        if (!entry || typeof entry !== 'object') return null
-        const row = entry as Record<string, unknown>
-        const name = String(row.name ?? '').trim()
-        const value = String(row.value ?? '').trim()
-        if (!name || !value) return null
-        return { name, value }
-      })
-      .filter((row): row is SolutionFormField => row !== null)
-
-    const diagramMarks = parseDiagramMarks(parsed.diagramMarks)
-
-    if (answers.length === 0 && formFields.length === 0 && diagramMarks.length === 0) {
-      const fallback = String(parsed.summary ?? parsed.text ?? trimmed).trim()
-      return {
-        summary: 'Automatisch erstellte Musterlösung.',
-        answers: fallback ? [{ id: '1', label: 'Lösung', answer: fallback }] : [],
-        formFields: [],
+        return recovered
       }
     }
 
-    return {
-      summary: String(parsed.summary ?? 'Automatisch erstellte Musterlösung.').trim(),
-      answers,
-      formFields,
-      notesForTeacher: parsed.notesForTeacher ? String(parsed.notesForTeacher) : null,
-      uncertainties: parsed.uncertainties ? String(parsed.uncertainties) : null,
-      diagramMarks: diagramMarks.length > 0 ? diagramMarks : null,
+    const truncated = recoverTruncatedSolutionJson(candidate.slice(start))
+    if (truncated) {
+      const recovered = structuredSolutionFromParsed(truncated, trimmed)
+      if (recovered.answers.length > 0 || (recovered.diagramMarks?.length ?? 0) > 0) {
+        log.warn('Strukturierte Lösung aus abgeschnittenem JSON rekonstruiert', {
+          answers: recovered.answers.length,
+          diagramMarks: recovered.diagramMarks?.length ?? 0,
+          parseError: error instanceof Error ? error.message : String(error),
+        })
+        return recovered
+      }
     }
-  } catch (error) {
+
     log.warn('Strukturierte Lösung konnte nicht geparst werden – Freitext-Fallback', error)
+    // JSON-ähnlichen Rohtext nicht als Lückenfüllung verwenden.
+    if (trimmed.includes('"answers"') && trimmed.includes('{')) {
+      return {
+        summary: 'Automatisch erstellte Musterlösung (Freitext).',
+        answers: [],
+        formFields: [],
+      }
+    }
     return {
       summary: 'Automatisch erstellte Musterlösung (Freitext).',
       answers: [{ id: '1', label: 'Lösung', answer: trimmed }],
@@ -389,14 +558,41 @@ function collectDocxRuns(paragraphXml: string): DocxRunInfo[] {
   return runs
 }
 
+/** Nächster Run mit sichtbarem Wortinhalt (nicht nur Spaces/Unterstriche). */
+function nearestContentRun(
+  runs: DocxRunInfo[],
+  fromIndex: number,
+  direction: -1 | 1,
+): DocxRunInfo | null {
+  let i = fromIndex
+  while (i >= 0 && i < runs.length) {
+    const run = runs[i]!
+    if (/\S/.test(run.text) && !/^[\s\u00a0_]+$/.test(run.text)) return run
+    i += direction
+  }
+  return null
+}
+
 /**
  * Findet Lücken aus unterstrichenen Leerzeichen (typisch in Word-Arbeitsblättern
  * statt „___“-Zeichen). Aufeinanderfolgende unterstrichene Space-Runs werden
  * zu einer Lücke zusammengeführt.
+ *
+ * Wichtig: Wenn links und rechts bereits unterstrichene Wörter stehen (häufig
+ * bei durchgängig unterstrichenen Absätzen / Lehrerfassungen mit eingetragenen
+ * Antworten), sind die Space-Läufe nur Abstände – keine echten Lücken.
  */
 function findUnderlineBlankRanges(
   runs: DocxRunInfo[],
 ): Array<{ start: number; end: number }> {
+  const hasPlainContentWord = runs.some(
+    (run) =>
+      !run.underlined && /\S/.test(run.text) && !/^[\s\u00a0_]+$/.test(run.text),
+  )
+  // Durchgängig unterstrichener Absatz (Lehrerfassung mit eingetragenen Wörtern):
+  // Space-Läufe sind Abstände, keine auszufüllenden Lücken.
+  if (!hasPlainContentWord) return []
+
   const ranges: Array<{ start: number; end: number }> = []
   let i = 0
   while (i < runs.length) {
@@ -420,11 +616,36 @@ function findUnderlineBlankRanges(
     }
     // Mindestens 3 Zeichen Breite – analog zu _{3,}
     if (end - start >= 3) {
-      ranges.push({ start, end })
+      const left = nearestContentRun(runs, i - 1, -1)
+      const right = nearestContentRun(runs, j, 1)
+      // Abstand zwischen zwei bereits unterstrichenen Antwortwörtern → kein Blank.
+      const sandwichedBetweenUnderlinedWords = Boolean(
+        left?.underlined && right?.underlined,
+      )
+      // „Wort ___ ,“ / „Wort ___ .“ sind Abstände vor Satzzeichen, keine Lücken.
+      const beforePunctuation = Boolean(right && /^[,.;:!?]/.test(right.text.trimStart()))
+      if (!sandwichedBetweenUnderlinedWords && !beforePunctuation) {
+        ranges.push({ start, end })
+      }
     }
     i = j
   }
   return ranges
+}
+
+/** Mappt DOCX-Textlücken auf die Align-Schnittstelle von PDF-Lücken. */
+export function textBlanksAsAlignable(blanks: TextBlankInfo[]): PdfBlankRegion[] {
+  return blanks.map((blank) => ({
+    pageIndex: 0,
+    blankIndex: blank.blankIndex,
+    x: 0,
+    y: 0,
+    width: 0,
+    height: 0,
+    kind: 'underscore' as const,
+    leftText: blank.leftText,
+    rightText: blank.rightText,
+  }))
 }
 
 /**

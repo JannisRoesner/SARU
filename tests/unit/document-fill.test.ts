@@ -19,6 +19,7 @@ import {
   normalizeSolutionTextForPdf,
   overlayPdfAnswers,
   parseStructuredSolution,
+  recoverTruncatedSolutionJson,
   sanitizePdfText,
   solutionToMarkdown,
   topLeftNormToPdfBaseline,
@@ -167,6 +168,41 @@ describe('parseStructuredSolution', () => {
     )
     expect(result.answers[0]!.fieldType).toBe('luecke')
     expect(result.answers[1]!.fieldType).toBe('freitext')
+  })
+
+  it('rekonstruiert abgeschnittenes answers-Array statt Freitext-Dump', () => {
+    const truncated = `{
+  "summary": "Meiose-Lückentext",
+  "answers": [
+    {
+      "id": "0",
+      "label": "Lücke 1",
+      "answer": "Hoden",
+      "blankIndex": 0,
+      "leftContext": "Im ",
+      "rightContext": "des Mannes"
+    },
+    {
+      "id": "1",
+      "label": "Lücke 2",
+      "answer": "haploidem",
+      "blankIndex": 1,
+      "leftContext": "mit ",
+      "rightContext": "Chromosomensatz heran. Dabei entstehen aus der diploide`
+    const recovered = recoverTruncatedSolutionJson(truncated)
+    expect(recovered?.answers).toHaveLength(1)
+    expect((recovered!.answers as Array<{ answer: string }>)[0]!.answer).toBe('Hoden')
+
+    const parsed = parseStructuredSolution(truncated)
+    expect(parsed.answers).toHaveLength(1)
+    expect(parsed.answers[0]!.answer).toBe('Hoden')
+    expect(parsed.answers[0]!.answer.startsWith('{')).toBe(false)
+  })
+
+  it('wirft kaputtes JSON nicht als Lücken-Antwort zurück', () => {
+    const broken = '{"summary":"S","answers":[{"answer":"x",'
+    const result = parseStructuredSolution(broken)
+    expect(result.answers.every((a) => !a.answer.includes('"answers"'))).toBe(true)
   })
 })
 
@@ -460,6 +496,39 @@ describe('fillDocxDocument', () => {
     expect(xml).toContain('haploidem')
     expect(xml).toContain('Spermienmutterzelle')
     expect(xml).toContain('w:val="1F4E9B"')
+  })
+
+  it('ignoriert Space-Lücken in durchgängig unterstrichenen Absätzen (Lehrerfassung)', () => {
+    // Typisch: ganze Zeile unterstrichen, Antworten bereits eingetragen,
+    // breite Spaces nur als Abstand – keine echten Lücken.
+    const teacherFilled = minimalDocxWithBody(`
+      <w:p>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t>Im</w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t xml:space="preserve">    </w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t>Hoden</w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t xml:space="preserve">       </w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t>des Mannes reifen Zellen mit</w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t xml:space="preserve">      </w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t>haploidem</w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t xml:space="preserve">        </w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t>Chromosomensatz.</w:t></w:r>
+      </w:p>
+    `)
+
+    const detected = detectDocxBlanks(teacherFilled)
+    expect(detected).toHaveLength(0)
+  })
+
+  it('ignoriert unterstrichene Spaces vor Satzzeichen', () => {
+    const doc = minimalDocxWithBody(`
+      <w:p>
+        <w:r><w:t>die sogenannten </w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t>Polkörperchen</w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t xml:space="preserve">    </w:t></w:r>
+        <w:r><w:t>, sterben ab.</w:t></w:r>
+      </w:p>
+    `)
+    expect(detectDocxBlanks(doc)).toHaveLength(0)
   })
 })
 

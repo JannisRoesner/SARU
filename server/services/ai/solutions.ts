@@ -42,6 +42,7 @@ import {
   solutionToMarkdown,
   summarizeAnswersForLog,
   summarizeBlanksForLog,
+  textBlanksAsAlignable,
   type FilledDocument,
   type PdfBlankRegion,
   type SolutionFillMode,
@@ -574,6 +575,12 @@ export async function generateSolution(
         )
       }
 
+      // Viele Lücken → verbose JSON; Token-Budget an Inventargröße anpassen.
+      const solutionMaxTokens = Math.min(
+        32_000,
+        Math.max(settings.maxOutputTokens || 4000, 1200 + blankCount * 220),
+      )
+
       const completion = await chatCompletion(
         settings,
         [
@@ -583,7 +590,7 @@ export async function generateSolution(
           },
           { role: 'user', parts },
         ],
-        { model, maxOutputTokens: settings.maxOutputTokens },
+        { model, maxOutputTokens: solutionMaxTokens },
       )
 
       usedModel = completion.model
@@ -618,21 +625,8 @@ export async function generateSolution(
           })),
         })
       } else if (docxBlanks.length > 0) {
-        // DOCX: Labels/Kontext an Inventar-Reihenfolge angleichen.
-        structured = {
-          ...structured,
-          answers: structured.answers
-            .slice(0, docxBlanks.length)
-            .map((a, i) => ({
-              ...a,
-              id: String(i + 1),
-              label: `Lücke ${i + 1}`,
-              blankIndex: i,
-              leftContext: docxBlanks[i]?.leftText ?? a.leftContext,
-              rightContext: docxBlanks[i]?.rightText ?? a.rightContext,
-              fieldType: a.fieldType ?? 'luecke',
-            })),
-        }
+        // DOCX: dieselbe Kontext-Ausrichtung wie bei PDF (nicht nur Positions-Slice).
+        structured = alignAnswersToBlanks(structured, textBlanksAsAlignable(docxBlanks))
         log.info('DOCX-Antworten an Lückeninventar gebunden', {
           mapping: summarizeAnswersForLog(structured.answers),
         })
