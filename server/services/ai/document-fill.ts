@@ -31,7 +31,19 @@ export interface SolutionAnswer {
   bbox?: SolutionBBox | null
   /** Darstellungs-/Overlay-Typ; Autoren können ihn nachträglich ändern. */
   fieldType?: SolutionFieldType | null
+  /** DOCX: Ziel-ID (txbx-0, shape-1, tc-0:1, …). */
+  targetId?: string | null
 }
+
+export type DiagramMark =
+  | { kind: 'label'; text: string; targetId: string }
+  | {
+      kind: 'chromosome'
+      form: 'two_chromatid' | 'one_chromatid'
+      count: number
+      targetId: string
+    }
+  | { kind: 'arrow_label'; text: string; targetId: string }
 
 export interface SolutionFormField {
   name: string
@@ -44,11 +56,15 @@ export interface StructuredSolution {
   formFields: SolutionFormField[]
   notesForTeacher?: string | null
   uncertainties?: string | null
+  /** Strukturierte Diagramm-Markierungen (DOCX diagram_completion). */
+  diagramMarks?: DiagramMark[] | null
 }
 
 export type FillStrategy =
   | 'docx_inplace'
   | 'docx_appended'
+  /** In-place-Befüllung plus Anhang für offene Teilaufgaben. */
+  | 'docx_mixed'
   | 'pdf_acroform'
   | 'pdf_overlay'
   /** Separates blankes PDF mit Aufgabennummer + Lösung (offene Aufgaben). */
@@ -71,6 +87,34 @@ const SOLUTION_INK = rgb(0.12, 0.22, 0.55)
 function clamp01(value: number): number {
   if (!Number.isFinite(value)) return 0
   return Math.min(1, Math.max(0, value))
+}
+
+function parseDiagramMarks(raw: unknown): DiagramMark[] {
+  if (!Array.isArray(raw)) return []
+  const out: DiagramMark[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue
+    const row = entry as Record<string, unknown>
+    const kind = String(row.kind ?? '')
+    const targetId = String(row.targetId ?? '').trim()
+    if (!targetId) continue
+    if (kind === 'label' || kind === 'arrow_label') {
+      const text = String(row.text ?? '').trim()
+      if (!text) continue
+      out.push({ kind, text, targetId })
+    } else if (kind === 'chromosome') {
+      const form =
+        row.form === 'one_chromatid' ? 'one_chromatid' : 'two_chromatid'
+      const count = Number(row.count)
+      out.push({
+        kind: 'chromosome',
+        form,
+        count: Number.isFinite(count) && count > 0 ? Math.floor(count) : 1,
+        targetId,
+      })
+    }
+  }
+  return out
 }
 
 function parseBBox(raw: unknown): SolutionBBox | null {
@@ -139,6 +183,7 @@ export function parseStructuredSolution(raw: string): StructuredSolution {
           : fieldRaw === 'luecke' || fieldRaw === 'blank' || fieldRaw === 'short'
             ? 'luecke'
             : null
+      const targetIdRaw = String(row.targetId ?? row.target ?? '').trim()
       answers.push({
         id: String(row.id ?? index + 1),
         label: String(row.label ?? row.task ?? `Aufgabe ${index + 1}`),
@@ -149,6 +194,7 @@ export function parseStructuredSolution(raw: string): StructuredSolution {
         rightContext: rightContext || null,
         bbox: flatBBox,
         fieldType,
+        targetId: targetIdRaw || null,
       })
     }
 
@@ -163,7 +209,9 @@ export function parseStructuredSolution(raw: string): StructuredSolution {
       })
       .filter((row): row is SolutionFormField => row !== null)
 
-    if (answers.length === 0 && formFields.length === 0) {
+    const diagramMarks = parseDiagramMarks(parsed.diagramMarks)
+
+    if (answers.length === 0 && formFields.length === 0 && diagramMarks.length === 0) {
       const fallback = String(parsed.summary ?? parsed.text ?? trimmed).trim()
       return {
         summary: 'Automatisch erstellte Musterlösung.',
@@ -178,6 +226,7 @@ export function parseStructuredSolution(raw: string): StructuredSolution {
       formFields,
       notesForTeacher: parsed.notesForTeacher ? String(parsed.notesForTeacher) : null,
       uncertainties: parsed.uncertainties ? String(parsed.uncertainties) : null,
+      diagramMarks: diagramMarks.length > 0 ? diagramMarks : null,
     }
   } catch (error) {
     log.warn('Strukturierte Lösung konnte nicht geparst werden – Freitext-Fallback', error)
@@ -286,6 +335,16 @@ export interface TextBlankInfo {
   blankIndex: number
   leftText: string
   rightText: string
+  /** underscore = ___/…; underline = unterstrichene Leerzeichen (Word-Formatierung). */
+  kind?: 'underscore' | 'underline'
+}
+
+interface DocxRunInfo {
+  xmlStart: number
+  xmlEnd: number
+  text: string
+  underlined: boolean
+  plainStart: number
 }
 
 function orderedAnswerTexts(solution: StructuredSolution): string[] {
@@ -297,37 +356,6 @@ function orderedAnswerTexts(solution: StructuredSolution): string[] {
   return solution.answers.map((a) => a.answer)
 }
 
-interface DocxTextNode {
-  /** Index des Match-Starts im XML. */
-  xmlStart: number
-  open: string
-  text: string
-  close: string
-  /** Start-Offset dieses Knotens im zusammengefügten Klartext. */
-  plainStart: number
-}
-
-function collectDocxTextNodes(xml: string): DocxTextNode[] {
-  const nodes: DocxTextNode[] = []
-  const re = /(<w:t(?:\s[^>]*)?>)([\s\S]*?)(<\/w:t>)/g
-  let match: RegExpExecArray | null
-  let plainStart = 0
-  while ((match = re.exec(xml)) != null) {
-    const open = match[1]!
-    const text = match[2]!
-    const close = match[3]!
-    nodes.push({
-      xmlStart: match.index,
-      open,
-      text,
-      close,
-      plainStart,
-    })
-    plainStart += text.length
-  }
-  return nodes
-}
-
 function decodeXmlText(value: string): string {
   return value
     .replaceAll('&lt;', '<')
@@ -337,29 +365,123 @@ function decodeXmlText(value: string): string {
     .replaceAll('&amp;', '&')
 }
 
+/** Sammelt Runs eines Absatzes inkl. Unterstreichungs-Flag. */
+function collectDocxRuns(paragraphXml: string): DocxRunInfo[] {
+  const runs: DocxRunInfo[] = []
+  const re = /<w:r\b[\s\S]*?<\/w:r>/g
+  let match: RegExpExecArray | null
+  let plainStart = 0
+  while ((match = re.exec(paragraphXml)) != null) {
+    const full = match[0]
+    const underlined = /<w:u[\s/>]/.test(full)
+    const text = [...full.matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)]
+      .map((t) => decodeXmlText(t[1] ?? ''))
+      .join('')
+    runs.push({
+      xmlStart: match.index,
+      xmlEnd: match.index + full.length,
+      text,
+      underlined,
+      plainStart,
+    })
+    plainStart += text.length
+  }
+  return runs
+}
+
 /**
- * Findet Unterstrich-/Punktlücken in DOCX-document.xml, auch wenn Word die
- * Unterstriche auf mehrere <w:t>-Runs aufgeteilt hat.
+ * Findet Lücken aus unterstrichenen Leerzeichen (typisch in Word-Arbeitsblättern
+ * statt „___“-Zeichen). Aufeinanderfolgende unterstrichene Space-Runs werden
+ * zu einer Lücke zusammengeführt.
+ */
+function findUnderlineBlankRanges(
+  runs: DocxRunInfo[],
+): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = []
+  let i = 0
+  while (i < runs.length) {
+    const run = runs[i]!
+    const isBlankRun = run.underlined && /^[\s\u00a0_]+$/.test(run.text) && run.text.length > 0
+    if (!isBlankRun) {
+      i += 1
+      continue
+    }
+    const start = run.plainStart
+    let end = run.plainStart + run.text.length
+    let j = i + 1
+    while (j < runs.length) {
+      const next = runs[j]!
+      if (next.underlined && /^[\s\u00a0_]+$/.test(next.text) && next.text.length > 0) {
+        end = next.plainStart + next.text.length
+        j += 1
+      } else {
+        break
+      }
+    }
+    // Mindestens 3 Zeichen Breite – analog zu _{3,}
+    if (end - start >= 3) {
+      ranges.push({ start, end })
+    }
+    i = j
+  }
+  return ranges
+}
+
+/**
+ * Findet Unterstrich-/Punktlücken und unterstrichene Leerzeichen-Lücken in
+ * DOCX-document.xml (auch über Run-Grenzen und in Tabellenzellen).
  */
 export function detectDocxBlanks(source: Buffer): TextBlankInfo[] {
   const files = unzipSync(new Uint8Array(source))
   const docEntry = files['word/document.xml']
   if (!docEntry) return []
   const xml = strFromU8(docEntry)
-  const nodes = collectDocxTextNodes(xml)
-  const plain = nodes.map((n) => decodeXmlText(n.text)).join('')
   const blanks: TextBlankInfo[] = []
-  const pattern = new RegExp(BLANK_PATTERN.source, 'g')
-  let match: RegExpExecArray | null
-  while ((match = pattern.exec(plain)) != null) {
-    const start = match.index
-    const end = start + match[0].length
-    blanks.push({
-      blankIndex: blanks.length,
-      leftText: plain.slice(Math.max(0, start - 56), start).replace(/\s+/g, ' ').trim(),
-      rightText: plain.slice(end, end + 56).replace(/\s+/g, ' ').trim(),
-    })
+
+  // Absatzweise: Zeichenmuster (___) und Formatierungs-Lücken (unterstrichene Spaces).
+  const paraRe = /<w:p\b[\s\S]*?<\/w:p>/g
+  let paraMatch: RegExpExecArray | null
+  while ((paraMatch = paraRe.exec(xml)) != null) {
+    const paragraphXml = paraMatch[0]
+    const runs = collectDocxRuns(paragraphXml)
+    if (runs.length === 0) continue
+    const plain = runs.map((r) => r.text).join('')
+
+    const charRanges: Array<{ start: number; end: number; kind: 'underscore' }> = []
+    const pattern = new RegExp(BLANK_PATTERN.source, 'g')
+    let match: RegExpExecArray | null
+    while ((match = pattern.exec(plain)) != null) {
+      charRanges.push({
+        start: match.index,
+        end: match.index + match[0].length,
+        kind: 'underscore',
+      })
+    }
+
+    const underlineRanges = findUnderlineBlankRanges(runs).map((r) => ({
+      ...r,
+      kind: 'underline' as const,
+    }))
+
+    // Zeichenlücken haben Vorrang; Formatierungs-Lücken nur, wenn sie nicht
+    // mit einer Zeichenlücke überlappen.
+    const ranges = [
+      ...charRanges,
+      ...underlineRanges.filter(
+        (u) => !charRanges.some((c) => c.start < u.end && c.end > u.start),
+      ),
+    ].sort((a, b) => a.start - b.start)
+
+    for (const range of ranges) {
+      blanks.push({
+        blankIndex: blanks.length,
+        leftText: plain.slice(Math.max(0, range.start - 56), range.start).replace(/\s+/g, ' ').trim(),
+        rightText: plain.slice(range.end, range.end + 56).replace(/\s+/g, ' ').trim(),
+        kind: range.kind,
+      })
+    }
   }
+
   return blanks
 }
 
@@ -395,32 +517,34 @@ function fillBlanksInParagraphXml(
   answers: string[],
   cursor: { index: number },
 ): { xml: string; replaced: number } {
-  const nodes = collectDocxTextNodes(paragraphXml)
-  if (nodes.length === 0) return { xml: paragraphXml, replaced: 0 }
+  const runInfos = collectDocxRuns(paragraphXml)
+  if (runInfos.length === 0) return { xml: paragraphXml, replaced: 0 }
 
-  const plainDecoded = nodes.map((n) => decodeXmlText(n.text))
-  const plain = plainDecoded.join('')
-  if (!new RegExp(BLANK_PATTERN.source).test(plain)) {
-    return { xml: paragraphXml, replaced: 0 }
-  }
+  const plain = runInfos.map((r) => r.text).join('')
 
+  const charRanges: Array<{ start: number; end: number }> = []
   const pattern = new RegExp(BLANK_PATTERN.source, 'g')
-  const blanks: Array<{ start: number; end: number; value: string | null }> = []
   let match: RegExpExecArray | null
   while ((match = pattern.exec(plain)) != null) {
+    charRanges.push({ start: match.index, end: match.index + match[0].length })
+  }
+  const underlineRanges = findUnderlineBlankRanges(runInfos).filter(
+    (u) => !charRanges.some((c) => c.start < u.end && c.end > u.start),
+  )
+  const ranges = [...charRanges, ...underlineRanges].sort((a, b) => a.start - b.start)
+  if (ranges.length === 0) return { xml: paragraphXml, replaced: 0 }
+
+  const blanks: Array<{ start: number; end: number; value: string | null }> = []
+  for (const range of ranges) {
     const value = answers[cursor.index] ?? null
     if (value != null) cursor.index += 1
-    blanks.push({
-      start: match.index,
-      end: match.index + match[0].length,
-      value,
-    })
+    blanks.push({ start: range.start, end: range.end, value })
   }
   const replaced = blanks.filter((b) => b.value != null).length
   if (replaced === 0) return { xml: paragraphXml, replaced: 0 }
 
-  // Minimale Ersetzung: Zeichenbereiche markieren, Runs nur bei Überlappung anfassen.
-  const minimal = tryMinimalBlankReplace(paragraphXml, nodes, plainDecoded, blanks)
+  // Minimale Ersetzung: nur betroffene Runs anfassen.
+  const minimal = tryMinimalRunReplace(paragraphXml, runInfos, blanks)
   if (minimal) return { xml: minimal, replaced }
 
   // Fallback: Absatz aus Segmenten neu aufbauen (pPr bleibt).
@@ -441,54 +565,41 @@ function fillBlanksInParagraphXml(
     last = blank.end
   }
   if (last < plain.length) segments.push({ text: plain.slice(last), answer: false })
-  const runs = segments.map((seg) => docxTextRun(seg.text, seg.answer)).join('')
-  return { xml: `${openTag}${pPr}${runs}</w:p>`, replaced }
+  const filledRuns = segments.map((seg) => docxTextRun(seg.text, seg.answer)).join('')
+  return { xml: `${openTag}${pPr}${filledRuns}</w:p>`, replaced }
 }
 
 /**
  * Ersetzt nur die <w:r>-Blöcke, die mit Lücken überlappen; andere Runs bleiben.
  * Gelingt nur, wenn jede Lücke genau eine zusammenhängende Run-Sequenz abdeckt.
  */
-function tryMinimalBlankReplace(
+function tryMinimalRunReplace(
   paragraphXml: string,
-  nodes: DocxTextNode[],
-  plainDecoded: string[],
+  runs: DocxRunInfo[],
   blanks: Array<{ start: number; end: number; value: string | null }>,
 ): string | null {
-  // Map plain offsets → node index
-  const nodeRanges = nodes.map((n, i) => ({
-    i,
-    start: n.plainStart,
-    end: n.plainStart + plainDecoded[i]!.length,
-    node: n,
-  }))
-
-  // Finde für jede Lücke die betroffenen Node-Indizes.
   const replacements: Array<{ fromXml: number; toXml: number; insert: string }> = []
   for (const blank of blanks) {
     if (blank.value == null) continue
-    const touched = nodeRanges.filter((r) => r.start < blank.end && r.end > blank.start)
+    const touched = runs.filter((r) => {
+      const end = r.plainStart + r.text.length
+      return r.plainStart < blank.end && end > blank.start
+    })
     if (touched.length === 0) return null
-    // Nur ersetzen, wenn die Lücke die betroffenen Nodes vollständig abdeckt
-    // (kein Teilwort außerhalb der Lücke im ersten/letzten Run).
     const first = touched[0]!
     const last = touched[touched.length - 1]!
-    if (first.start < blank.start || last.end > blank.end) {
-      // Teil-Run: zu riskant → Fallback
+    const lastEnd = last.plainStart + last.text.length
+    // Nur ersetzen, wenn die Lücke die betroffenen Runs vollständig abdeckt.
+    if (first.plainStart < blank.start || lastEnd > blank.end) {
       return null
     }
-    const firstXml = paragraphXml.lastIndexOf('<w:r', first.node.xmlStart)
-    const lastClose = paragraphXml.indexOf('</w:r>', last.node.xmlStart)
-    if (firstXml < 0 || lastClose < 0) return null
-    const toXml = lastClose + '</w:r>'.length
     replacements.push({
-      fromXml: firstXml,
-      toXml,
+      fromXml: first.xmlStart,
+      toXml: last.xmlEnd,
       insert: docxTextRun(blank.value, true),
     })
   }
 
-  // Von hinten nach vorne einsetzen, damit Offsets stabil bleiben.
   replacements.sort((a, b) => b.fromXml - a.fromXml)
   let out = paragraphXml
   for (const rep of replacements) {
@@ -510,9 +621,87 @@ function fillBlanksAcrossDocxRuns(xml: string, answers: string[]): { xml: string
 }
 
 /**
- * Füllt Lücken in einem DOCX: Content Controls (Alias/Tag), Bookmarks und
- * Unterstrich-/Punktmuster (minimal-invasive Run-Ersetzung wo möglich).
- * Offene Antworten können zusätzlich als Lösungsabschnitt mit Bookmark angehängt werden.
+ * Füllt leere Textboxen (w:txbxContent) sequenziell oder per targetId.
+ */
+export function fillDocxTextboxes(
+  xml: string,
+  solution: StructuredSolution,
+): { xml: string; filled: number } {
+  const byTarget = new Map<string, string>()
+  for (const a of solution.answers) {
+    if (a.targetId && a.answer.trim()) byTarget.set(a.targetId, a.answer.trim())
+  }
+  // Antworten ohne blankIndex, die noch nicht für Lücken vorgesehen sind.
+  const sequential = solution.answers
+    .filter((a) => a.answer.trim() && a.blankIndex == null && !a.targetId)
+    .map((a) => a.answer.trim())
+
+  let filled = 0
+  let seq = 0
+  let txIndex = 0
+  const next = xml.replace(/<w:txbxContent>([\s\S]*?)<\/w:txbxContent>/g, (full, inner: string) => {
+    const boxText = [...inner.matchAll(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g)]
+      .map((x) => decodeXmlText(x[1] ?? ''))
+      .join('')
+      .trim()
+    const id = `txbx-${txIndex}`
+    txIndex += 1
+    if (boxText.length > 0) return full
+
+    const value =
+      byTarget.get(id) ??
+      solution.answers.find((a) => a.label.toLowerCase() === id)?.answer ??
+      sequential[seq] ??
+      null
+    if (!value) return full
+    if (!byTarget.has(id) && sequential[seq]) seq += 1
+    filled += 1
+    return `<w:txbxContent><w:p>${docxTextRun(value, true)}</w:p></w:txbxContent>`
+  })
+  return { xml: next, filled }
+}
+
+/**
+ * Fügt eine verankerte Textbox (DrawingML) vor dem schließenden body-Tag ein.
+ * Fallback für reine Vision-BBox-Ziele ohne native Shape-Referenz.
+ */
+export function insertAnchoredTextboxes(
+  xml: string,
+  items: Array<{ bbox: SolutionBBox; text: string; id: string }>,
+): { xml: string; filled: number } {
+  if (items.length === 0) return { xml, filled: 0 }
+  const parts = items.map((item, i) => {
+    const cx = Math.round((item.bbox.x + (item.bbox.w ?? 0.1) / 2) * 595 * 12700)
+    const cy = Math.round((item.bbox.y + (item.bbox.h ?? 0.04) / 2) * 842 * 12700)
+    const w = Math.round(Math.max(0.08, item.bbox.w ?? 0.15) * 595 * 12700)
+    const h = Math.round(Math.max(0.03, item.bbox.h ?? 0.04) * 842 * 12700)
+    return `<w:p><w:r><w:drawing>
+      <wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="${1000 + i}" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1"
+        xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+        xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+        <wp:simplePos x="0" y="0"/>
+        <wp:positionH relativeFrom="page"><wp:posOffset>${cx}</wp:posOffset></wp:positionH>
+        <wp:positionV relativeFrom="page"><wp:posOffset>${cy}</wp:posOffset></wp:positionV>
+        <wp:extent cx="${w}" cy="${h}"/>
+        <wp:docPr id="${8000 + i}" name="saru-${escapeXml(item.id)}"/>
+        <a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+          <wps:wsp><wps:txbx><w:txbxContent><w:p>${docxTextRun(item.text, true)}</w:p></w:txbxContent></wps:txbx></wps:wsp>
+        </a:graphicData></a:graphic>
+      </wp:anchor>
+    </w:drawing></w:r></w:p>`
+  })
+  const injected = parts.join('')
+  if (!/<\/w:body>/i.test(xml)) return { xml, filled: 0 }
+  return {
+    xml: xml.replace(/<\/w:body>/i, `${injected}</w:body>`),
+    filled: items.length,
+  }
+}
+
+/**
+ * Füllt Lücken in einem DOCX: Content Controls, Bookmarks, Textboxen und
+ * Unterstrich-/Punktmuster. Offene Antworten können als Anhang folgen.
  */
 export function fillDocxDocument(
   source: Buffer,
@@ -522,8 +711,16 @@ export function fillDocxDocument(
     notice?: string
     /** Zusätzliche Freitext-Antworten als Anhang, auch wenn In-place gefüllt wurde. */
     appendOpenAnswers?: boolean
+    /** Erzwingt Anhang auch bei erfolgreicher In-place-Befüllung. */
+    forceAppendix?: boolean
+    /** Vision-/BBox-Ziele ohne native Ref. */
+    anchoredOverlays?: Array<{ bbox: SolutionBBox; text: string; id: string }>
   } = {},
-): { buffer: Buffer; strategy: 'docx_inplace' | 'docx_appended'; filled: number } {
+): {
+  buffer: Buffer
+  strategy: 'docx_inplace' | 'docx_appended' | 'docx_mixed'
+  filled: number
+} {
   const files = unzipSync(new Uint8Array(source))
   const docEntry = files['word/document.xml']
   if (!docEntry) {
@@ -561,7 +758,6 @@ export function fillDocxDocument(
             : null
       if (!value) return full
       replaced += 1
-      // Nur sdtContent ersetzen – sdtPr und umgebende Struktur bleiben.
       const content = inner.replace(
         /<w:sdtContent>([\s\S]*?)<\/w:sdtContent>/,
         `<w:sdtContent>${docxTextRun(value, true)}</w:sdtContent>`,
@@ -585,15 +781,27 @@ export function fillDocxDocument(
     },
   )
 
+  const textboxes = fillDocxTextboxes(xml, solution)
+  xml = textboxes.xml
+  replaced += textboxes.filled
+
   const across = fillBlanksAcrossDocxRuns(xml, answers)
   xml = across.xml
   replaced += across.replaced
 
+  if (options.anchoredOverlays?.length) {
+    const anchored = insertAnchoredTextboxes(xml, options.anchoredOverlays)
+    xml = anchored.xml
+    replaced += anchored.filled
+  }
+
   const openAnswers = solution.answers.filter(
-    (a) => a.fieldType === 'freitext' || (a.blankIndex == null && (a.answer?.length ?? 0) > 40),
+    (a) => a.fieldType === 'freitext' || (a.blankIndex == null && !a.targetId && (a.answer?.length ?? 0) > 40),
   )
   const shouldAppend =
-    replaced === 0 || (options.appendOpenAnswers && openAnswers.length > 0)
+    options.forceAppendix ||
+    replaced === 0 ||
+    (options.appendOpenAnswers && openAnswers.length > 0)
 
   if (shouldAppend) {
     const appendixAnswers =
@@ -610,9 +818,15 @@ export function fillDocxDocument(
   }
 
   files['word/document.xml'] = strToU8(xml)
+  const strategy: 'docx_inplace' | 'docx_appended' | 'docx_mixed' =
+    replaced > 0 && shouldAppend && openAnswers.length > 0
+      ? 'docx_mixed'
+      : replaced > 0
+        ? 'docx_inplace'
+        : 'docx_appended'
   return {
     buffer: Buffer.from(zipSync(files, { level: 6 })),
-    strategy: replaced > 0 ? 'docx_inplace' : 'docx_appended',
+    strategy,
     filled: replaced,
   }
 }
@@ -1047,10 +1261,12 @@ export function looksLikeOpenEndedTaskText(text: string): boolean {
  * (die echte Cloze-Lücken wie „bei allen Jungen ___“ verwerfen).
  */
 export function classifySolutionFillMode(
-  blanks: Array<Pick<PdfBlankRegion, 'kind'>>,
+  blanks: Array<Pick<PdfBlankRegion, 'kind'> | Pick<TextBlankInfo, 'kind'>>,
   documentText?: string | null,
 ): SolutionFillMode {
-  const underscoreCount = blanks.filter((b) => b.kind === 'underscore').length
+  const underscoreCount = blanks.filter(
+    (b) => b.kind === 'underscore' || b.kind === 'underline',
+  ).length
   if (underscoreCount > 0) return 'lueckentext'
   if (looksLikeOpenEndedTaskText(documentText ?? '')) return 'offen'
   return blanks.length > 0 ? 'lueckentext' : 'offen'

@@ -24,9 +24,12 @@ export type TaskKind =
   | 'matching_table'
   | 'free_text_inplace'
   | 'free_text_separate'
+  | 'diagram_completion'
   | 'unknown'
 
 export type TaskRenderMode = 'overlay' | 'native' | 'appendix'
+
+export type RenderConfidence = 'high' | 'medium' | 'low'
 
 export type AnswerTargetKind =
   | 'blank'
@@ -35,6 +38,8 @@ export type AnswerTargetKind =
   | 'bookmark'
   | 'text_field'
   | 'answer_line'
+  | 'shape_oval'
+  | 'shape_box'
 
 /** Konkretes Antwortziel innerhalb einer Aufgabe. */
 export interface AnswerTarget {
@@ -50,9 +55,15 @@ export interface AnswerTarget {
   nativeRef?: string | null
   /** Tabellenzelle: „row:col“. */
   cellRef?: string | null
+  /** Herkunft: native XML vs. Vision-Fallback. */
+  source?: 'native' | 'vision'
 }
 
-export type CandidateBankStatus = 'found' | 'expected_but_missing' | 'not_applicable'
+export type CandidateBankStatus =
+  | 'found'
+  | 'expected_but_missing'
+  | 'malformed'
+  | 'not_applicable'
 
 export interface TaskBlock {
   id: string
@@ -66,7 +77,10 @@ export interface TaskBlock {
   candidateBank?: CandidateBank
   candidateBankStatus?: CandidateBankStatus
   requiresCandidateBankRepair?: boolean
+  /** Vision-Repair für fehlende/unsichere geometrische Ziele. */
+  requiresVisionTargetRepair?: boolean
   renderMode: TaskRenderMode
+  renderConfidence?: RenderConfidence
 }
 
 export interface TextBlock {
@@ -92,15 +106,19 @@ export interface ImageBlock {
 export interface NativeField {
   id: string
   name: string
-  kind: 'content_control' | 'bookmark' | 'form_field'
+  kind: 'content_control' | 'bookmark' | 'form_field' | 'text_field'
   page?: number
 }
+
+export type ShapeBlockKind = 'line' | 'box' | 'oval' | 'shape' | 'textbox'
 
 export interface ShapeBlock {
   id: string
   page: number
-  kind: string
+  kind: ShapeBlockKind
   bbox?: SolutionBBox | null
+  nativeRef?: string | null
+  anchorText?: string | null
 }
 
 export interface DocumentPage {
@@ -134,3 +152,6 @@ export interface ClozeValidationResult {
   valid: boolean
   violations: ClozeViolations
 }
+
+/** Re-Export – kanonische Definition in document-fill.ts. */
+export type { DiagramMark } from '../document-fill'

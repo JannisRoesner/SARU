@@ -410,6 +410,57 @@ describe('fillDocxDocument', () => {
     expect(xml).toContain('<w:color w:val="1F4E9B"/>')
     expect(xml).not.toContain('______')
   })
+
+  it('erkennt und füllt unterstrichene Leerzeichen-Lücken (Geschlechtszellen-Muster)', () => {
+    // Typisch in Word: Lücken als w:u + Spaces, oft über mehrere Runs gesplittet.
+    const blanked = minimalDocxWithBody(`
+      <w:p>
+        <w:r><w:t>Im </w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t xml:space="preserve">   </w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t xml:space="preserve">      </w:t></w:r>
+        <w:r><w:t> des Mannes reifen Zellen mit </w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t xml:space="preserve">     </w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t xml:space="preserve">       </w:t></w:r>
+        <w:r><w:t> Chromosomensatz.</w:t></w:r>
+      </w:p>
+      <w:tbl>
+        <w:tr>
+          <w:tc>
+            <w:p>
+              <w:r><w:t>Aus der </w:t></w:r>
+              <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t xml:space="preserve">           </w:t></w:r>
+              <w:r><w:t> entstehen Spermien.</w:t></w:r>
+            </w:p>
+          </w:tc>
+        </w:tr>
+      </w:tbl>
+    `)
+
+    const detected = detectDocxBlanks(blanked)
+    expect(detected.length).toBe(3)
+    expect(detected.every((b) => b.kind === 'underline')).toBe(true)
+    expect(detected[0]!.leftText).toMatch(/Im/)
+    expect(detected[0]!.rightText).toMatch(/des Mannes/)
+    expect(detected[2]!.leftText).toMatch(/Aus der/)
+    expect(classifySolutionFillMode(detected)).toBe('lueckentext')
+
+    const filled = fillDocxDocument(blanked, {
+      summary: 'Test',
+      answers: [
+        { id: '1', label: '1', answer: 'Hoden', blankIndex: 0 },
+        { id: '2', label: '2', answer: 'haploidem', blankIndex: 1 },
+        { id: '3', label: '3', answer: 'Spermienmutterzelle', blankIndex: 2 },
+      ],
+      formFields: [],
+    })
+    expect(filled.strategy).toBe('docx_inplace')
+    expect(filled.filled).toBe(3)
+    const xml = strFromU8(unzipSync(new Uint8Array(filled.buffer))['word/document.xml']!)
+    expect(xml).toContain('Hoden')
+    expect(xml).toContain('haploidem')
+    expect(xml).toContain('Spermienmutterzelle')
+    expect(xml).toContain('w:val="1F4E9B"')
+  })
 })
 
 describe('fillPdfAcroForm', () => {

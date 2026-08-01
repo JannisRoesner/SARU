@@ -16,7 +16,10 @@ export type SolutionPipelineEvent =
   | 'task.repair_started'
   | 'task.validation_passed'
   | 'render.task_completed'
+  | 'render.route_selected'
+  | 'render.fallback_appendix'
   | 'solution.run.completed'
+  | 'solution.run.failed'
 
 export interface PipelineLogContext {
   jobId?: string

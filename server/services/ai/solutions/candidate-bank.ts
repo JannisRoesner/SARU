@@ -171,23 +171,68 @@ function extractFromWordlistSection(text: string): CandidateTerm[] {
     if (!chunk) continue
 
     const lines = chunk.split(/\n/).map((l) => l.trim()).filter(Boolean)
-    if (lines.length >= 2) {
-      for (const line of lines) {
-        if ((line.match(/,/g) ?? []).length >= 2) {
-          for (const part of tokenizeCandidateLine(line)) {
-            terms.push(makeTerm(part, terms.length))
-          }
-        } else {
-          terms.push(makeTerm(line, terms.length))
-        }
+    // PDF-Textebene bricht Schrägstrich-Wortlisten oft mitten in der Liste um.
+    const effectiveLines = joinSlashSeparatedLines(lines)
+
+    if (effectiveLines.length >= 2) {
+      for (const line of effectiveLines) {
+        appendTermsFromLine(line, terms)
       }
     } else {
-      for (const part of tokenizeCandidateLine(chunk)) {
+      for (const part of tokenizeCandidateLine(effectiveLines[0] ?? chunk)) {
         terms.push(makeTerm(part, terms.length))
       }
     }
   }
   return terms
+}
+
+/** True, wenn die Zeile Trennzeichen enthält und tokenisiert werden soll. */
+function shouldTokenizeCandidateLine(line: string): boolean {
+  if ((line.match(/,/g) ?? []).length >= 2) return true
+  if (/[/|;•·]/.test(line)) return true
+  if (/\s{2,}/.test(line)) return true
+  return false
+}
+
+/**
+ * Führt aufeinanderfolgende Schrägstrich-Zeilen zu einer Zeile zusammen
+ * (PDF-Textebene bricht Wortlisten oft mitten in der Liste um).
+ */
+function joinSlashSeparatedLines(lines: string[]): string[] {
+  if (lines.length < 2) return lines
+  const out: string[] = []
+  let buffer: string[] = []
+
+  const flush = () => {
+    if (buffer.length === 0) return
+    out.push(buffer.join(' '))
+    buffer = []
+  }
+
+  for (const line of lines) {
+    if (line.includes('/')) {
+      buffer.push(line)
+    } else {
+      flush()
+      out.push(line)
+    }
+  }
+  flush()
+  return out
+}
+
+function appendTermsFromLine(line: string, terms: CandidateTerm[]): void {
+  if (shouldTokenizeCandidateLine(line)) {
+    const parts = tokenizeCandidateLine(line)
+    if (parts.length >= 2) {
+      for (const part of parts) {
+        terms.push(makeTerm(part, terms.length))
+      }
+      return
+    }
+  }
+  terms.push(makeTerm(line, terms.length))
 }
 
 function tokenizeCandidateLine(line: string): string[] {

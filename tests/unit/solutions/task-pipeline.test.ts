@@ -65,4 +65,41 @@ Die ___ des Penis …
     expect(cloze.confidence).toBeLessThan(0.9)
     expect(cloze.evidence).toContain('candidate bank expected but missing')
   })
+
+  it('markiert unplausible Wortliste (2 Zeilen statt 9 Begriffe) als malformed', () => {
+    const text = `
+Wortliste:
+Eichel / Erektion / Hautschichten / lang / Nervenenden /
+Schleimhaut / Spitze / unterschiedlich / Unterseite
+Fülle die Lücken mit Wörtern aus der Wortliste.
+Die ___ des Penis …
+`
+    const blanks = Array.from({ length: 9 }, (_, i) => blank(i, `left${i}`, `right${i}`))
+    // Simuliere den alten Extraktionsfehler: zwei unzerlegte Zeilen.
+    const badBank = {
+      id: 'bank-1',
+      candidates: [
+        {
+          id: 'c0',
+          value: 'Eichel / Erektion / Hautschichten / lang / Nervenenden /',
+          normalized: 'eichel / erektion / hautschichten / lang / nervenenden /',
+        },
+        {
+          id: 'c1',
+          value: 'Schleimhaut / Spitze / unterschiedlich / Unterseite',
+          normalized: 'schleimhaut / spitze / unterschiedlich / unterseite',
+        },
+      ],
+      reusePolicy: 'repeatable' as const,
+      source: 'wordlist_section' as const,
+    }
+    const doc = analyzeDocument({ fullText: text, pdfBlanks: blanks })
+    const tasks = classifyTasks(
+      segmentTasks({ document: doc, pdfBlanks: blanks, candidateBank: badBank }),
+    )
+    const cloze = tasks.find((t) => t.kind === 'cloze')!
+    expect(cloze.candidateBankStatus).toBe('malformed')
+    expect(cloze.requiresCandidateBankRepair).toBe(true)
+    expect(cloze.evidence.some((e) => e.includes('malformed'))).toBe(true)
+  })
 })

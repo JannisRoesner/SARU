@@ -3,39 +3,76 @@ import {
   type FilledDocument,
   type StructuredSolution,
 } from '../../document-fill'
+import { buildDocxRenderPlan } from '../docx-render-plan'
+import { logPipeline } from '../logging'
 import type { TaskBlock } from '../types'
+import { applyDiagramMarksToDocx } from './docx-diagram-renderer'
 
 export interface DocxRenderOptions {
   title: string
   notice?: string
   sourceFileName: string
   tasks: TaskBlock[]
+  jobId?: string
+  runId?: string
 }
 
 /**
- * Rendert DOCX aufgabenbasiert: In-place für Cloze/native, Anhang für offene Tasks.
+ * Rendert DOCX aufgabenbasiert über Render-Plan (2f):
+ * In-place / Textbox / Diagramm / Anchored Overlay / Anhang.
  */
 export function renderDocxSolution(
   source: Buffer,
   solution: StructuredSolution,
   options: DocxRenderOptions,
 ): FilledDocument {
-  const hasAppendix = options.tasks.some((t) => t.renderMode === 'appendix')
-  const hasOverlayOrNative = options.tasks.some(
-    (t) => t.renderMode === 'overlay' || t.renderMode === 'native',
-  )
+  const plan = buildDocxRenderPlan(options.tasks, solution)
 
-  const result = fillDocxDocument(source, solution, {
+  for (const route of plan.routes) {
+    logPipeline('render.route_selected', {
+      jobId: options.jobId,
+      runId: options.runId,
+      taskId: route.taskId,
+      mode: route.mode,
+      confidence: route.confidence,
+    })
+  }
+
+  let buffer = source
+  const diagramTask = options.tasks.find((t) => t.kind === 'diagram_completion')
+  if (diagramTask && (solution.diagramMarks?.length ?? 0) > 0) {
+    const diagrammed = applyDiagramMarksToDocx(buffer, solution, diagramTask.targets)
+    buffer = diagrammed.buffer
+  }
+
+  const result = fillDocxDocument(buffer, solution, {
     title: options.title,
     notice: options.notice,
-    appendOpenAnswers: hasAppendix && hasOverlayOrNative,
+    appendOpenAnswers: plan.appendOpenAnswers,
+    forceAppendix: plan.forceAppendix,
+    anchoredOverlays: plan.anchoredOverlays,
   })
+
+  if (result.strategy === 'docx_appended' || result.strategy === 'docx_mixed') {
+    logPipeline('render.fallback_appendix', {
+      jobId: options.jobId,
+      runId: options.runId,
+      strategy: result.strategy,
+      unresolved: plan.unresolvedTaskIds,
+    })
+  }
+
+  // Prefer plan strategy when mixed was intended
+  const strategy =
+    plan.strategy === 'docx_mixed' && result.filled > 0
+      ? 'docx_mixed'
+      : result.strategy
 
   return {
     buffer: result.buffer,
     fileName: options.sourceFileName.replace(/\.docx$/i, '') + '-musterloesung.docx',
     mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    strategy: result.strategy,
+    strategy,
     summary: solution.summary,
   }
 }

@@ -4,7 +4,14 @@ import { extractCandidateBank } from './candidate-bank'
 import { analyzeDocument } from './document-analyzer'
 import { classifyTasks, legacyFillModeFromTasks } from './task-classifier'
 import { segmentTasks } from './task-segmenter'
-import type { CandidateBank, DocumentModel, NativeField, TaskBlock } from './types'
+import type {
+  AnswerTarget,
+  CandidateBank,
+  DocumentModel,
+  NativeField,
+  ShapeBlock,
+  TaskBlock,
+} from './types'
 
 export interface SolutionPlanInput {
   documentText: string
@@ -13,6 +20,9 @@ export interface SolutionPlanInput {
   pdfBlanks?: PdfBlankRegion[]
   docxBlanks?: TextBlankInfo[]
   nativeFields?: NativeField[]
+  shapes?: ShapeBlock[]
+  /** Vollständige AnswerTargets aus DOCX-Analyse. */
+  answerTargets?: AnswerTarget[]
 }
 
 export interface SolutionPlan {
@@ -26,7 +36,6 @@ export interface SolutionPlan {
 
 /**
  * Orchestriert Analyse → Segmentierung → Klassifikation.
- * generateSolution() bleibt der Einstieg; diese Funktion kapselt den Plan.
  */
 export function buildSolutionPlan(input: SolutionPlanInput): SolutionPlan {
   const pdfBlanks = input.pdfBlanks ?? []
@@ -45,6 +54,8 @@ export function buildSolutionPlan(input: SolutionPlanInput): SolutionPlan {
     pdfBlanks,
     docxBlanks,
     nativeFields: input.nativeFields,
+    shapes: input.shapes,
+    answerTargets: input.answerTargets,
   })
   const candidateBank = extractCandidateBank({
     documentText: input.documentText,
@@ -59,6 +70,7 @@ export function buildSolutionPlan(input: SolutionPlanInput): SolutionPlan {
       pdfBlanks,
       docxBlanks,
       candidateBank,
+      answerTargets: input.answerTargets,
     }),
   )
   const fillMode: SolutionFillMode =

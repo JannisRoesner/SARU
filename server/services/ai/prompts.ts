@@ -34,6 +34,8 @@ export interface SolutionPromptContext {
   fillMode?: SolutionFillMode | null
   /** Strukturierte Wortliste – verbindlich wenn gesetzt. */
   candidateBank?: CandidateBank | null
+  /** Diagramm-Ziele (Oval-/Box-IDs) für diagram_completion. */
+  diagramTargetIds?: string[] | null
 }
 
 export const SOLUTION_PROMPT_VERSION = '7-candidate-bank-task-pipeline'
@@ -197,6 +199,19 @@ export function buildSolutionPrompt(context: SolutionPromptContext): string {
     )
   }
 
+  if (context.diagramTargetIds?.length) {
+    lines.push(
+      '',
+      '## Diagramm-Ziele (verbindlich)',
+      `Es gibt ${context.diagramTargetIds.length} leere Diagrammfelder (Kreise/Kästen).`,
+      'Liefere zusätzlich diagramMarks als JSON-Array:',
+      '[{"kind":"label","text":"kurze Beschriftung","targetId":"shape-0"}]',
+      'oder kind "chromosome" mit form "two_chromatid"|"one_chromatid" und count.',
+      `Erlaubte targetIds: ${context.diagramTargetIds.join(', ')}`,
+      'Jede targetId genau einmal verwenden.',
+    )
+  }
+
   if (context.userInstructions?.trim()) {
     lines.push('', '## Zusätzliche Hinweise der Lehrkraft', '', context.userInstructions.trim())
   }
@@ -217,6 +232,11 @@ export function buildSolutionPrompt(context: SolutionPromptContext): string {
         ? 'Für jede erkannte Lücke: answer + page + blankIndex (aus der Liste) + leftContext + rightContext + fieldType + bbox.'
         : 'Für jede Lücke: answer + page + blankIndex (Dokumentreihenfolge) + leftContext + rightContext + fieldType + bbox (normiert 0–1, Ursprung oben links).',
     )
+    if (context.diagramTargetIds?.length) {
+      lines.push(
+        'Für Diagrammfelder: diagramMarks mit targetId; kurze Labels statt langer Freitext.',
+      )
+    }
   }
 
   lines.push('Liefere ausschließlich das JSON-Objekt.')

@@ -85,6 +85,33 @@ Die ___ des Penis …
     expect(bank!.candidates).toHaveLength(9)
     expect(bank!.reusePolicy).toBe('once')
   })
+
+  it('tokenisiert mehrzeilige Schrägstrich-Wortliste unter Überschrift (Vorhaut-Regression)', () => {
+    const text = `
+Wortliste:
+Eichel / Erektion / Hautschichten / lang / Nervenenden /
+Schleimhaut / Spitze / unterschiedlich / Unterseite
+Fülle die Lücken mit Wörtern aus der Wortliste.
+Die ___ des Penis …
+`
+    const bank = extractCandidateBank({ documentText: '', pdfText: text, blankCount: 9 })
+    expect(bank).not.toBeNull()
+    expect(bank!.candidates).toHaveLength(9)
+    expect(bank!.reusePolicy).toBe('once')
+    expect(bank!.candidates.map((c) => c.value)).toEqual(
+      expect.arrayContaining([
+        'Eichel',
+        'Erektion',
+        'Hautschichten',
+        'lang',
+        'Nervenenden',
+        'Schleimhaut',
+        'Spitze',
+        'unterschiedlich',
+        'Unterseite',
+      ]),
+    )
+  })
 })
 
 describe('validateClozeAnswers – Vorhaut-Regression', () => {

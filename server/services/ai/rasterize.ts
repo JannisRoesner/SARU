@@ -97,24 +97,25 @@ export async function rasterizePdf(
 
 /** Seitenzahl ohne Rendering – für PDF-Vorschau-Navigation. */
 export async function getPdfPageCount(buffer: Buffer): Promise<number | null> {
+  const pdfjs = await loadPdfjs()
+  const task = pdfjs.getDocument({
+    data: new Uint8Array(buffer),
+    disableFontFace: true,
+    useSystemFonts: false,
+    standardFontDataUrl: pdfjsAssetUrl('standard_fonts'),
+    cMapUrl: pdfjsAssetUrl('cmaps'),
+    cMapPacked: true,
+    wasmUrl: pdfjsAssetUrl('wasm'),
+    verbosity: 0,
+  })
   try {
-    const pdfjs = await loadPdfjs()
-    const task = pdfjs.getDocument({
-      data: new Uint8Array(buffer),
-      disableFontFace: true,
-      useSystemFonts: false,
-      standardFontDataUrl: pdfjsAssetUrl('standard_fonts'),
-      cMapUrl: pdfjsAssetUrl('cmaps'),
-      cMapPacked: true,
-      wasmUrl: pdfjsAssetUrl('wasm'),
-      verbosity: 0,
-    })
     const document = await task.promise
     const count = document.numPages
-    await document.destroy()
     return count > 0 ? count : null
   } catch (error) {
     log.warn('PDF-Seitenzahl konnte nicht ermittelt werden', error)
     return null
+  } finally {
+    await task.destroy()
   }
 }

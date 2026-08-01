@@ -43,6 +43,68 @@ describe('analyzeDocxTargets', () => {
     expect(analysis.nativeFields.some((f) => f.name === 'Aufgabe1')).toBe(true)
     expect(analysis.targets.length).toBeGreaterThanOrEqual(2)
   })
+
+  it('erkennt leere Textboxen als text_field-Ziele', () => {
+    const source = docxWith(`
+      <w:r>
+        <w:drawing>
+          <w:txbxContent>
+            <w:p><w:r><w:t></w:t></w:r></w:p>
+          </w:txbxContent>
+        </w:drawing>
+      </w:r>
+      <w:r>
+        <w:drawing>
+          <w:txbxContent>
+            <w:p><w:r><w:t>bereits beschriftet</w:t></w:r></w:p>
+          </w:txbxContent>
+        </w:drawing>
+      </w:r>
+      <w:r>
+        <w:drawing>
+          <w:txbxContent>
+            <w:p><w:r><w:t xml:space="preserve">   </w:t></w:r></w:p>
+          </w:txbxContent>
+        </w:drawing>
+      </w:r>
+    `)
+    const analysis = analyzeDocxTargets(source)
+    const textFields = analysis.nativeFields.filter((f) => f.kind === 'text_field')
+    expect(textFields).toHaveLength(2)
+    expect(analysis.targets.filter((t) => t.kind === 'text_field')).toHaveLength(2)
+    expect(analysis.shapes).toEqual([])
+  })
+})
+
+describe('fillDocxDocument textboxes', () => {
+  it('füllt leere Textboxen in-place', () => {
+    const source = docxWith(`
+      <w:p><w:r><w:t>Diagramm</w:t></w:r>
+        <w:drawing>
+          <w:txbxContent><w:p><w:r><w:t></w:t></w:r></w:p></w:txbxContent>
+        </w:drawing>
+      </w:p>
+    `)
+    const result = fillDocxDocument(source, {
+      summary: 'Test',
+      answers: [
+        {
+          id: '1',
+          label: 'Textbox 1',
+          answer: '2 Chromatiden',
+          targetId: 'txbx-0',
+          blankIndex: null,
+        },
+      ],
+      formFields: [],
+    })
+    expect(result.filled).toBeGreaterThanOrEqual(1)
+    expect(result.strategy).toBe('docx_inplace')
+    const files = unzipSync(new Uint8Array(result.buffer))
+    const xml = strFromU8(files['word/document.xml']!)
+    expect(xml).toContain('2 Chromatiden')
+    expect(xml).toContain('w:val="1F4E9B"')
+  })
 })
 
 describe('fillDocxDocument appendix bookmark', () => {

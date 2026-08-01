@@ -1,9 +1,52 @@
-import type { TaskBlock, TaskKind, TaskRenderMode, CandidateBankStatus } from './types'
+import type {
+  TaskBlock,
+  TaskKind,
+  TaskRenderMode,
+  CandidateBankStatus,
+  RenderConfidence,
+} from './types'
 import { instructionExpectsCandidateBank } from './candidate-bank'
 
 /**
+ * Schätzt, wie sicher In-place-Rendering für diesen Task ist.
+ */
+export function resolveRenderConfidence(task: TaskBlock): RenderConfidence {
+  if (task.renderConfidence) return task.renderConfidence
+
+  const visionOnly =
+    task.targets.length > 0 && task.targets.every((t) => t.source === 'vision')
+  if (visionOnly) return 'low'
+
+  if (task.kind === 'diagram_completion') {
+    const withNative = task.targets.filter((t) => t.nativeRef).length
+    if (withNative / Math.max(1, task.targets.length) < 0.5) return 'low'
+    return 'medium'
+  }
+
+  if (task.kind === 'cloze') {
+    const blanks = task.targets.filter((t) => t.kind === 'blank')
+    if (blanks.some((b) => (b.leftText ?? '').length > 0)) return 'high'
+    return 'medium'
+  }
+
+  if (
+    task.targets.some(
+      (t) => t.kind === 'content_control' || t.kind === 'bookmark',
+    )
+  ) {
+    return 'high'
+  }
+
+  if (task.targets.some((t) => t.kind === 'text_field' || t.kind === 'table_cell')) {
+    return 'medium'
+  }
+
+  if (task.renderMode === 'appendix') return 'high'
+  return 'medium'
+}
+
+/**
  * Verfeinert Kind und RenderMode anhand Evidence und Targets.
- * Der Segmenter liefert bereits Startwerte; der Classifier bestätigt/korrigiert.
  */
 export function classifyTask(task: TaskBlock): TaskBlock {
   const evidence = [...task.evidence]
@@ -22,12 +65,33 @@ export function classifyTask(task: TaskBlock): TaskBlock {
       ? 'expected_but_missing'
       : 'not_applicable'
   let requiresCandidateBankRepair = candidateBankStatus === 'expected_but_missing'
+  let requiresVisionTargetRepair = task.requiresVisionTargetRepair ?? false
 
-  if (blankTargets.length > 0) {
+  if (kind === 'diagram_completion') {
+    renderMode = 'native'
+    confidence = Math.max(confidence, 0.8)
+    evidence.push('diagram completion task')
+    if (task.targets.some((t) => !t.nativeRef || t.source === 'vision')) {
+      requiresVisionTargetRepair = true
+      evidence.push('diagram targets may need vision repair')
+    }
+  } else if (blankTargets.length > 0) {
     kind = 'cloze'
     renderMode = 'overlay'
     evidence.push(`${blankTargets.length} answer targets detected`)
-    if (bank && Math.abs(bank.candidates.length - blankTargets.length) <= 1) {
+
+    if (
+      wordListExpected &&
+      bank &&
+      bank.candidates.length < blankTargets.length
+    ) {
+      candidateBankStatus = 'malformed'
+      requiresCandidateBankRepair = true
+      confidence = Math.max(0.4, confidence - 0.3)
+      evidence.push(
+        `candidate bank malformed: ${bank.candidates.length} terms for ${blankTargets.length} blanks`,
+      )
+    } else if (bank && Math.abs(bank.candidates.length - blankTargets.length) <= 1) {
       confidence = Math.max(confidence, 0.97)
       evidence.push('instruction mentions word list or candidate count matches blanks')
       if (bank.reusePolicy === 'once') {
@@ -61,12 +125,21 @@ export function classifyTask(task: TaskBlock): TaskBlock {
     kind = 'free_text_inplace'
     renderMode = 'native'
     confidence = Math.max(confidence, 0.7)
+  } else if (
+    task.targets.some(
+      (t) => t.kind === 'shape_oval' || t.kind === 'shape_box' || t.kind === 'answer_line',
+    )
+  ) {
+    kind = kind === 'unknown' ? 'free_text_inplace' : kind
+    renderMode = 'native'
+    confidence = Math.max(confidence, 0.65)
+    evidence.push('geometric shape targets')
   } else if (kind === 'unknown') {
     confidence = Math.min(confidence, 0.4)
     evidence.push('insufficient signals')
   }
 
-  return {
+  const next: TaskBlock = {
     ...task,
     kind,
     confidence,
@@ -74,7 +147,10 @@ export function classifyTask(task: TaskBlock): TaskBlock {
     renderMode,
     candidateBankStatus,
     requiresCandidateBankRepair,
+    requiresVisionTargetRepair,
   }
+  next.renderConfidence = resolveRenderConfidence(next)
+  return next
 }
 
 export function classifyTasks(tasks: TaskBlock[]): TaskBlock[] {
@@ -85,7 +161,15 @@ export function classifyTasks(tasks: TaskBlock[]): TaskBlock[] {
 export function legacyFillModeFromTasks(
   tasks: TaskBlock[],
 ): 'lueckentext' | 'offen' {
-  if (tasks.some((t) => t.kind === 'cloze' || t.kind === 'matching_inline' || t.kind === 'matching_table')) {
+  if (
+    tasks.some(
+      (t) =>
+        t.kind === 'cloze' ||
+        t.kind === 'matching_inline' ||
+        t.kind === 'matching_table' ||
+        t.kind === 'diagram_completion',
+    )
+  ) {
     return 'lueckentext'
   }
   if (tasks.some((t) => t.renderMode === 'overlay' || t.renderMode === 'native')) {

@@ -64,15 +64,18 @@ import { logPipeline } from './solutions/logging'
 import { buildSolutionPlan } from './solutions/orchestrator'
 import { buildClozeRepairPrompt } from './solutions/repair/cloze-repair'
 import { repairCandidateBankViaVision } from './solutions/repair/candidate-bank-vision'
+import { repairDocxTargetsViaVision } from './solutions/repair/docx-targets-vision'
+import { mergeNativeAndVisualTargets } from './solutions/docx-target-merger'
 import { renderPdfSolution } from './solutions/renderers/pdf-renderer'
 import { renderDocxSolution } from './solutions/renderers/docx-renderer'
 import { assignCandidatesGlobally } from './solutions/solvers/cloze-solver'
 import { applyFreeTextTaskMeta } from './solutions/solvers/free-text-solver'
 import type { CandidateBank, TaskBlock } from './solutions/types'
+import { validateClozeAnswers } from './solutions/validators/cloze-validator'
 import {
-  sanitizeOutOfBankAnswers,
-  validateClozeAnswers,
-} from './solutions/validators/cloze-validator'
+  assertClozeValidationPassed,
+  hasPlaceholderAnswers,
+} from './solutions/validators/validation-gate'
 
 const log = createLogger('ai:solutions')
 
@@ -229,6 +232,7 @@ export async function generateSolution(
   let docxNative: ReturnType<typeof analyzeDocxTargets> = {
     nativeFields: [],
     targets: [],
+    shapes: [],
     fullText: '',
   }
   if (source?.extension === 'docx') {
@@ -245,53 +249,107 @@ export async function generateSolution(
     pdfBlanks: detectedBlanks,
     docxBlanks,
     nativeFields: docxNative.nativeFields,
+    shapes: docxNative.shapes,
+    answerTargets: docxNative.targets,
   })
   let { tasks, candidateBank, fillMode, blankCount, document: documentModel } = plan
 
   let candidateBankRepairedViaVision = false
+  const needsBankRepair = tasks.some((t) => t.requiresCandidateBankRepair)
   if (
-    !candidateBank &&
+    needsBankRepair &&
     source &&
     PDF_EXTENSIONS.has(source.extension) &&
     blankCount > 0
   ) {
-    const repairTask = tasks.find((t) => t.requiresCandidateBankRepair)
-    if (repairTask) {
-      try {
-        const visionBank = await repairCandidateBankViaVision({
-          buffer: source.buffer,
-          fileName: source.fileName,
+    const repairTask = tasks.find((t) => t.requiresCandidateBankRepair)!
+    try {
+      const visionBank = await repairCandidateBankViaVision({
+        buffer: source.buffer,
+        fileName: source.fileName,
+        settings,
+        blankCount,
+        instruction: repairTask.instruction,
+        page: repairTask.page,
+      })
+      if (visionBank) {
+        candidateBank = visionBank
+        candidateBankRepairedViaVision = true
+        tasks = tasks.map((t) =>
+          t.kind === 'cloze'
+            ? {
+                ...t,
+                candidateBank: visionBank,
+                candidateBankStatus: 'found' as const,
+                requiresCandidateBankRepair: false,
+                confidence: Math.max(t.confidence, 0.92),
+                evidence: [
+                  ...t.evidence.filter(
+                    (e) =>
+                      e !== 'no word list detected' &&
+                      !e.startsWith('candidate bank malformed'),
+                  ),
+                  `${visionBank.candidates.length} candidate terms detected via vision`,
+                ],
+              }
+            : t,
+        )
+        log.info('Wortliste per Vision-Repair extrahiert', {
+          count: visionBank.candidates.length,
+          words: visionBank.candidates.map((c) => c.value),
+          previousStatus: repairTask.candidateBankStatus,
+        })
+      }
+    } catch (error) {
+      log.warn('Vision-Wortlisten-Repair fehlgeschlagen', error)
+    }
+  }
+
+  // Vision-Fallback für unsichere geometrische DOCX-Ziele (2d).
+  if (
+    source?.extension === 'docx' &&
+    tasks.some((t) => t.requiresVisionTargetRepair)
+  ) {
+    const repairTask = tasks.find((t) => t.requiresVisionTargetRepair)!
+    try {
+      const pdfBuffer = await convertOfficeBufferToPdf(
+        source.buffer,
+        source.fileName ?? 'material.docx',
+      )
+      if (pdfBuffer) {
+        const visual = await repairDocxTargetsViaVision({
+          pdfBuffer,
           settings,
-          blankCount,
           instruction: repairTask.instruction,
+          existingTargets: repairTask.targets,
           page: repairTask.page,
         })
-        if (visionBank) {
-          candidateBank = visionBank
-          candidateBankRepairedViaVision = true
+        if (visual.length > 0) {
+          const merged = mergeNativeAndVisualTargets(repairTask.targets, visual)
           tasks = tasks.map((t) =>
-            t.kind === 'cloze'
+            t.id === repairTask.id
               ? {
                   ...t,
-                  candidateBank: visionBank,
-                  candidateBankStatus: 'found' as const,
-                  requiresCandidateBankRepair: false,
-                  confidence: Math.max(t.confidence, 0.92),
+                  targets: merged.merged,
+                  confidence: Math.min(t.confidence, merged.confidence + 0.1),
+                  requiresVisionTargetRepair: merged.requiresVisionRepair,
                   evidence: [
-                    ...t.evidence.filter((e) => e !== 'no word list detected'),
-                    `${visionBank.candidates.length} candidate terms detected via vision`,
+                    ...t.evidence,
+                    `${visual.length} vision targets, ${merged.matchedPairs} matched`,
                   ],
+                  renderConfidence: merged.confidence < 0.5 ? 'low' : 'medium',
                 }
               : t,
           )
-          log.info('Wortliste per Vision-Repair extrahiert', {
-            count: visionBank.candidates.length,
-            words: visionBank.candidates.map((c) => c.value),
+          log.info('DOCX-Ziele per Vision ergänzt', {
+            visual: visual.length,
+            matched: merged.matchedPairs,
+            confidence: merged.confidence,
           })
         }
-      } catch (error) {
-        log.warn('Vision-Wortlisten-Repair fehlgeschlagen', error)
       }
+    } catch (error) {
+      log.warn('DOCX-Vision-Target-Repair fehlgeschlagen', error)
     }
   }
 
@@ -318,6 +376,7 @@ export async function generateSolution(
           : null
       : null
 
+  const diagramTask = tasks.find((t) => t.kind === 'diagram_completion')
   const prompt = buildSolutionPrompt({
     title: material.title,
     description: material.description,
@@ -337,6 +396,7 @@ export async function generateSolution(
     detectedBlankCount: fillMode === 'lueckentext' ? blankCount || null : null,
     fillMode,
     candidateBank,
+    diagramTargetIds: diagramTask?.targets.map((t) => t.id) ?? null,
   })
 
   if (!documentText && !source && !material.content?.trim()) {
@@ -594,6 +654,21 @@ export async function generateSolution(
         })
       }
 
+      // Sicherheit: keine ???-Platzhalter als fertige Musterlösung speichern.
+      if (hasPlaceholderAnswers(structured.answers)) {
+        logPipeline('solution.run.failed', {
+          jobId,
+          runId,
+          errorCode: 'CLOZE_VALIDATION_FAILED_AFTER_REPAIR',
+          reason: 'placeholder_answers',
+        })
+        throw appError(
+          'UNGUELTIGE_EINGABE',
+          'Die Musterlösung konnte nicht zuverlässig gegen die Wortliste validiert werden. Es wurde keine verwendbare Musterlösung erstellt.',
+          { details: { errorCode: 'CLOZE_VALIDATION_FAILED_AFTER_REPAIR' } },
+        )
+      }
+
       structured = applyFreeTextTaskMeta(structured, tasks)
 
       for (const task of tasks) {
@@ -740,6 +815,16 @@ export async function generateSolution(
       fileName: filled.fileName,
     }
   } catch (error) {
+    logPipeline('solution.run.failed', {
+      jobId,
+      runId,
+      materialId,
+      error:
+        error instanceof Error
+          ? { name: error.name, message: error.message }
+          : { message: String(error) },
+      durationMs: Date.now() - startedAt,
+    })
     await db
       .update(aiJobs)
       .set({
@@ -801,6 +886,7 @@ async function loadPrimarySourceAsset(variantId: string): Promise<SourceAsset | 
 /**
  * Validiert gegen die Wortliste, führt max. einen Repair-Pass aus und
  * erzwingt bei reusePolicy „once“ eine globale bijektive Zuordnung.
+ * Wirft bei endgültigem Validierungsfehler – kein ???-Material.
  */
 async function enforceCandidateBankConstraints(args: {
   structured: StructuredSolution
@@ -871,25 +957,7 @@ async function enforceCandidateBankConstraints(args: {
     }
   }
 
-  if (validation.valid) {
-    logPipeline('task.validation_passed', {
-      jobId,
-      runId,
-      taskId: clozeTaskId,
-      answers: structured.answers.length,
-    })
-  } else {
-    logPipeline('task.validation_failed', {
-      jobId,
-      runId,
-      taskId: clozeTaskId,
-      violations: validation.violations,
-      afterRepair: true,
-    })
-    structured = sanitizeOutOfBankAnswers(structured, candidateBank, validation)
-  }
-
-  // Globale Zuordnung bei once-Policy (auch nach erfolgreichem Repair).
+  // Globale Zuordnung bei once-Policy – kann Fehlzuordnungen korrigieren.
   if (candidateBank.reusePolicy === 'once') {
     const frames = blanks.map((b) => ({
       blankIndex: b.blankIndex,
@@ -898,18 +966,44 @@ async function enforceCandidateBankConstraints(args: {
       page: 'pageIndex' in b ? b.pageIndex + 1 : 1,
     }))
     structured = assignCandidatesGlobally(structured, candidateBank, frames)
-    // Nach Matching erneut prüfen – bei Erfolg Unsicherheiten bereinigen.
-    const afterAssign = validateClozeAnswers(structured, candidateBank, blankCount)
-    if (afterAssign.valid) {
+    validation = validateClozeAnswers(structured, candidateBank, blankCount)
+    if (validation.valid) {
       logPipeline('task.validation_passed', {
         jobId,
         runId,
         taskId: clozeTaskId,
         via: 'global_assignment',
+        answers: structured.answers.length,
       })
+      return structured
     }
   }
 
+  if (validation.valid) {
+    logPipeline('task.validation_passed', {
+      jobId,
+      runId,
+      taskId: clozeTaskId,
+      answers: structured.answers.length,
+    })
+    return structured
+  }
+
+  logPipeline('task.validation_failed', {
+    jobId,
+    runId,
+    taskId: clozeTaskId,
+    violations: validation.violations,
+    afterRepair: true,
+  })
+  logPipeline('solution.run.failed', {
+    jobId,
+    runId,
+    taskId: clozeTaskId,
+    errorCode: 'CLOZE_VALIDATION_FAILED_AFTER_REPAIR',
+    violations: validation.violations,
+  })
+  assertClozeValidationPassed(validation)
   return structured
 }
 

@@ -1,5 +1,12 @@
 import type { PdfBlankRegion, TextBlankInfo } from '../document-fill'
-import type { DocumentModel, DocumentPage, NativeField, TextBlock } from './types'
+import type {
+  AnswerTarget,
+  DocumentModel,
+  DocumentPage,
+  NativeField,
+  ShapeBlock,
+  TextBlock,
+} from './types'
 
 export interface AnalyzeDocumentInput {
   fullText: string
@@ -7,11 +14,13 @@ export interface AnalyzeDocumentInput {
   pdfBlanks?: PdfBlankRegion[]
   docxBlanks?: TextBlankInfo[]
   nativeFields?: NativeField[]
+  shapes?: ShapeBlock[]
+  /** Explizite AnswerTargets aus DOCX-Analyse (Textboxen, Shapes, …). */
+  answerTargets?: AnswerTarget[]
 }
 
 /**
  * Baut eine gemeinsame DocumentModel aus Extrakt + erkannten Lücken.
- * MVP: Textblöcke aus Absätzen, Targets kommen später aus dem Segmenter.
  */
 export function analyzeDocument(input: AnalyzeDocumentInput): DocumentModel {
   const fullText = (input.fullText ?? '').trim()
@@ -27,7 +36,6 @@ export function analyzeDocument(input: AnalyzeDocumentInput): DocumentModel {
     bbox: null,
   }))
 
-  // Einzeilige Blöcke als Fallback, wenn keine Absätze.
   if (textBlocks.length === 0 && fullText) {
     const lines = fullText.split(/\n/).map((l) => l.trim()).filter(Boolean)
     for (let i = 0; i < lines.length; i++) {
@@ -46,7 +54,7 @@ export function analyzeDocument(input: AnalyzeDocumentInput): DocumentModel {
     tables: [],
     images: [],
     nativeFields: input.nativeFields ?? [],
-    shapes: [],
+    shapes: input.shapes ?? [],
     fullText,
   }
 }
