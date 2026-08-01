@@ -275,19 +275,21 @@ export async function commitAiMaterialCreate(
       content: input.content?.trim() || null,
       materialType: input.materialType,
       schoolForm: (input.schoolForm as SchoolForm | null) ?? null,
-      origin: 'ki',
+      origin: 'manuell',
       subjectIds,
       gradeLevels: input.gradeLevels ?? [],
       tagNames: input.tagNames ?? [],
       learningObjectives: input.learningObjectives ?? [],
       source: input.source?.trim() || null,
       author: input.author?.trim() || null,
-      aiMeta: {
-        generatedAt: new Date().toISOString(),
-        promptVersion: MATERIAL_METADATA_PROMPT_VERSION,
-        sourceFileName: detected.fileName,
-        extractionMethod: detected.extractionMethod,
-      },
+      aiMeta: detected.suggestions?.aiUsed
+        ? {
+            generatedAt: new Date().toISOString(),
+            promptVersion: MATERIAL_METADATA_PROMPT_VERSION,
+            sourceFileName: detected.fileName,
+            extractionMethod: detected.extractionMethod,
+          }
+        : null,
     },
     userId,
   )
