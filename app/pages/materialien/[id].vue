@@ -6,6 +6,7 @@ import {
   materialRelationTypes,
 } from '#shared/utils/labels'
 import { istKiMusterloesung, kiAutorAnzeige } from '#shared/utils/ki'
+import { solutionEditorMode, type SolutionEditorMode } from '#shared/utils/solution-editor'
 import { istMoodleKursMaterial, istH5pMaterial, kursarchivErweiterung } from '#shared/utils/moodle'
 import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
 import type { MaterialDetail } from '~~/server/repositories/material.repository'
@@ -340,17 +341,13 @@ const loesungStruktur = computed<StoredStructuredSolution | null>(() => {
   return raw
 })
 
-/** PDF-Overlay-Editor nur bei PDF-Strategien – Word-Lösungen werden im Dokument selbst befüllt. */
-const loesungBearbeitbar = computed(
-  () =>
-    Boolean(
-      kiLoesungAktiv.value &&
-        loesungStruktur.value &&
-        darfBearbeiten.value &&
-        (data.value?.aiMeta?.fillStrategy === 'pdf_overlay' ||
-          data.value?.aiMeta?.fillStrategy === 'pdf_separate'),
-    ),
-)
+/** PDF-Musterlösung: Overlay-, Anhang- oder Hybrid-Editor je nach fillStrategy. */
+const loesungEditorModus = computed<SolutionEditorMode | null>(() => {
+  if (!kiLoesungAktiv.value || !loesungStruktur.value || !darfBearbeiten.value) return null
+  return solutionEditorMode(data.value?.aiMeta?.fillStrategy)
+})
+
+const loesungBearbeitbar = computed(() => loesungEditorModus.value !== null)
 
 </script>
 
@@ -1009,9 +1006,10 @@ const loesungBearbeitbar = computed(
       :asset-id="vorschauAssetId"
       :titel="vorschauTitel"
       :loesung-bearbeiten="loesungBearbeitbar"
+      :editor-modus="loesungEditorModus"
       :struktur="loesungStruktur"
       :material-id="loesungBearbeitbar ? id : null"
-      :quellen-asset-id="data?.aiMeta?.sourceAssetId ?? null"
+      :quellen-asset-id="loesungEditorModus === 'appendix' ? null : (data?.aiMeta?.sourceAssetId ?? null)"
       :modell-credit="kiCredit"
       :geprueft="Boolean(data?.aiMeta?.reviewed)"
       :darf-bearbeiten="darfBearbeiten"

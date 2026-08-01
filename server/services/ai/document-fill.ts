@@ -702,6 +702,21 @@ export function sanitizePdfText(text: string): string {
   return out.replace(/[^\S\n]+/g, ' ').trim()
 }
 
+/**
+ * Entfernt minimale Markdown-Syntax aus Lösungstexten vor dem PDF-Rendering
+ * (Listensterne, Fettung, Code), damit Helvetica keine Rohmarker zeigt.
+ */
+export function normalizeSolutionTextForPdf(text: string): string {
+  return text
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^\s*[*+-]\s+/gm, '- ')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/__(.+?)__/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*([^*\n]+)\*/g, '$1')
+    .replace(/_([^_\n]+)_/g, '$1')
+}
+
 function wrapTextToWidth(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
   const paragraphs = text.split(/\n/).map((p) => p.trim()).filter(Boolean)
   if (paragraphs.length === 0) return []
@@ -1829,7 +1844,7 @@ export async function buildAnswerListPdf(
 
   const drawWrapped = (text: string, size: number, bold = false, color = rgb(0.12, 0.14, 0.18)) => {
     const active = bold ? fontBold : font
-    const safe = sanitizePdfText(text)
+    const safe = sanitizePdfText(normalizeSolutionTextForPdf(text))
     const paragraphs = safe.split(/\n+/).filter((p) => p.trim().length > 0)
     if (paragraphs.length === 0) return
 

@@ -110,6 +110,8 @@ ${SOLUTION_JSON_SCHEMA}
 - leftContext / rightContext: immer null.
 - bbox: immer null (kein Einzeichnen ins Original).
 - answer: knapper Erwartungshorizont (Stichpunkte oder kurze Sätze), fachlich korrekt und altersgerecht – kein Roman.
+- Keine Markdown-Syntax in answer/summary/notes: keine Sternchen, keine **Fettung**, keine # Überschriften, keine Codeformatierung. Aufzählungen ausschließlich als Zeilen mit „- “ (Bindestrich + Leerzeichen).
+- Bei GUI-/Oberflächenaufgaben: nur tatsächlich sichtbare Elemente nennen und klar trennen in Eingabe, Aktion und Ausgabe – nichts hinzuerfinden.
 - formFields: leer lassen, außer es gibt echte PDF-/Word-Formularfelder.
 - Löse jede erkennbare Aufgabe. Überspringe keine Teilaufgabe.
 - Erfinde keine Inhalte, die dem Material widersprechen.
@@ -205,6 +207,8 @@ export function buildSolutionPrompt(context: SolutionPromptContext): string {
     lines.push(
       'Erkenne Aufgabenstellungen multimodal. Materialtexte und GUIs sind Kontext, keine Lücken.',
       'Für jede Aufgabe: label (Aufgabennummer) + answer (Erwartungshorizont) + page + fieldType="freitext" + blankIndex=null + bbox=null.',
+      'Kein Markdown in den Antworttexten: Aufzählungen nur mit „- “, keine Sternchen oder Fettsyntax.',
+      'Beschreibe nur sichtbare UI-/Materialelemente; unterscheide Eingabe, Aktion und Ausgabe.',
     )
   } else {
     lines.push(

@@ -4,6 +4,8 @@ import type { StoredSolutionAnswer, StoredStructuredSolution } from '~~/server/d
 const props = defineProps<{
   disabled?: boolean
   aktiveId?: string | null
+  /** Anhang-Editor: kein Bezug zur Seitenvorschau. */
+  nurText?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -65,8 +67,13 @@ function antwortAktualisieren(id: string, patch: Partial<StoredSolutionAnswer>) 
         />
       </UiField>
       <p class="text-xs text-ink-muted">
-        Antworten bearbeiten, tauschen oder per Anfasser umsortieren. Klick auf ein Feld
-        markiert die Position in der Seitenvorschau.
+        <template v-if="nurText">
+          Antworten bearbeiten, tauschen oder per Anfasser umsortieren.
+        </template>
+        <template v-else>
+          Antworten bearbeiten, tauschen oder per Anfasser umsortieren. Klick auf ein Feld
+          markiert die Position in der Seitenvorschau.
+        </template>
       </p>
     </div>
 
@@ -93,7 +100,7 @@ function antwortAktualisieren(id: string, patch: Partial<StoredSolutionAnswer>) 
           </button>
           <span class="text-xs font-semibold text-ink-muted">#{{ index + 1 }}</span>
           <UiBadge
-            v-if="antwort.page"
+            v-if="!nurText && antwort.page"
             groesse="sm"
             class="!text-[0.65rem]"
           >
@@ -137,7 +144,7 @@ function antwortAktualisieren(id: string, patch: Partial<StoredSolutionAnswer>) 
               @update:model-value="antwortAktualisieren(antwort.id, { answer: String($event ?? '') })"
             />
           </UiField>
-          <div class="grid grid-cols-2 gap-2">
+          <div v-if="!nurText" class="grid grid-cols-2 gap-2">
             <UiField label="Feldtyp">
               <UiSelect
                 :model-value="antwort.fieldType ?? 'luecke'"
@@ -164,7 +171,7 @@ function antwortAktualisieren(id: string, patch: Partial<StoredSolutionAnswer>) 
             </UiField>
           </div>
           <p
-            v-if="antwort.leftContext || antwort.rightContext"
+            v-if="!nurText && (antwort.leftContext || antwort.rightContext)"
             class="truncate text-[0.7rem] text-ink-subtle"
             :title="`${antwort.leftContext ?? '…'} ___ ${antwort.rightContext ?? '…'}`"
           >
@@ -178,6 +185,19 @@ function antwortAktualisieren(id: string, patch: Partial<StoredSolutionAnswer>) 
       <p v-if="!loesung.answers.length" class="py-6 text-center text-sm text-ink-muted">
         Keine strukturierten Antworten vorhanden.
       </p>
+    </div>
+
+    <div v-if="nurText" class="shrink-0 space-y-2 border-t border-line pt-3">
+      <UiField label="Hinweise für die Lehrkraft">
+        <UiTextarea
+          :model-value="loesung.notesForTeacher ?? ''"
+          :disabled="disabled"
+          :zeilen="2"
+          @update:model-value="
+            loesung = { ...loesung, notesForTeacher: String($event ?? '') || null }
+          "
+        />
+      </UiField>
     </div>
   </div>
 </template>

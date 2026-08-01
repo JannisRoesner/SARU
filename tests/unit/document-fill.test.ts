@@ -16,6 +16,7 @@ import {
   inferAnswerFieldType,
   buildAnswerListPdf,
   looksLikeOpenEndedTaskText,
+  normalizeSolutionTextForPdf,
   overlayPdfAnswers,
   parseStructuredSolution,
   sanitizePdfText,
@@ -285,6 +286,20 @@ describe('sanitizePdfText', () => {
     expect(sanitizePdfText('Größe – „Äpfel“ …')).toContain('Größe')
     expect(sanitizePdfText('Größe – „Äpfel“ …')).toContain('Äpfel')
     expect(sanitizePdfText('Größe – „Äpfel“ …')).not.toContain('„')
+  })
+})
+
+describe('normalizeSolutionTextForPdf', () => {
+  it('entfernt Listen- und Fettsyntax aus offenen Antworten', () => {
+    const raw = [
+      '* **Flugnummer:** Eingabefeld',
+      '* **Geplante/Tatsächliche Ankunftszeit:** Anzeige',
+    ].join('\n')
+    const normalized = normalizeSolutionTextForPdf(raw)
+    expect(normalized).toContain('- Flugnummer: Eingabefeld')
+    expect(normalized).toContain('- Geplante/Tatsächliche Ankunftszeit: Anzeige')
+    expect(normalized).not.toContain('**')
+    expect(normalized).not.toMatch(/^\*/m)
   })
 })
 
@@ -627,8 +642,10 @@ describe('solution fill mode prompts', () => {
     expect(resolveSolutionFillMode({ title: 'x', subjects: [], gradeLevels: [], topics: [], competencies: [], learningObjectives: [], fillMode: 'offen' })).toBe('offen')
     expect(prompt).toContain('separates PDF')
     expect(prompt).toContain('Füllmodus: offen')
+    expect(prompt).toContain('Kein Markdown')
     expect(prompt).not.toContain('verbindliche blankIndex-Liste')
     expect(solutionSystemPromptForMode('offen')).toContain('separates Dokument')
+    expect(solutionSystemPromptForMode('offen')).toContain('Keine Markdown-Syntax')
     expect(solutionSystemPromptForMode('offen')).not.toContain('sichtbare Lücken im Fließtext')
   })
 
@@ -652,6 +669,33 @@ describe('solution fill mode prompts', () => {
     expect(buffer.subarray(0, 5).toString('utf8')).toBe('%PDF-')
     const pdf = await PDFDocument.load(buffer)
     expect(pdf.getPageCount()).toBeGreaterThanOrEqual(1)
+  })
+
+  it('rendert Markdown-Marker nicht wörtlich im Appendix-PDF', async () => {
+    const buffer = await buildAnswerListPdf('Musterlösung', {
+      summary: null,
+      answers: [
+        {
+          id: '1',
+          label: 'Aufgabe 1',
+          answer: '* **Flugnummer:** Eingabe\n* **Abrufen:** Aktion',
+          fieldType: 'freitext',
+        },
+      ],
+      formFields: [],
+    })
+    const { loadPdfjs } = await import('../../server/utils/pdfjs')
+    const pdfjs = await loadPdfjs()
+    const doc = await pdfjs.getDocument({
+      data: new Uint8Array(buffer),
+      useSystemFonts: true,
+    }).promise
+    const content = await (await doc.getPage(1)).getTextContent()
+    const text = content.items.map((i) => ('str' in i ? i.str : '')).join(' ')
+    expect(text).toContain('Flugnummer')
+    expect(text).toContain('Abrufen')
+    expect(text).not.toContain('**')
+    expect(text).not.toMatch(/\*\s*Flugnummer/)
   })
 
   it('behält Lückentext-Prompt mit Inventar', () => {

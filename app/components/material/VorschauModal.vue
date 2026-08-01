@@ -5,6 +5,12 @@ import type {
   StoredStructuredSolution,
 } from '~~/server/database/schema/materials'
 import { overlayFieldType, overlayFontSizePx } from '#shared/utils/solution-overlay'
+import {
+  istOverlayAntwort,
+  overlayBboxVon,
+  solutionEditorBackgroundAssetId,
+  type SolutionEditorMode,
+} from '#shared/utils/solution-editor'
 
 const offen = defineModel<boolean>({ required: true })
 
@@ -14,6 +20,8 @@ const props = defineProps<{
   titel?: string | null
   /** KI-Musterlösung: strukturierte Antworten bearbeiten + Overlay neu zeichnen. */
   loesungBearbeiten?: boolean
+  /** overlay = Lücken auf Quell-PDF; appendix = Anhang-PDF; hybrid = beides. */
+  editorModus?: SolutionEditorMode | null
   struktur?: StoredStructuredSolution | null
   /** Material-ID – lädt an PDF-Geometrie ausgerichtete bboxes für die Vorschau. */
   materialId?: string | null
@@ -226,15 +234,34 @@ const anzeigeTitel = computed(
   () => info.value?.title || props.titel || 'Dokumentvorschau',
 )
 
+const istAnhangEditor = computed(() => props.editorModus === 'appendix')
+const istHybridEditor = computed(() => props.editorModus === 'hybrid')
+const zeigtOverlay = computed(
+  () =>
+    props.loesungBearbeiten &&
+    props.editorModus !== 'appendix' &&
+    props.editorModus != null,
+)
+
 const seitenBildUrl = computed(() => {
-  const id = props.quellenAssetId || props.assetId
-  if (!id || !props.loesungBearbeiten) return null
+  if (!props.loesungBearbeiten || !props.editorModus) return null
+  const id = solutionEditorBackgroundAssetId(
+    props.editorModus,
+    props.assetId,
+    props.quellenAssetId,
+  )
+  if (!id) return null
   return `/api/assets/${id}/page?page=${seite.value}`
 })
 
-const antwortenAufSeite = computed(() =>
-  (lokalStruktur.value?.answers ?? []).filter((a) => (a.page || 1) === seite.value),
-)
+const antwortenAufSeite = computed(() => {
+  const modus = props.editorModus
+  if (!modus || istAnhangEditor.value) return []
+  return (lokalStruktur.value?.answers ?? [])
+    .filter((a) => (a.page || 1) === seite.value)
+    .filter((a) => istOverlayAntwort(a, modus))
+    .filter((a) => overlayBboxVon(a) != null)
+})
 
 function herunterladen() {
   if (!props.assetId) return
@@ -252,24 +279,27 @@ function beiTaste(event: KeyboardEvent) {
 function antwortFokussieren(id: string) {
   aktiveAntwortId.value = id
   const antwort = lokalStruktur.value?.answers.find((a) => a.id === id)
-  if (antwort?.page) seite.value = antwort.page
+  const modus = props.editorModus
+  if (
+    antwort?.page &&
+    modus &&
+    !istAnhangEditor.value &&
+    istOverlayAntwort(antwort, modus)
+  ) {
+    seite.value = antwort.page
+  }
   nextTick(() => {
     document.getElementById(`antwort-${id}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   })
 }
 
 function bboxVon(antwort: StoredSolutionAnswer) {
-  const b = antwort.bbox
-  return {
-    x: b?.x ?? 0.35,
-    y: b?.y ?? 0.2,
-    w: b?.w ?? (antwort.fieldType === 'freitext' ? 0.45 : 0.28),
-    h: b?.h ?? (antwort.fieldType === 'freitext' ? 0.08 : 0.028),
-  }
+  return overlayBboxVon(antwort)
 }
 
 function antwortTextStyle(antwort: StoredSolutionAnswer) {
   const box = bboxVon(antwort)
+  if (!box) return {}
   const fieldType = overlayFieldType({
     fieldType: antwort.fieldType,
     bboxH: box.h,
@@ -280,6 +310,18 @@ function antwortTextStyle(antwort: StoredSolutionAnswer) {
   return {
     '--pdf-font-size': `${fontSize}px`,
     '--pdf-line-gap': fieldType === 'freitext' ? '3px' : '2px',
+  }
+}
+
+function antwortBoxStyle(antwort: StoredSolutionAnswer) {
+  const box = bboxVon(antwort)
+  if (!box) return {}
+  return {
+    left: `${box.x * 100}%`,
+    top: `${box.y * 100}%`,
+    width: `${box.w * 100}%`,
+    height: `${box.h * 100}%`,
+    ...antwortTextStyle(antwort),
   }
 }
 
@@ -318,10 +360,11 @@ function dragStart(
   antwort: StoredSolutionAnswer,
   art: 'move' | 'resize',
 ) {
-  if (!props.darfBearbeiten) return
+  if (!props.darfBearbeiten || istAnhangEditor.value) return
+  const box = bboxVon(antwort)
+  if (!box) return
   event.preventDefault()
   event.stopPropagation()
-  const box = bboxVon(antwort)
   aktiveAntwortId.value = antwort.id
   drag.value = {
     id: antwort.id,
@@ -474,8 +517,14 @@ onBeforeUnmount(() => {
                 class="!text-white hover:!bg-white/10"
                 @click="seite += 1"
               />
-              <span class="text-[0.7rem] text-white/50">
+              <span v-if="zeigtOverlay" class="text-[0.7rem] text-white/50">
                 Boxen ziehen zum Verschieben, Ecke zum Vergrößern
+              </span>
+              <span v-else-if="istAnhangEditor" class="text-[0.7rem] text-white/50">
+                Vorschau des erzeugten Lösungs-PDFs
+              </span>
+              <span v-else-if="istHybridEditor" class="text-[0.7rem] text-white/50">
+                Lücken auf dem Arbeitsblatt; Anhang-Antworten nur rechts bearbeiten
               </span>
             </div>
 
@@ -490,7 +539,7 @@ onBeforeUnmount(() => {
                 <img
                   v-if="seitenBildUrl"
                   :src="seitenBildUrl"
-                  alt="Arbeitsblatt-Seite"
+                  :alt="istAnhangEditor ? 'Lösungs-PDF-Seite' : 'Arbeitsblatt-Seite'"
                   class="block w-full select-none"
                   draggable="false"
                 >
@@ -507,13 +556,7 @@ onBeforeUnmount(() => {
                   type="button"
                   class="pdf-antwort-box"
                   :class="{ 'pdf-antwort-box--aktiv': aktiveAntwortId === antwort.id }"
-                  :style="{
-                    left: `${bboxVon(antwort).x * 100}%`,
-                    top: `${bboxVon(antwort).y * 100}%`,
-                    width: `${bboxVon(antwort).w * 100}%`,
-                    height: `${bboxVon(antwort).h * 100}%`,
-                    ...antwortTextStyle(antwort),
-                  }"
+                  :style="antwortBoxStyle(antwort)"
                   :title="antwort.label"
                   @click="antwortFokussieren(antwort.id)"
                   @pointerdown="dragStart($event, antwort, 'move')"
@@ -533,7 +576,15 @@ onBeforeUnmount(() => {
             <div class="border-b border-line px-3 py-2">
               <p class="text-sm font-semibold text-ink">Antworten korrigieren</p>
               <p class="text-xs text-ink-muted">
-                Änderungen werden automatisch gespeichert und ins PDF übernommen.
+                <template v-if="istAnhangEditor">
+                  Textliche Antworten bearbeiten; das Lösungs-PDF wird neu erzeugt.
+                </template>
+                <template v-else-if="istHybridEditor">
+                  Lücken auf dem Arbeitsblatt verschieben; Anhang-Antworten textuell bearbeiten.
+                </template>
+                <template v-else>
+                  Änderungen werden automatisch gespeichert und ins PDF übernommen.
+                </template>
               </p>
             </div>
             <div class="min-h-0 flex-1 overflow-hidden p-3">
@@ -541,6 +592,7 @@ onBeforeUnmount(() => {
                 v-model="lokalStruktur"
                 :aktive-id="aktiveAntwortId"
                 :disabled="!darfBearbeiten"
+                :nur-text="istAnhangEditor"
                 @update:aktive-id="(id) => id && antwortFokussieren(id)"
               />
             </div>
