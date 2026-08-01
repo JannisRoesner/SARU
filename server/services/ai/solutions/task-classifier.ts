@@ -6,6 +6,7 @@ import type {
   RenderConfidence,
 } from './types'
 import { instructionExpectsCandidateBank } from './candidate-bank'
+import { instructionExpectsNumberAnswers } from './number-matching'
 
 /**
  * Schätzt, wie sicher In-place-Rendering für diesen Task ist.
@@ -76,9 +77,14 @@ export function classifyTask(task: TaskBlock): TaskBlock {
       evidence.push('diagram targets may need vision repair')
     }
   } else if (blankTargets.length > 0) {
-    kind = 'cloze'
+    const numberMatching = instructionExpectsNumberAnswers(task.instruction)
+    kind = numberMatching ? 'matching_inline' : 'cloze'
     renderMode = 'overlay'
     evidence.push(`${blankTargets.length} answer targets detected`)
+    if (numberMatching) {
+      evidence.push('instruction expects number answers (not terms)')
+      confidence = Math.max(confidence, 0.9)
+    }
 
     if (
       wordListExpected &&
@@ -97,7 +103,7 @@ export function classifyTask(task: TaskBlock): TaskBlock {
       if (bank.reusePolicy === 'once') {
         evidence.push('candidate count equals blank count → reuse once')
       }
-    } else if (/wortliste|lückentext|füllen sie die lücken/.test(instruction)) {
+    } else if (/wortliste|füllen sie die lücken/.test(instruction)) {
       confidence = Math.max(confidence, 0.9)
       evidence.push('instruction mentions word list')
       if (!bank) {
@@ -125,10 +131,13 @@ export function classifyTask(task: TaskBlock): TaskBlock {
     kind = 'free_text_inplace'
     renderMode = 'native'
     confidence = Math.max(confidence, 0.7)
+  } else if (task.targets.some((t) => t.kind === 'answer_line')) {
+    kind = kind === 'unknown' ? 'free_text_inplace' : kind
+    renderMode = 'overlay'
+    confidence = Math.max(confidence, 0.7)
+    evidence.push('answer line targets')
   } else if (
-    task.targets.some(
-      (t) => t.kind === 'shape_oval' || t.kind === 'shape_box' || t.kind === 'answer_line',
-    )
+    task.targets.some((t) => t.kind === 'shape_oval' || t.kind === 'shape_box')
   ) {
     kind = kind === 'unknown' ? 'free_text_inplace' : kind
     renderMode = 'native'
@@ -161,18 +170,15 @@ export function classifyTasks(tasks: TaskBlock[]): TaskBlock[] {
 export function legacyFillModeFromTasks(
   tasks: TaskBlock[],
 ): 'lueckentext' | 'offen' {
-  if (
-    tasks.some(
-      (t) =>
-        t.kind === 'cloze' ||
-        t.kind === 'matching_inline' ||
-        t.kind === 'matching_table' ||
-        t.kind === 'diagram_completion',
-    )
-  ) {
-    return 'lueckentext'
-  }
-  if (tasks.some((t) => t.renderMode === 'overlay' || t.renderMode === 'native')) {
+  // Nur wenn es echte In-place-Ziele gibt → Lückentext/Overlay.
+  // Appendix-only (Glossar, offene Fragen, Bildbeschriftung ohne Shapes) → offen.
+  const hasInplaceTargets = tasks.some(
+    (t) =>
+      (t.renderMode === 'overlay' || t.renderMode === 'native') &&
+      t.targets.length > 0,
+  )
+  if (hasInplaceTargets) return 'lueckentext'
+  if (tasks.some((t) => t.kind === 'cloze' && t.targets.length > 0)) {
     return 'lueckentext'
   }
   return 'offen'

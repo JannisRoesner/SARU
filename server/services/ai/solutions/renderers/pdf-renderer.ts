@@ -26,7 +26,10 @@ export async function renderPdfSolution(
   solution: StructuredSolution,
   options: PdfRenderOptions,
 ): Promise<FilledDocument> {
-  const overlayTasks = options.tasks.filter((t) => t.renderMode === 'overlay')
+  // PDF: native In-place-Ziele (Antwortlinien) ebenfalls als Overlay zeichnen.
+  const overlayTasks = options.tasks.filter(
+    (t) => t.renderMode === 'overlay' || t.renderMode === 'native',
+  )
   const appendixTasks = options.tasks.filter((t) => t.renderMode === 'appendix')
 
   const acro = await fillPdfAcroForm(source, solution)

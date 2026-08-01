@@ -63,12 +63,18 @@ import { ensureExtractedText } from './document-text'
 import { analyzeDocxTargets } from './solutions/docx-analyzer'
 import { logPipeline } from './solutions/logging'
 import { buildSolutionPlan } from './solutions/orchestrator'
+import { detectPdfAnswerLines } from './solutions/pdf-answer-lines'
 import { buildClozeRepairPrompt } from './solutions/repair/cloze-repair'
 import { repairCandidateBankViaVision } from './solutions/repair/candidate-bank-vision'
 import { repairDocxTargetsViaVision } from './solutions/repair/docx-targets-vision'
 import { mergeNativeAndVisualTargets } from './solutions/docx-target-merger'
 import { renderPdfSolution } from './solutions/renderers/pdf-renderer'
 import { renderDocxSolution } from './solutions/renderers/docx-renderer'
+import { coerceAnswersToNumbers } from './solutions/number-matching'
+import {
+  detectWorksheetTasks,
+  formatWorksheetTasksForPrompt,
+} from './solutions/worksheet-tasks'
 import { assignCandidatesGlobally } from './solutions/solvers/cloze-solver'
 import { applyFreeTextTaskMeta } from './solutions/solvers/free-text-solver'
 import type { CandidateBank, TaskBlock } from './solutions/types'
@@ -244,21 +250,54 @@ export async function generateSolution(
     }
   }
 
+  let pdfAnswerLines: Awaited<ReturnType<typeof detectPdfAnswerLines>> = {
+    targets: [],
+    shapes: [],
+    rawLineCount: 0,
+    clusterCount: 0,
+  }
+  // Nur wenn keine Text-Lücken gefunden wurden – Cloze bleibt prioritär.
+  if (
+    source &&
+    PDF_EXTENSIONS.has(source.extension) &&
+    detectedBlanks.length === 0
+  ) {
+    try {
+      pdfAnswerLines = await detectPdfAnswerLines(source.buffer)
+      if (pdfAnswerLines.clusterCount > 0) {
+        log.info('PDF-Antwortlinien erkannt', {
+          rawLines: pdfAnswerLines.rawLineCount,
+          clusters: pdfAnswerLines.clusterCount,
+        })
+      }
+    } catch (error) {
+      log.warn('PDF-Antwortlinien-Erkennung fehlgeschlagen', error)
+    }
+  }
+
   const plan = buildSolutionPlan({
     documentText: textForAnalysis || pdfExtractText || docxNative.fullText,
     pdfText: pdfExtractText || null,
     pdfBlanks: detectedBlanks,
     docxBlanks,
     nativeFields: docxNative.nativeFields,
-    shapes: docxNative.shapes,
-    answerTargets: docxNative.targets,
+    shapes: [...docxNative.shapes, ...pdfAnswerLines.shapes],
+    answerTargets: [...docxNative.targets, ...pdfAnswerLines.targets],
   })
-  let { tasks, candidateBank, fillMode, blankCount, document: documentModel } = plan
+  let {
+    tasks,
+    candidateBank,
+    fillMode,
+    blankCount,
+    document: documentModel,
+    numberMatching,
+  } = plan
 
   let candidateBankRepairedViaVision = false
   const needsBankRepair = tasks.some((t) => t.requiresCandidateBankRepair)
   if (
     needsBankRepair &&
+    !numberMatching &&
     source &&
     PDF_EXTENSIONS.has(source.extension) &&
     blankCount > 0
@@ -378,6 +417,24 @@ export async function generateSolution(
       : null
 
   const diagramTask = tasks.find((t) => t.kind === 'diagram_completion')
+  const answerLineCount =
+    pdfAnswerLines.clusterCount ||
+    tasks
+      .flatMap((t) => t.targets)
+      .filter((t) => t.kind === 'answer_line').length ||
+    null
+  const worksheetUnits = detectWorksheetTasks(
+    documentText || documentModel.fullText || '',
+  )
+  const taskInventory = worksheetUnits.length
+    ? formatWorksheetTasksForPrompt(worksheetUnits)
+    : tasks
+        .filter(
+          (t) =>
+            t.kind === 'free_text_separate' || t.kind === 'matching_inline',
+        )
+        .map((t, i) => `${i + 1}. ${t.instruction}`)
+        .join('\n') || null
   const prompt = buildSolutionPrompt({
     title: material.title,
     description: material.description,
@@ -398,6 +455,9 @@ export async function generateSolution(
     fillMode,
     candidateBank,
     diagramTargetIds: diagramTask?.targets.map((t) => t.id) ?? null,
+    answerLineCount,
+    numberMatching,
+    taskInventory,
   })
 
   if (!documentText && !source && !material.content?.trim()) {
@@ -599,6 +659,13 @@ export async function generateSolution(
         count: structured.answers.length,
         answers: summarizeAnswersForLog(structured.answers),
       })
+      // Begriffe → Nummern, falls die Aufgabe Nummern verlangt.
+      if (numberMatching) {
+        structured = coerceAnswersToNumbers(structured, numberMatching)
+        log.info('Nummern-Zuordnung: Antworten auf Ziffern normalisiert', {
+          answers: summarizeAnswersForLog(structured.answers),
+        })
+      }
       if (fillMode === 'offen') {
         structured = {
           ...structured,

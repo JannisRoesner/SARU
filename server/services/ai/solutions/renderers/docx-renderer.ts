@@ -1,5 +1,6 @@
 import {
   fillDocxDocument,
+  highlightDocxPrefilledClozeAnswers,
   type FilledDocument,
   type StructuredSolution,
 } from '../../document-fill'
@@ -39,10 +40,34 @@ export function renderDocxSolution(
   }
 
   let buffer = source
+  let priorFilled = 0
+
+  // Lehrerfassungen: bereits eingetragene Lückenantworten in Lösungstinte markieren.
+  const highlighted = highlightDocxPrefilledClozeAnswers(buffer)
+  buffer = highlighted.buffer
+  priorFilled += highlighted.highlighted
+  if (highlighted.highlighted > 0) {
+    logPipeline('render.prefilled_highlighted', {
+      jobId: options.jobId,
+      runId: options.runId,
+      highlighted: highlighted.highlighted,
+    })
+  }
+
   const diagramTask = options.tasks.find((t) => t.kind === 'diagram_completion')
-  if (diagramTask && (solution.diagramMarks?.length ?? 0) > 0) {
+  if (
+    diagramTask &&
+    ((solution.diagramMarks?.length ?? 0) > 0 ||
+      solution.answers.some(
+        (a) =>
+          a.targetId?.startsWith('shape-') ||
+          a.targetId?.startsWith('txbx-') ||
+          /^shape-\d+$/i.test(a.label),
+      ))
+  ) {
     const diagrammed = applyDiagramMarksToDocx(buffer, solution, diagramTask.targets)
     buffer = diagrammed.buffer
+    priorFilled += diagrammed.filled
   }
 
   const result = fillDocxDocument(buffer, solution, {
@@ -51,6 +76,7 @@ export function renderDocxSolution(
     appendOpenAnswers: plan.appendOpenAnswers,
     forceAppendix: plan.forceAppendix,
     anchoredOverlays: plan.anchoredOverlays,
+    priorFilled,
   })
 
   if (result.strategy === 'docx_appended' || result.strategy === 'docx_mixed') {

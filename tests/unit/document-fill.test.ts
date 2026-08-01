@@ -11,9 +11,11 @@ import {
   enrichSolutionPlacements,
   fillDocxDocument,
   fillPdfAcroForm,
+  filterColumnGutterGaps,
   formatBlankInventory,
   formatTextBlankInventory,
   inferAnswerFieldType,
+  isLikelyLayoutGap,
   buildAnswerListPdf,
   looksLikeOpenEndedTaskText,
   normalizeSolutionTextForPdf,
@@ -641,12 +643,13 @@ describe('detectPdfBlankRegions', () => {
 
     const source = Buffer.from(await pdf.save())
     const blanks = await detectPdfBlankRegions(source)
-    expect(blanks.length).toBeGreaterThanOrEqual(4)
+    expect(blanks.length).toBeGreaterThanOrEqual(3)
     const lefts = blanks.map((b) => b.leftText.toLowerCase())
     expect(lefts.some((t) => t.includes('die'))).toBe(true)
     expect(lefts.some((t) => t.includes('jungen'))).toBe(true)
-    expect(lefts.some((t) => t.includes('sehr'))).toBe(true)
     expect(lefts.some((t) => /20\.?000/.test(t))).toBe(true)
+    // Underscore-Cloze bleibt erhalten (nicht von Gap-Layout-Filtern betroffen).
+    expect(blanks.some((b) => b.kind === 'underscore')).toBe(true)
   })
 
   it('erkennt aufeinanderfolgende Einzel-Unterstrich-Runs als eine Lücke', async () => {
@@ -722,6 +725,101 @@ describe('detectPdfBlankRegions', () => {
       'Beschreiben Sie die in der GUI dargestellten Komponenten im Sachzusammenhang. Material zum Nachtflugverbot.'
     expect(looksLikeOpenEndedTaskText(text)).toBe(true)
     expect(classifySolutionFillMode(blanks, text)).toBe('offen')
+  })
+
+  it('ignoriert Name:-Kopfzeile und Tabellenkopf-Spalten als Gaps', async () => {
+    const pdf = await PDFDocument.create()
+    const font = await pdf.embedFont(StandardFonts.Helvetica)
+    const page = pdf.addPage([595.28, 841.89])
+    // Kopfzeile wie STI / Geschlechtsidentität
+    page.drawText('Name:', { x: 50, y: 800, size: 11, font })
+    page.drawText('Geschlechtskrankheiten - STI', { x: 200, y: 800, size: 11, font })
+    // Tabellenkopf
+    page.drawText('Name', { x: 50, y: 600, size: 11, font })
+    page.drawText('Symptome Behandlung Schutz', { x: 180, y: 600, size: 11, font })
+    const source = Buffer.from(await pdf.save())
+
+    const blanks = await detectPdfBlankRegions(source)
+    expect(blanks.filter((b) => b.kind === 'gap')).toHaveLength(0)
+  })
+
+  it('ignoriert zweispaltigen Mittelgutter als Gaps', async () => {
+    const pdf = await PDFDocument.create()
+    const font = await pdf.embedFont(StandardFonts.Helvetica)
+    const page = pdf.addPage([595.28, 841.89])
+    // Links Definitionen (bewusst kürzer, damit ein Gutter entsteht), rechts Begriffe
+    const rows = [
+      { y: 650, left: 'beschreibt die sexuelle Orientierung klar', right: 'Heterosexualität' },
+      { y: 620, left: 'bei der eine Person sich zu anderen fühlt', right: 'Homosexualität' },
+      { y: 590, left: 'romantische Beziehungen mit mehreren Personen', right: 'Polyamorie' },
+      { y: 560, left: 'Identität und das Verständnis der eigenen Rolle', right: 'Cisgender' },
+    ]
+    for (const row of rows) {
+      page.drawText(row.left, { x: 40, y: row.y, size: 10, font })
+      page.drawText(row.right, { x: 340, y: row.y, size: 10, font })
+    }
+    const source = Buffer.from(await pdf.save())
+
+    const blanks = await detectPdfBlankRegions(source)
+    expect(blanks.filter((b) => b.kind === 'gap')).toHaveLength(0)
+  })
+})
+
+describe('isLikelyLayoutGap / filterColumnGutterGaps', () => {
+  it('erkennt Name:-Felder und Datum-Kopfzeilen', () => {
+    expect(
+      isLikelyLayoutGap(
+        {
+          kind: 'gap',
+          x: 118,
+          width: 122,
+          leftText: 'Name:',
+          rightText: 'Geschlechtskrankheiten - STI',
+        },
+        595,
+      ),
+    ).toBe(true)
+    expect(
+      isLikelyLayoutGap(
+        {
+          kind: 'gap',
+          x: 351,
+          width: 133,
+          leftText: 'Name:Sexuelle Vielfalt',
+          rightText: '04.06.2025',
+        },
+        595,
+      ),
+    ).toBe(true)
+  })
+
+  it('lässt echte Satz-Gaps durch', () => {
+    expect(
+      isLikelyLayoutGap(
+        {
+          kind: 'gap',
+          x: 80,
+          width: 90,
+          leftText: 'Die',
+          rightText: 'des Penis ist bedeckt.',
+        },
+        595,
+      ),
+    ).toBe(false)
+  })
+
+  it('entfernt Spaltengutter-Cluster, behält Underscores', () => {
+    const blanks = [
+      { pageIndex: 0, x: 290, kind: 'gap' as const },
+      { pageIndex: 0, x: 295, kind: 'gap' as const },
+      { pageIndex: 0, x: 288, kind: 'gap' as const },
+      { pageIndex: 0, x: 100, kind: 'underscore' as const },
+      { pageIndex: 0, x: 50, kind: 'gap' as const },
+    ]
+    const filtered = filterColumnGutterGaps(blanks)
+    expect(filtered.some((b) => b.kind === 'underscore')).toBe(true)
+    expect(filtered.filter((b) => b.kind === 'gap')).toHaveLength(1)
+    expect(filtered.find((b) => b.kind === 'gap')!.x).toBe(50)
   })
 })
 

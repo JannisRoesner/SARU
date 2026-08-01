@@ -1,6 +1,10 @@
 import { formatJahrgaenge, type GradeLevel } from '#shared/utils/jahrgangsstufen'
 import type { SolutionFillMode } from './document-fill'
 import { formatCandidateBankForPrompt } from './solutions/candidate-bank'
+import {
+  formatNumberMatchingForPrompt,
+  type NumberMatchingLegend,
+} from './solutions/number-matching'
 import type { CandidateBank } from './solutions/types'
 
 export interface SolutionPromptContext {
@@ -36,9 +40,15 @@ export interface SolutionPromptContext {
   candidateBank?: CandidateBank | null
   /** Diagramm-Ziele (Oval-/Box-IDs) für diagram_completion. */
   diagramTargetIds?: string[] | null
+  /** Anzahl erkannter PDF-/DOCX-Antwortlinien-Blöcke (Schreiblinien). */
+  answerLineCount?: number | null
+  /** Nummern-Zuordnung: answer nur als Ziffer, Legende Nummer→Begriff. */
+  numberMatching?: NumberMatchingLegend | null
+  /** Erkannte Teilaufgaben (offen/Glossar/Beschriftung) für den Erwartungshorizont. */
+  taskInventory?: string | null
 }
 
-export const SOLUTION_PROMPT_VERSION = '7-candidate-bank-task-pipeline'
+export const SOLUTION_PROMPT_VERSION = '8-number-matching'
 
 const SOLUTION_JSON_SCHEMA = `{
   "summary": "kurzer Überblick in 1–2 Sätzen",
@@ -76,8 +86,9 @@ ${SOLUTION_JSON_SCHEMA}
 - fieldType: "luecke" für kurze Einwort-/Phrasenantworten; "freitext" nur wenn die Aufgabe ausdrücklich Fließtext verlangt.
 - Semantik zuerst: Jede answer muss im Satzkontext der konkreten Lücke grammatisch und fachlich passen (z. B. „Die ___ der Pflanze“ → „Wurzel“, nicht ein beliegiges anderes Wort).
 - Wortliste / Candidate Bank:
-  - Wenn im User-Prompt eine „Verbindliche Wortliste (Kandidaten)“ steht: Antworten AUSSCHLIESSLICH aus diesen Begriffen. Keine erfundenen Wörter.
-  - Bei gleicher Anzahl von Kandidaten und Lücken: jeden Begriff GENAU einmal verwenden (bijektive Zuordnung).
+  - Wenn im User-Prompt „Antwortformat: Nur Nummern“ steht: answer ausschließlich als Ziffer (z. B. „5“), niemals als Begriffsname.
+  - Wenn im User-Prompt eine „Verbindliche Wortliste (Kandidaten)“ steht: Antworten AUSSCHLIESSLICH aus diesen Einträgen. Keine erfundenen Wörter.
+  - Bei gleicher Anzahl von Kandidaten und Lücken: jeden Eintrag GENAU einmal verwenden (bijektive Zuordnung).
   - Ohne verbindliche Liste: Antworten möglichst aus einer im Dokument sichtbaren Wortliste wählen.
 - blankIndex:
   - Wenn eine maschinelle Lückenliste im User-Prompt steht: verwende GENAU diese Indizes (0…n-1). Keine eigenen Nummern erfinden, keine Lücke überspringen, keine Extra-Antworten ohne Lücke.
@@ -138,9 +149,10 @@ export function buildSolutionPrompt(context: SolutionPromptContext): string {
   if (mode === 'offen') {
     lines.push(
       'Erstelle eine Musterlösung (Erwartungshorizont) für das folgende Unterrichtsmaterial.',
-      'Es wurden KEINE ausfüllbaren Dokumentlücken/Antwortfelder erkannt – offene Aufgabe.',
+      'Es wurden KEINE ausfüllbaren Dokumentlücken/Antwortfelder erkannt – offene / gemischte Aufgaben.',
       'Die Lösung wird als separates PDF mit Aufgabennummer und Lösungstext erzeugt (kein Overlay).',
       'fieldType ist freitext; blankIndex, leftContext, rightContext und bbox sind null.',
+      'Löse JEDE erkannte Teilaufgabe separat (eigene answer mit klarem label).',
     )
   } else {
     lines.push(
@@ -177,14 +189,43 @@ export function buildSolutionPrompt(context: SolutionPromptContext): string {
     lines.push(context.documentText.trim())
   }
 
-  if (mode === 'lueckentext' && context.candidateBank) {
+  if (context.taskInventory?.trim()) {
     lines.push(
       '',
-      '## Verbindliche Wortliste (Kandidaten)',
+      '## Erkannte Teilaufgaben (verbindlich abdecken)',
+      'Für jede Teilaufgabe eine eigene Antwort (label = Aufgabenkurzname).',
+      'Bildbeschriftung: Begriffe der Wortliste den Bildstellen zuordnen (Stichpunkte).',
+      'Glossar: zu jedem Begriff eine knappe Bedeutung.',
+      '',
+      context.taskInventory.trim(),
+    )
+  }
+
+  if (mode === 'lueckentext' && context.numberMatching) {
+    lines.push(
+      '',
+      '## Antwortformat: Nur Nummern',
+      formatNumberMatchingForPrompt(context.numberMatching),
+    )
+  }
+
+  if (mode === 'lueckentext' && context.candidateBank) {
+    const isNumberBank = context.candidateBank.candidates.every((c) =>
+      /^\d{1,2}$/.test(c.value),
+    )
+    lines.push(
+      '',
+      isNumberBank
+        ? '## Verbindliche Nummern (Kandidaten)'
+        : '## Verbindliche Wortliste (Kandidaten)',
       formatCandidateBankForPrompt(context.candidateBank),
       context.candidateBank.reusePolicy === 'once'
-        ? 'VERBINDLICH: ausschließlich diese Begriffe, jeden genau einmal.'
-        : 'VERBINDLICH: ausschließlich diese Begriffe (Wiederholung nur wenn nötig).',
+        ? isNumberBank
+          ? 'VERBINDLICH: ausschließlich diese Nummern, jede genau einmal.'
+          : 'VERBINDLICH: ausschließlich diese Begriffe, jeden genau einmal.'
+        : isNumberBank
+          ? 'VERBINDLICH: ausschließlich diese Nummern (Wiederholung nur wenn nötig).'
+          : 'VERBINDLICH: ausschließlich diese Begriffe (Wiederholung nur wenn nötig).',
     )
   }
 
@@ -196,6 +237,18 @@ export function buildSolutionPrompt(context: SolutionPromptContext): string {
       'Die answer muss in „linker Kontext ___ rechter Kontext“ Sinn ergeben.',
       '',
       context.blankInventory.trim(),
+    )
+  } else if (
+    mode === 'lueckentext' &&
+    !context.blankInventory?.trim() &&
+    (context.answerLineCount ?? 0) > 0
+  ) {
+    lines.push(
+      '',
+      `## Erkannte Antwortlinien (${context.answerLineCount} Schreibblöcke)`,
+      'Es gibt horizontale Schreiblinien neben Abbildungen/Texten.',
+      'Liefere genau eine Freitext-Antwort pro Schreibblock in Dokumentreihenfolge (oben→unten).',
+      'fieldType="freitext", blankIndex=null; kurze Stichpunkte mit „- “.',
     )
   }
 
@@ -230,7 +283,9 @@ export function buildSolutionPrompt(context: SolutionPromptContext): string {
       'Erkenne Aufgaben, Abbildungen, Lücken und Formularfelder multimodal.',
       context.blankInventory?.trim()
         ? 'Für jede erkannte Lücke: answer + page + blankIndex (aus der Liste) + leftContext + rightContext + fieldType + bbox.'
-        : 'Für jede Lücke: answer + page + blankIndex (Dokumentreihenfolge) + leftContext + rightContext + fieldType + bbox (normiert 0–1, Ursprung oben links).',
+        : (context.answerLineCount ?? 0) > 0
+          ? 'Für jeden Schreibblock: label + answer (Stichpunkte) + page + fieldType="freitext" + blankIndex=null.'
+          : 'Für jede Lücke: answer + page + blankIndex (Dokumentreihenfolge) + leftContext + rightContext + fieldType + bbox (normiert 0–1, Ursprung oben links).',
     )
     if (context.diagramTargetIds?.length) {
       lines.push(

@@ -1,4 +1,8 @@
 import type { CandidateBank, CandidateReusePolicy, CandidateTerm, DocumentModel } from './types'
+import {
+  detectImageLabelingTask,
+  extractInlineTermList,
+} from './worksheet-tasks'
 
 /** Normalisiert für Vergleich: Kleinbuchstaben, Umlaute vereinheitlicht, Trim. */
 export function normalizeCandidate(value: string): string {
@@ -96,6 +100,35 @@ function extractFromSingleText(text: string, blankCount: number): CandidateBank 
   const trimmed = text.trim()
   if (!trimmed) return null
 
+  // „Ordne die Begriffe dem Bild zu: A, B, C“
+  const labeling = detectImageLabelingTask(trimmed)
+  if (labeling?.terms && labeling.terms.length >= 2) {
+    const candidates = uniqueByNormalized(
+      labeling.terms.map((v, i) => makeTerm(v, i)),
+    )
+    if (candidates.length >= 2) {
+      return {
+        id: 'bank-1',
+        candidates,
+        reusePolicy: resolveReusePolicy(candidates, blankCount),
+        source: 'instruction',
+      }
+    }
+  }
+
+  const fromAssign = extractFromAssignColonList(trimmed)
+  if (fromAssign.length >= 2) {
+    const candidates = uniqueByNormalized(fromAssign)
+    if (candidates.length >= 2) {
+      return {
+        id: 'bank-1',
+        candidates,
+        reusePolicy: resolveReusePolicy(candidates, blankCount),
+        source: 'instruction',
+      }
+    }
+  }
+
   const fromSection = extractFromWordlistSection(trimmed)
   const candidates = uniqueByNormalized(fromSection)
   if (candidates.length < 2) return null
@@ -106,6 +139,15 @@ function extractFromSingleText(text: string, blankCount: number): CandidateBank 
     reusePolicy: resolveReusePolicy(candidates, blankCount),
     source: 'wordlist_section',
   }
+}
+
+/** „Ordne … zu: Harnröhre, Hoden, …“ ohne zwingend „Bild“. */
+function extractFromAssignColonList(text: string): CandidateTerm[] {
+  const m = text.match(
+    /ordn\w*.{0,80}begriffe[^:]{0,40}:\s*((?:[\p{Lu}][\p{L}\p{N}\-]*)(?:\s*,\s*[\p{Lu}][\p{L}\p{N}\-]*){1,12})/iu,
+  )
+  if (!m?.[1]) return []
+  return extractInlineTermList(m[1]).map((v, i) => makeTerm(v, i))
 }
 
 /**

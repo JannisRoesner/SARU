@@ -921,6 +921,81 @@ export function insertAnchoredTextboxes(
 }
 
 /**
+ * Markiert bereits eingetragene Lückenantworten in durchgängig unterstrichenen
+ * Lehrerfassungen (kurze Wörter zwischen Space-Polstern) in Lösungstinte.
+ */
+export function highlightDocxPrefilledClozeAnswers(source: Buffer): {
+  buffer: Buffer
+  highlighted: number
+} {
+  const files = unzipSync(new Uint8Array(source))
+  const docEntry = files['word/document.xml']
+  if (!docEntry) return { buffer: source, highlighted: 0 }
+
+  let xml = strFromU8(docEntry)
+  let highlighted = 0
+
+  xml = xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (paragraphXml) => {
+    const runs = collectDocxRuns(paragraphXml)
+    if (runs.length < 3) return paragraphXml
+    const hasPlain = runs.some(
+      (run) =>
+        !run.underlined && /\S/.test(run.text) && !/^[\s\u00a0_]+$/.test(run.text),
+    )
+    if (hasPlain) return paragraphXml
+
+    const isSpacePad = (run: DocxRunInfo | undefined) =>
+      Boolean(run && /^[\s\u00a0]+$/.test(run.text) && run.text.length >= 2)
+    const isShortAnswer = (run: DocxRunInfo) => {
+      const trimmed = run.text.trim()
+      if (!trimmed || trimmed.length > 40) return false
+      if ((trimmed.match(/\s+/g) ?? []).length > 2) return false
+      return run.underlined && !/^[\s\u00a0_]+$/.test(run.text)
+    }
+
+    let next = paragraphXml
+    // Von hinten nach vorne ersetzen, damit Offsets stabil bleiben.
+    for (let i = runs.length - 1; i >= 0; i--) {
+      const run = runs[i]!
+      if (!isShortAnswer(run)) continue
+      // Typisch: „   Hoden      “ – Antwortwort zwischen Space-Polstern.
+      if (!isSpacePad(runs[i - 1]) || !isSpacePad(runs[i + 1])) continue
+      const original = next.slice(run.xmlStart, run.xmlEnd)
+      if (/w:val="1F4E9B"/i.test(original)) continue
+      const colored = original.replace(
+        /<w:rPr>([\s\S]*?)<\/w:rPr>/,
+        (_full, inner: string) => {
+          if (/<w:color\b/i.test(inner)) {
+            return `<w:rPr>${inner.replace(
+              /<w:color\b[^/]*\/>/i,
+              `<w:color w:val="${SOLUTION_DOCX_COLOR}"/>`,
+            )}</w:rPr>`
+          }
+          return `<w:rPr>${inner}<w:color w:val="${SOLUTION_DOCX_COLOR}"/><w:b/></w:rPr>`
+        },
+      )
+      const withPr =
+        colored === original
+          ? original.replace(
+              /<w:r\b([^>]*)>/,
+              `<w:r$1><w:rPr><w:color w:val="${SOLUTION_DOCX_COLOR}"/><w:b/></w:rPr>`,
+            )
+          : colored
+      if (withPr === original) continue
+      next = next.slice(0, run.xmlStart) + withPr + next.slice(run.xmlEnd)
+      highlighted += 1
+    }
+    return next
+  })
+
+  files['word/document.xml'] = strToU8(xml)
+  return {
+    buffer: Buffer.from(zipSync(files, { level: 6 })),
+    highlighted,
+  }
+}
+
+/**
  * Füllt Lücken in einem DOCX: Content Controls, Bookmarks, Textboxen und
  * Unterstrich-/Punktmuster. Offene Antworten können als Anhang folgen.
  */
@@ -936,6 +1011,8 @@ export function fillDocxDocument(
     forceAppendix?: boolean
     /** Vision-/BBox-Ziele ohne native Ref. */
     anchoredOverlays?: Array<{ bbox: SolutionBBox; text: string; id: string }>
+    /** Bereits in einem vorherigen Render-Schritt befüllte Ziele (Highlight/Diagramm). */
+    priorFilled?: number
   } = {},
 ): {
   buffer: Buffer
@@ -955,7 +1032,7 @@ export function fillDocxDocument(
   }
 
   let xml = strFromU8(docEntry)
-  let replaced = 0
+  let replaced = Math.max(0, options.priorFilled ?? 0)
   const answers = orderedAnswerTexts(solution)
 
   // Content Controls mit Alias/Tag, die zu Antwort-Labels passen.
@@ -1016,17 +1093,45 @@ export function fillDocxDocument(
     replaced += anchored.filled
   }
 
+  const bodyPlain = [...xml.matchAll(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g)]
+    .map((m) => decodeXmlText(m[1] ?? ''))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+
+  const answerAlreadyInBody = (answer: string) => {
+    const normalized = answer.trim().toLowerCase().replace(/\s+/g, ' ')
+    if (normalized.length < 2) return false
+    // shape-/txbx-IDs sind nie sinnvolle Anhangstexte
+    if (/^(shape|txbx|cc|bm)-\d+$/i.test(normalized)) return true
+    return bodyPlain.includes(normalized)
+  }
+
   const openAnswers = solution.answers.filter(
-    (a) => a.fieldType === 'freitext' || (a.blankIndex == null && !a.targetId && (a.answer?.length ?? 0) > 40),
+    (a) =>
+      (a.fieldType === 'freitext' ||
+        (a.blankIndex == null && !a.targetId && (a.answer?.length ?? 0) > 40)) &&
+      !answerAlreadyInBody(a.answer),
   )
+  const hasInPlaceTargets = solution.answers.some(
+    (a) => a.targetId || typeof a.blankIndex === 'number',
+  )
+  const hasDiagramMarks = (solution.diagramMarks?.length ?? 0) > 0
+  // Anhang nur wenn wirklich nichts In-place landete und Antworten nicht schon im Body stehen.
+  const unplacedForAppendix =
+    replaced === 0
+      ? solution.answers.filter((a) => !answerAlreadyInBody(a.answer))
+      : openAnswers
   const shouldAppend =
     options.forceAppendix ||
-    replaced === 0 ||
-    (options.appendOpenAnswers && openAnswers.length > 0)
+    (options.appendOpenAnswers && openAnswers.length > 0) ||
+    (replaced === 0 &&
+      unplacedForAppendix.length > 0 &&
+      !hasDiagramMarks &&
+      (openAnswers.length > 0 || !hasInPlaceTargets))
 
-  if (shouldAppend) {
-    const appendixAnswers =
-      replaced === 0 ? solution : { ...solution, answers: openAnswers }
+  if (shouldAppend && unplacedForAppendix.length > 0) {
+    const appendixAnswers = { ...solution, answers: unplacedForAppendix }
     const bookmarkId = 9000
     const appendix = [
       `<w:bookmarkStart w:id="${bookmarkId}" w:name="saru-loesung"/>`,
@@ -1044,7 +1149,9 @@ export function fillDocxDocument(
       ? 'docx_mixed'
       : replaced > 0
         ? 'docx_inplace'
-        : 'docx_appended'
+        : shouldAppend
+          ? 'docx_appended'
+          : 'docx_inplace'
   return {
     buffer: Buffer.from(zipSync(files, { level: 6 })),
     strategy,
@@ -1226,6 +1333,13 @@ const MIN_GAP_PT = 24
 const MAX_GAP_PAGE_FRACTION = 0.38
 /** eng: nur echte Baseline-Gleichheit; verhindert, dass schräg liegende Overlays Zeilen mergen. */
 const LINE_Y_TOLERANCE_FACTOR = 0.22
+/** PDF-Y wächst nach oben: Kopfzeile (Name:/Datum) aussperren. */
+const GAP_HEADER_BAND = 0.1
+/** Fußzeile / Seitennummern / Autor. */
+const GAP_FOOTER_BAND = 0.08
+/** Ähnliche X-Positionen → Spaltengutter (Zweispaltigkeit). */
+const GUTTER_X_TOLERANCE_PT = 28
+const GUTTER_MIN_CLUSTER = 3
 
 /** Füllmodus: echte Lücken vs. offene Aufgaben ohne Antwortplätze im Dokument. */
 export type SolutionFillMode = 'lueckentext' | 'offen'
@@ -1461,6 +1575,116 @@ function isBlankFillerRun(text: string): boolean {
   return /^[_.…·•]+$/.test(trimmed)
 }
 
+const HEADER_FIELD_LABEL =
+  /^(name|klasse|datum|kurs|schule|fach|thema|datum\/name|name\/datum)\s*:?\s*$/i
+
+/**
+ * Layout-Gaps (Kopfzeile, Tabellenköpfe, Zweispaltigkeit, Footer) – keine Cloze-Lücken.
+ * Nur für kind=gap gedacht; Underscores bleiben unberührt.
+ */
+export function isLikelyLayoutGap(
+  blank: Pick<PdfBlankRegion, 'x' | 'width' | 'leftText' | 'rightText' | 'kind'>,
+  pageWidth: number,
+): boolean {
+  if (blank.kind !== 'gap') return false
+  const left = (blank.leftText ?? '').replace(/\s+/g, ' ').trim()
+  const right = (blank.rightText ?? '').replace(/\s+/g, ' ').trim()
+  const combined = `${left} ${right}`
+
+  // Kopfzeilen-Felder: „Name: ___ Titel“
+  if (HEADER_FIELD_LABEL.test(left)) return true
+  if (/^(name|klasse|datum)\s*:/i.test(left) && left.length <= 12) return true
+
+  // Datum / Seitenzahl / Autor-Fußzeile
+  if (/\b\d{1,2}\.\d{1,2}\.\d{2,4}\b/.test(combined)) return true
+  if (/\bseite\s*\d+\s*\/\s*\d+\b/i.test(combined)) return true
+  if (/\b[a-z0-9]+\.[a-z0-9]+@[a-z.]+\b/i.test(combined)) return true
+  if (/\bja\.roesner\b/i.test(combined) || /\broesner\b/i.test(left) && /biologie|seite/i.test(right)) {
+    return true
+  }
+
+  // Glossar-/Tabellenköpfe: „Begriff“ ↔ „Bedeutung“
+  if (
+    /^(begriff|begriffe|term|stichwort)$/i.test(left) &&
+    /^(bedeutung|definition|erklärung|erkl[äa]rung|erlaeuterung)$/i.test(right)
+  ) {
+    return true
+  }
+
+  // Tabellenköpfe / kurze Labels ohne Satzzeichen
+  const leftShort = left.length > 0 && left.length < 28
+  const rightShort = right.length > 0 && right.length < 48
+  const noSentencePunct = !/[.!?…]/.test(left) && !/[.!?…]/.test(right)
+  if (
+    leftShort &&
+    rightShort &&
+    noSentencePunct &&
+    !/,/.test(left) &&
+    /^[\p{L}\p{N}\s/\-–—]+$/u.test(left) &&
+    /^[\p{L}\p{N}\s/\-–—,]+$/u.test(right)
+  ) {
+    // „Name“ ↔ „Symptome Behandlung Schutz“ o. Ä.
+    const leftWords = left.split(/\s+/).filter(Boolean)
+    const rightWords = right.split(/\s+/).filter(Boolean)
+    if (leftWords.length <= 3 && rightWords.length <= 6) return true
+  }
+
+  // Zweispaltigkeit: Gap im mittleren Gutter, links Fließtext / rechts oft kurzer Begriff
+  const gutterLeft = pageWidth * 0.32
+  const gutterRight = pageWidth * 0.68
+  const rightIsShortTerm =
+    right.length >= 4 &&
+    right.length <= 40 &&
+    right.split(/\s+/).filter(Boolean).length <= 4
+  if (
+    blank.x >= gutterLeft &&
+    blank.x <= gutterRight &&
+    blank.width <= pageWidth * 0.28 &&
+    left.length >= 18 &&
+    rightIsShortTerm
+  ) {
+    return true
+  }
+
+  return false
+}
+
+/**
+ * Entfernt Gap-Cluster mit ähnlicher X-Position (vertikaler Spaltengutter).
+ * Underscore-Lücken bleiben erhalten.
+ */
+export function filterColumnGutterGaps<T extends Pick<PdfBlankRegion, 'pageIndex' | 'x' | 'kind'>>(
+  blanks: T[],
+): T[] {
+  const gaps = blanks.filter((b) => b.kind === 'gap')
+  if (gaps.length < GUTTER_MIN_CLUSTER) return blanks
+
+  const drop = new Set<T>()
+  const byPage = new Map<number, T[]>()
+  for (const gap of gaps) {
+    const list = byPage.get(gap.pageIndex) ?? []
+    list.push(gap)
+    byPage.set(gap.pageIndex, list)
+  }
+
+  for (const pageGaps of byPage.values()) {
+    const used = new Set<T>()
+    for (const seed of pageGaps) {
+      if (used.has(seed)) continue
+      const cluster = pageGaps.filter(
+        (g) => Math.abs(g.x - seed.x) <= GUTTER_X_TOLERANCE_PT,
+      )
+      for (const g of cluster) used.add(g)
+      if (cluster.length >= GUTTER_MIN_CLUSTER) {
+        for (const g of cluster) drop.add(g)
+      }
+    }
+  }
+
+  if (drop.size === 0) return blanks
+  return blanks.filter((b) => !drop.has(b))
+}
+
 /**
  * Offene Aufgaben (Beschreiben/Erklären…) ohne Wortliste/Unterstriche.
  * Layout-Gaps im Fließtext sollen dann nicht den Lückentext-Modus auslösen.
@@ -1582,8 +1806,10 @@ function detectGapBlanksOnLine(
   if (content.length === 0) return
 
   const lineY = content[0]!.y
-  // Kopf-/Fußzeilen erzeugen oft große Abstände (Titel ↔ Copyright), keine Lücken.
-  if (lineY < pageHeight * 0.06 || lineY > pageHeight * 0.94) return
+  // Kopf-/Fußzeilen erzeugen oft große Abstände (Titel ↔ Copyright / Name:), keine Lücken.
+  if (lineY < pageHeight * GAP_FOOTER_BAND || lineY > pageHeight * (1 - GAP_HEADER_BAND)) {
+    return
+  }
 
   const maxGap = pageWidth * MAX_GAP_PAGE_FRACTION
   const lineHeight = Math.max(...content.map((r) => r.height), 10)
@@ -1593,6 +1819,18 @@ function detectGapBlanksOnLine(
   for (let i = 0; i < content.length; i++) {
     if (isBlankFillerRun(content[i]!.str)) continue
     semantic.push({ run: content[i]!, index: i })
+  }
+
+  const pushGapOrUnderscore = (
+    blank: Omit<PdfBlankRegion, 'blankIndex'>,
+  ) => {
+    if (
+      blank.kind === 'gap' &&
+      isLikelyLayoutGap(blank, pageWidth)
+    ) {
+      return
+    }
+    pushBlank(into, blank)
   }
 
   for (let s = 0; s < semantic.length - 1; s++) {
@@ -1635,7 +1873,7 @@ function detectGapBlanksOnLine(
       ? Math.max(MIN_GAP_PT, content[right.index - 1]!.xEnd - content[left.index + 1]!.x)
       : gap - 2
 
-    pushBlank(into, {
+    pushGapOrUnderscore({
       pageIndex,
       x: blankX,
       y: left.run.y,
@@ -1660,7 +1898,7 @@ function detectGapBlanksOnLine(
     looksLikeSentenceFragment(first.str) &&
     (startsWithPunct || (content.length >= 2 && startGap >= MIN_GAP_PT * 1.5))
   ) {
-    pushBlank(into, {
+    pushGapOrUnderscore({
       pageIndex,
       x: commonLeft,
       y: first.y,
@@ -1699,7 +1937,7 @@ function detectGapBlanksOnLine(
             ? punct[0].x
             : lastSem.run.xEnd + MIN_GAP_PT * 2
         const blankWidth = Math.max(MIN_GAP_PT, blankEnd - blankX)
-        pushBlank(into, {
+        pushGapOrUnderscore({
           pageIndex,
           x: blankX,
           y: lastSem.run.y,
@@ -1792,13 +2030,16 @@ export async function detectPdfBlankRegions(source: Buffer): Promise<PdfBlankReg
       page.cleanup()
     }
 
-    raw.sort((a, b) => {
+    // Zweispaltige Layout-Gutter als Gap-Cluster entfernen (Unterstriche bleiben).
+    const filtered = filterColumnGutterGaps(raw)
+
+    filtered.sort((a, b) => {
       if (a.pageIndex !== b.pageIndex) return a.pageIndex - b.pageIndex
       if (Math.abs(a.y - b.y) > 3) return b.y - a.y
       return a.x - b.x
     })
 
-    return raw.map((blank, blankIndex) => ({ ...blank, blankIndex }))
+    return filtered.map((blank, blankIndex) => ({ ...blank, blankIndex }))
   } finally {
     await task.destroy()
   }

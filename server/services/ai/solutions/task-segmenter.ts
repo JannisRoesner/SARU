@@ -1,6 +1,11 @@
 import type { PdfBlankRegion, TextBlankInfo } from '../document-fill'
 import type { CandidateBank } from './types'
 import type { AnswerTarget, DocumentModel, TaskBlock } from './types'
+import {
+  detectWorksheetTasks,
+  type WorksheetTaskUnit,
+} from './worksheet-tasks'
+import { candidateBankFromWords } from './candidate-bank'
 
 export interface SegmentTasksInput {
   document: DocumentModel
@@ -32,7 +37,7 @@ export function segmentTasks(input: SegmentTasksInput): TaskBlock[] {
   } = input
   const tasks: TaskBlock[] = []
 
-  const blankTargets: AnswerTarget[] = pdfBlanks.length
+  const rawBlankTargets: AnswerTarget[] = pdfBlanks.length
     ? pdfBlanks.map((b) => ({
         id: `blank-${b.blankIndex}`,
         kind: 'blank' as const,
@@ -55,6 +60,12 @@ export function segmentTasks(input: SegmentTasksInput): TaskBlock[] {
         leftText: b.leftText,
         rightText: b.rightText,
       }))
+
+  const worksheetUnits = detectWorksheetTasks(document.fullText)
+  const blankTargets = suppressLayoutBlanksWhenWorksheetOpen(
+    rawBlankTargets,
+    worksheetUnits,
+  )
 
   if (blankTargets.length > 0) {
     const page = blankTargets[0]!.page
@@ -131,10 +142,11 @@ export function segmentTasks(input: SegmentTasksInput): TaskBlock[] {
       bbox: lines[0]!.bbox ?? { x: 0, y: 0, w: 1, h: 0.3 },
       instruction: 'Antwortlinien ausfüllen',
       kind: 'free_text_inplace',
-      confidence: 0.65,
-      evidence: [`${lines.length} answer lines detected`],
+      confidence: 0.7,
+      evidence: [`${lines.length} answer line blocks detected`],
       targets: lines,
-      renderMode: 'native',
+      // Overlay: PDF zeichnet auf die Linien; DOCX-native bleibt über Classifier möglich.
+      renderMode: 'overlay',
       renderConfidence: 'medium',
     })
   }
@@ -199,13 +211,63 @@ export function segmentTasks(input: SegmentTasksInput): TaskBlock[] {
     }
   }
 
-  const openTasks = detectOpenEndedTasks(document.fullText)
-  for (const open of openTasks) {
-    if (blankTargets.length > 0 && /wortliste|lückentext/i.test(open.instruction)) {
+  const hasInplaceAnswerLines = tasks.some(
+    (t) =>
+      t.kind === 'free_text_inplace' &&
+      t.targets.some((target) => target.kind === 'answer_line'),
+  )
+  const hasDiagram = tasks.some((t) => t.kind === 'diagram_completion')
+
+  // Bildbeschriftung ohne erkannte Shapes → Appendix mit Wortliste.
+  for (const unit of worksheetUnits.filter((u) => u.kind === 'image_labeling')) {
+    if (hasDiagram) continue
+    const bank =
+      unit.terms && unit.terms.length >= 2
+        ? candidateBankFromWords(unit.terms, unit.terms.length, 'instruction')
+        : candidateBank
+    tasks.push({
+      id: `p${unit.page}-label`,
+      page: unit.page,
+      bbox: { x: 0.05, y: unit.yNorm, w: 0.9, h: 0.12 },
+      instruction: unit.instruction,
+      kind: 'matching_inline',
+      confidence: unit.confidence,
+      evidence: unit.evidence,
+      targets: [],
+      candidateBank: bank ?? undefined,
+      renderMode: 'appendix',
+      renderConfidence: 'medium',
+    })
+  }
+
+  // Glossar → eine Freitext-Aufgabe (Definitionen je Begriff).
+  for (const unit of worksheetUnits.filter((u) => u.kind === 'glossary')) {
+    tasks.push({
+      id: `p${unit.page}-glossary`,
+      page: unit.page,
+      bbox: { x: 0.05, y: unit.yNorm, w: 0.9, h: 0.2 },
+      instruction: unit.terms?.length
+        ? `${unit.instruction} Begriffe: ${unit.terms.join(', ')}`
+        : unit.instruction,
+      kind: 'free_text_separate',
+      confidence: unit.confidence,
+      evidence: unit.evidence,
+      targets: [],
+      renderMode: 'appendix',
+      renderConfidence: 'high',
+    })
+  }
+
+  const openUnits = worksheetUnits.filter((u) => u.kind === 'open_ended')
+  for (let i = 0; i < openUnits.length; i++) {
+    const open = openUnits[i]!
+    if (blankTargets.length > 0 && /wortliste|füllen sie die lücken/i.test(open.instruction)) {
       continue
     }
+    // Schreiblinien vor Ort → kein zusätzlicher Appendix nur wegen „erklären/beschreiben“.
+    if (hasInplaceAnswerLines) continue
     tasks.push({
-      id: open.id,
+      id: `p${open.page}-open-${i + 1}`,
       page: open.page,
       bbox: { x: 0.05, y: open.yNorm, w: 0.9, h: 0.08 },
       instruction: open.instruction,
@@ -221,55 +283,49 @@ export function segmentTasks(input: SegmentTasksInput): TaskBlock[] {
   return tasks
 }
 
-function extractClozeInstruction(text: string): string {
-  const m = text.match(
-    /(?:wortliste|füllen sie die lücken|lückentext)[^\n]{0,120}/i,
+/**
+ * Einzelne Header-Gaps (z. B. Begriff|Bedeutung) nicht als Cloze werten,
+ * wenn das Blatt klar offene/Glossar-/Beschriftungsaufgaben hat.
+ */
+function suppressLayoutBlanksWhenWorksheetOpen(
+  blanks: AnswerTarget[],
+  worksheetUnits: WorksheetTaskUnit[],
+): AnswerTarget[] {
+  if (blanks.length === 0) return blanks
+  const openLike = worksheetUnits.filter(
+    (u) =>
+      u.kind === 'open_ended' ||
+      u.kind === 'glossary' ||
+      u.kind === 'image_labeling',
   )
-  return m?.[0]?.trim() || 'Lückentext'
+  if (openLike.length < 2) return blanks
+  if (blanks.length > 2) return blanks
+
+  return blanks.filter((b) => {
+    const left = (b.leftText ?? '').trim()
+    const right = (b.rightText ?? '').trim()
+    if (/^begriff/i.test(left) && /^bedeutung/i.test(right)) return false
+    if (left.length > 0 && left.length < 24 && right.length > 0 && right.length < 24) {
+      if (!/[.!?…]/.test(left) && !/[.!?…]/.test(right)) return false
+    }
+    return true
+  })
+}
+
+function extractClozeInstruction(text: string): string {
+  const numberMatch = text.match(
+    /ordn\w*.{0,120}nummern?|nummern?\s+der\s+begriffe|(?:nummern?|zahlen|ziffern)\s+(?:eintragen|zuordnen)|trage\s+(?:die\s+)?(?:nummern?|zahlen|ziffern)[^\n]{0,80}/i,
+  )
+  if (numberMatch?.[0]) return numberMatch[0].trim().slice(0, 200)
+
+  const m = text.match(
+    /(?:wortliste|füllen sie die lücken)[^\n]{0,120}/i,
+  )
+  return m?.[0]?.trim() || 'Cloze-Aufgabe'
 }
 
 function extractDiagramInstruction(text: string): string {
   const lines = text.split(/\n/).map((l) => l.trim()).filter(Boolean)
   const hit = lines.find((l) => DIAGRAM_INSTRUCTION.test(l))
   return hit?.slice(0, 160) || 'Diagramm vervollständigen'
-}
-
-function detectOpenEndedTasks(text: string): Array<{
-  id: string
-  page: number
-  yNorm: number
-  instruction: string
-  confidence: number
-  evidence: string[]
-}> {
-  const lines = text.split(/\n/).map((l) => l.trim()).filter(Boolean)
-  const out: Array<{
-    id: string
-    page: number
-    yNorm: number
-    instruction: string
-    confidence: number
-    evidence: string[]
-  }> = []
-  let openIndex = 0
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!
-    if (
-      !/\b(beschreiben|erklären|erläutern|erörtern|vergleichen|diskutieren|begründen)\b/i.test(
-        line,
-      )
-    ) {
-      continue
-    }
-    openIndex += 1
-    out.push({
-      id: `p1-open-${openIndex}`,
-      page: 1,
-      yNorm: Math.min(0.9, i / Math.max(1, lines.length)),
-      instruction: line.slice(0, 200),
-      confidence: 0.85,
-      evidence: ['open-ended operator verb', `line ${i + 1}`],
-    })
-  }
-  return out
 }

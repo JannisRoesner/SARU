@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
-import { applyDiagramMarksToDocx } from '../../../server/services/ai/solutions/renderers/docx-diagram-renderer'
+import {
+  applyDiagramMarksToDocx,
+  fillVmlShapesWithLabels,
+} from '../../../server/services/ai/solutions/renderers/docx-diagram-renderer'
 import { parseDocxTargetsVisionResponse } from '../../../server/services/ai/solutions/repair/docx-targets-vision'
-import { parseStructuredSolution } from '../../../server/services/ai/document-fill'
+import {
+  highlightDocxPrefilledClozeAnswers,
+  parseStructuredSolution,
+} from '../../../server/services/ai/document-fill'
 import { segmentTasks } from '../../../server/services/ai/solutions/task-segmenter'
 import { analyzeDocument } from '../../../server/services/ai/solutions/document-analyzer'
 import { classifyTasks } from '../../../server/services/ai/solutions/task-classifier'
+import { renderDocxSolution } from '../../../server/services/ai/solutions/renderers/docx-renderer'
 
 function docxWith(bodyInner: string): Buffer {
   const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -96,5 +103,101 @@ describe('parseDocxTargetsVisionResponse', () => {
     expect(targets[0]!.kind).toBe('shape_oval')
     expect(targets[0]!.source).toBe('vision')
     expect(targets[1]!.kind).toBe('answer_line')
+  })
+})
+
+describe('fillVmlShapesWithLabels', () => {
+  it('schreibt Labels in self-closing VML-Ovale', () => {
+    const xml = `<w:body><w:p><w:r><w:pict><v:oval id="_x0000_s2120" style="width:62pt;height:62pt"/></w:pict></w:r></w:p></w:body>`
+    const result = fillVmlShapesWithLabels(xml, [
+      { shapeId: '_x0000_s2120', text: '||' },
+    ])
+    expect(result.filled).toBe(1)
+    expect(result.xml).toContain('||')
+    expect(result.xml).toContain('<v:textbox')
+    expect(result.xml).toContain('</v:oval>')
+  })
+})
+
+describe('highlightDocxPrefilledClozeAnswers', () => {
+  it('färbt Antwortwörter zwischen Space-Polstern blau', () => {
+    const source = docxWith(`
+      <w:p>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t>Im</w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t xml:space="preserve">    </w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t>Hoden</w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t xml:space="preserve">       </w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t>des Mannes</w:t></w:r>
+      </w:p>
+    `)
+    const result = highlightDocxPrefilledClozeAnswers(source)
+    expect(result.highlighted).toBe(1)
+    const xml = strFromU8(unzipSync(new Uint8Array(result.buffer))['word/document.xml']!)
+    expect(xml).toContain('Hoden')
+    expect(xml).toContain('w:val="1F4E9B"')
+  })
+})
+
+describe('renderDocxSolution teacher worksheet', () => {
+  it('markiert vorbefüllte Lücken und hängt keinen JSON-/Shape-Anhang an', () => {
+    const source = docxWith(`
+      <w:p>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t>Im</w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t xml:space="preserve">    </w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t>Hoden</w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t xml:space="preserve">       </w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t>des Mannes mit</w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t xml:space="preserve">      </w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t>haploidem</w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t xml:space="preserve">    </w:t></w:r>
+        <w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t>Chromosomensatz.</w:t></w:r>
+      </w:p>
+      <w:p><w:r><w:pict><v:oval id="_x0000_s2120" style="width:62pt;height:62pt"/></w:pict></w:r></w:p>
+    `)
+
+    const result = renderDocxSolution(
+      source,
+      {
+        summary: 'Meiose',
+        answers: [
+          { id: '1', label: 'Lücke 1', answer: 'Hoden', blankIndex: 0 },
+          { id: '2', label: 'shape-2', answer: 'shape-2' },
+        ],
+        formFields: [],
+        diagramMarks: [
+          { kind: 'chromosome', form: 'two_chromatid', count: 1, targetId: 'shape-0' },
+        ],
+      },
+      {
+        title: 'Musterlösung',
+        sourceFileName: 'test.docx',
+        tasks: [
+          {
+            id: 'p1-diagram',
+            page: 1,
+            kind: 'diagram_completion',
+            instruction: 'Zeichne Chromosomen',
+            targets: [
+              {
+                id: 'shape-0',
+                kind: 'shape_oval',
+                page: 1,
+                nativeRef: '_x0000_s2120',
+                source: 'native',
+              },
+            ],
+            renderMode: 'native',
+            renderConfidence: 'medium',
+          },
+        ],
+      },
+    )
+
+    expect(result.strategy).toBe('docx_inplace')
+    const xml = strFromU8(unzipSync(new Uint8Array(result.buffer))['word/document.xml']!)
+    expect(xml).toContain('w:val="1F4E9B"')
+    expect(xml).toContain('||')
+    expect(xml).not.toContain('Musterlösung (KI)')
+    expect(xml).not.toContain('shape-2')
   })
 })
