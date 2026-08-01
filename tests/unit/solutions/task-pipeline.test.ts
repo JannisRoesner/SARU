@@ -49,4 +49,20 @@ Die ___ des Penis …
     expect(tasks.some((t) => t.kind === 'free_text_separate')).toBe(true)
     expect(legacyFillModeFromTasks(tasks)).toBe('offen')
   })
+
+  it('markiert fehlende Wortliste bei Cloze als expected_but_missing', () => {
+    const text = `
+Fülle die Lücken mit Wörtern aus der Wortliste.
+Die ___ des Penis …
+`
+    const blanks = Array.from({ length: 9 }, (_, i) => blank(i, `left${i}`, `right${i}`))
+    const doc = analyzeDocument({ fullText: text, pdfBlanks: blanks })
+    const tasks = classifyTasks(segmentTasks({ document: doc, pdfBlanks: blanks }))
+    const cloze = tasks.find((t) => t.kind === 'cloze')!
+    expect(cloze.candidateBank).toBeUndefined()
+    expect(cloze.candidateBankStatus).toBe('expected_but_missing')
+    expect(cloze.requiresCandidateBankRepair).toBe(true)
+    expect(cloze.confidence).toBeLessThan(0.9)
+    expect(cloze.evidence).toContain('candidate bank expected but missing')
+  })
 })

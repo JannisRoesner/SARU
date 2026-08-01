@@ -1,4 +1,5 @@
-import type { TaskBlock, TaskKind, TaskRenderMode } from './types'
+import type { TaskBlock, TaskKind, TaskRenderMode, CandidateBankStatus } from './types'
+import { instructionExpectsCandidateBank } from './candidate-bank'
 
 /**
  * Verfeinert Kind und RenderMode anhand Evidence und Targets.
@@ -14,6 +15,13 @@ export function classifyTask(task: TaskBlock): TaskBlock {
   const blankTargets = task.targets.filter((t) => t.kind === 'blank')
   const bank = task.candidateBank
   const instruction = task.instruction.toLowerCase()
+  const wordListExpected = instructionExpectsCandidateBank(task.instruction)
+  let candidateBankStatus: CandidateBankStatus = bank
+    ? 'found'
+    : wordListExpected
+      ? 'expected_but_missing'
+      : 'not_applicable'
+  let requiresCandidateBankRepair = candidateBankStatus === 'expected_but_missing'
 
   if (blankTargets.length > 0) {
     kind = 'cloze'
@@ -28,6 +36,10 @@ export function classifyTask(task: TaskBlock): TaskBlock {
     } else if (/wortliste|lückentext|füllen sie die lücken/.test(instruction)) {
       confidence = Math.max(confidence, 0.9)
       evidence.push('instruction mentions word list')
+      if (!bank) {
+        confidence = Math.max(0.5, confidence - 0.25)
+        evidence.push('candidate bank expected but missing')
+      }
     } else {
       confidence = Math.max(confidence, 0.75)
     }
@@ -60,6 +72,8 @@ export function classifyTask(task: TaskBlock): TaskBlock {
     confidence,
     evidence: [...new Set(evidence)],
     renderMode,
+    candidateBankStatus,
+    requiresCandidateBankRepair,
   }
 }
 

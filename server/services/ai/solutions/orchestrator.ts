@@ -8,6 +8,8 @@ import type { CandidateBank, DocumentModel, NativeField, TaskBlock } from './typ
 
 export interface SolutionPlanInput {
   documentText: string
+  /** PDF-Textebene, falls documentText leer (z. B. fehlende DB-Extraktion). */
+  pdfText?: string | null
   pdfBlanks?: PdfBlankRegion[]
   docxBlanks?: TextBlankInfo[]
   nativeFields?: NativeField[]
@@ -30,12 +32,26 @@ export function buildSolutionPlan(input: SolutionPlanInput): SolutionPlan {
   const pdfBlanks = input.pdfBlanks ?? []
   const docxBlanks = input.docxBlanks ?? []
   const blankCount = pdfBlanks.length || docxBlanks.length
-  const candidateBank = extractCandidateBank(input.documentText, blankCount)
+  const analysisText =
+    input.documentText.trim() ||
+    input.pdfText?.trim() ||
+    ''
+  const blankContexts = [
+    ...pdfBlanks.map((b) => `${b.leftText} ${b.rightText}`.trim()),
+    ...docxBlanks.map((b) => `${b.leftText} ${b.rightText}`.trim()),
+  ]
   const document = analyzeDocument({
-    fullText: input.documentText,
+    fullText: analysisText,
     pdfBlanks,
     docxBlanks,
     nativeFields: input.nativeFields,
+  })
+  const candidateBank = extractCandidateBank({
+    documentText: input.documentText,
+    pdfText: input.pdfText,
+    documentModel: document,
+    blankCount,
+    blankContexts,
   })
   const tasks = classifyTasks(
     segmentTasks({

@@ -58,10 +58,12 @@ import {
   solutionSystemPromptForMode,
 } from './prompts'
 import { rasterizePdf } from './rasterize'
+import { ensureExtractedText } from './document-text'
 import { analyzeDocxTargets } from './solutions/docx-analyzer'
 import { logPipeline } from './solutions/logging'
 import { buildSolutionPlan } from './solutions/orchestrator'
 import { buildClozeRepairPrompt } from './solutions/repair/cloze-repair'
+import { repairCandidateBankViaVision } from './solutions/repair/candidate-bank-vision'
 import { renderPdfSolution } from './solutions/renderers/pdf-renderer'
 import { renderDocxSolution } from './solutions/renderers/docx-renderer'
 import { assignCandidatesGlobally } from './solutions/solvers/cloze-solver'
@@ -207,6 +209,23 @@ export async function generateSolution(
 
   const textForAnalysis = documentText || material.content || ''
 
+  let pdfExtractText = ''
+  if (source && PDF_EXTENSIONS.has(source.extension) && !documentText.trim()) {
+    try {
+      const ensured = await ensureExtractedText(source.buffer, source.fileName, settings)
+      pdfExtractText = ensured.text.trim()
+      if (pdfExtractText) {
+        log.info('PDF-Text für Analyse nachgeladen', {
+          zeichen: pdfExtractText.length,
+          method: ensured.method,
+          fileName: source.fileName,
+        })
+      }
+    } catch (error) {
+      log.warn('PDF-Textextraktion für Analyse fehlgeschlagen', error)
+    }
+  }
+
   let docxNative: ReturnType<typeof analyzeDocxTargets> = {
     nativeFields: [],
     targets: [],
@@ -221,12 +240,60 @@ export async function generateSolution(
   }
 
   const plan = buildSolutionPlan({
-    documentText: textForAnalysis || docxNative.fullText,
+    documentText: textForAnalysis || pdfExtractText || docxNative.fullText,
+    pdfText: pdfExtractText || null,
     pdfBlanks: detectedBlanks,
     docxBlanks,
     nativeFields: docxNative.nativeFields,
   })
-  const { tasks, candidateBank, fillMode, blankCount, document: documentModel } = plan
+  let { tasks, candidateBank, fillMode, blankCount, document: documentModel } = plan
+
+  let candidateBankRepairedViaVision = false
+  if (
+    !candidateBank &&
+    source &&
+    PDF_EXTENSIONS.has(source.extension) &&
+    blankCount > 0
+  ) {
+    const repairTask = tasks.find((t) => t.requiresCandidateBankRepair)
+    if (repairTask) {
+      try {
+        const visionBank = await repairCandidateBankViaVision({
+          buffer: source.buffer,
+          fileName: source.fileName,
+          settings,
+          blankCount,
+          instruction: repairTask.instruction,
+          page: repairTask.page,
+        })
+        if (visionBank) {
+          candidateBank = visionBank
+          candidateBankRepairedViaVision = true
+          tasks = tasks.map((t) =>
+            t.kind === 'cloze'
+              ? {
+                  ...t,
+                  candidateBank: visionBank,
+                  candidateBankStatus: 'found' as const,
+                  requiresCandidateBankRepair: false,
+                  confidence: Math.max(t.confidence, 0.92),
+                  evidence: [
+                    ...t.evidence.filter((e) => e !== 'no word list detected'),
+                    `${visionBank.candidates.length} candidate terms detected via vision`,
+                  ],
+                }
+              : t,
+          )
+          log.info('Wortliste per Vision-Repair extrahiert', {
+            count: visionBank.candidates.length,
+            words: visionBank.candidates.map((c) => c.value),
+          })
+        }
+      } catch (error) {
+        log.warn('Vision-Wortlisten-Repair fehlgeschlagen', error)
+      }
+    }
+  }
 
   log.info('Musterlösungs-Füllmodus', {
     fillMode,
@@ -322,7 +389,28 @@ export async function generateSolution(
       reusePolicy: candidateBank.reusePolicy,
       source: candidateBank.source,
       words: candidateBank.candidates.map((c) => c.value),
+      repairedViaVision: candidateBankRepairedViaVision,
     })
+    if (candidateBankRepairedViaVision) {
+      logPipeline('candidate_bank.repaired', {
+        jobId,
+        runId,
+        count: candidateBank.candidates.length,
+        source: 'vision',
+        words: candidateBank.candidates.map((c) => c.value),
+      })
+    }
+  } else {
+    const repairTask = tasks.find((t) => t.requiresCandidateBankRepair)
+    if (repairTask) {
+      logPipeline('candidate_bank.expected_but_missing', {
+        jobId,
+        runId,
+        taskId: repairTask.id,
+        instruction: repairTask.instruction.slice(0, 120),
+        candidateBankStatus: repairTask.candidateBankStatus,
+      })
+    }
   }
   for (const task of tasks) {
     logPipeline('task.detected', {
@@ -342,6 +430,8 @@ export async function generateSolution(
       confidence: task.confidence,
       reasons: task.evidence,
       renderMode: task.renderMode,
+      candidateBankStatus: task.candidateBankStatus ?? null,
+      requiresCandidateBankRepair: task.requiresCandidateBankRepair ?? false,
     })
   }
 

@@ -52,6 +52,8 @@ export interface AnswerTarget {
   cellRef?: string | null
 }
 
+export type CandidateBankStatus = 'found' | 'expected_but_missing' | 'not_applicable'
+
 export interface TaskBlock {
   id: string
   page: number
@@ -62,6 +64,8 @@ export interface TaskBlock {
   evidence: string[]
   targets: AnswerTarget[]
   candidateBank?: CandidateBank
+  candidateBankStatus?: CandidateBankStatus
+  requiresCandidateBankRepair?: boolean
   renderMode: TaskRenderMode
 }
 

@@ -72,6 +72,19 @@ Die ___ des Penis ist in der Regel …
       expect.arrayContaining(['Spitze', 'Eichel', 'Hautschichten']),
     )
   })
+
+  it('extrahiert Schrägstrich-Wortliste ohne Überschrift (PDF-Textebene)', () => {
+    const text = `
+05_Arbeitsblatt: Die Vorhaut
+Eichel / Erektion / Hautschichten / lang / Nervenenden / Schleimhaut / Spitze / unterschiedlich / Unterseite
+Fülle die Lücken mit Wörtern aus der Wortliste.
+Die ___ des Penis …
+`
+    const bank = extractCandidateBank({ documentText: '', pdfText: text, blankCount: 9 })
+    expect(bank).not.toBeNull()
+    expect(bank!.candidates).toHaveLength(9)
+    expect(bank!.reusePolicy).toBe('once')
+  })
 })
 
 describe('validateClozeAnswers – Vorhaut-Regression', () => {
