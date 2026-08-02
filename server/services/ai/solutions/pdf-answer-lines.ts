@@ -35,6 +35,18 @@ interface PageSize {
   height: number
 }
 
+interface PdfTableGrid {
+  pageIndex: number
+  columns: Array<{ x: number; width: number }>
+  yLevels: number[]
+  lines: Set<PdfAnswerLineRaw>
+}
+
+interface PdfTextItem {
+  str: string
+  transform: ArrayLike<number>
+}
+
 type PdfMatrix = [number, number, number, number, number, number]
 
 const IDENTITY_MATRIX: PdfMatrix = [1, 0, 0, 1, 0, 0]
@@ -366,6 +378,280 @@ export function pdfAnswerLinesToShapeBlocks(lines: PdfAnswerLineTarget[]): Shape
     nativeRef: line.id,
     anchorText: line.leftText ?? null,
   }))
+}
+
+function groupLinesByY(lines: PdfAnswerLineRaw[]): PdfAnswerLineRaw[][] {
+  const groups: PdfAnswerLineRaw[][] = []
+  for (const line of [...lines].sort((a, b) => b.y - a.y || a.x - b.x)) {
+    const group = groups.find(
+      (candidate) =>
+        candidate[0]!.pageIndex === line.pageIndex &&
+        Math.abs(candidate[0]!.y - line.y) <= 2.5,
+    )
+    if (group) group.push(line)
+    else groups.push([line])
+  }
+  return groups
+}
+
+function sameColumnSignature(a: PdfAnswerLineRaw[], b: PdfAnswerLineRaw[]): boolean {
+  if (a.length < 3 || a.length !== b.length) return false
+  const left = [...a].sort((x, y) => x.x - y.x)
+  const right = [...b].sort((x, y) => x.x - y.x)
+  return left.every(
+    (line, index) =>
+      Math.abs(line.x - right[index]!.x) <= 3 &&
+      Math.abs(line.width - right[index]!.width) <= 4,
+  )
+}
+
+/**
+ * Erkennt Tabellen, deren Zellränder als getrennte horizontale Liniensegmente
+ * gezeichnet sind. Das ist absichtlich strenger als die Antwortlinien-Erkennung:
+ * mindestens drei gleich ausgerichtete Spalten und drei horizontale Rasterebenen
+ * verhindern, dass normale Schreiblinien als Tabelle klassifiziert werden.
+ */
+function detectTableGrids(lines: PdfAnswerLineRaw[]): PdfTableGrid[] {
+  const grids: PdfTableGrid[] = []
+  const groups = groupLinesByY(lines)
+
+  for (const seed of groups) {
+    const matching = groups.filter(
+      (candidate) =>
+        candidate[0]!.pageIndex === seed[0]!.pageIndex &&
+        sameColumnSignature(seed, candidate),
+    )
+    if (matching.length < 3) continue
+
+    const yLevels = matching
+      .map((group) => group.reduce((sum, line) => sum + line.y, 0) / group.length)
+      .sort((a, b) => b - a)
+    const existing = grids.some(
+      (grid) =>
+        grid.pageIndex === seed[0]!.pageIndex &&
+        Math.abs(grid.yLevels[0]! - yLevels[0]!) <= 3 &&
+        Math.abs(grid.yLevels.at(-1)! - yLevels.at(-1)!) <= 3,
+    )
+    if (existing) continue
+
+    const columns = [...seed]
+      .sort((a, b) => a.x - b.x)
+      .map((line) => ({ x: line.x, width: line.width }))
+    grids.push({
+      pageIndex: seed[0]!.pageIndex,
+      columns,
+      yLevels,
+      lines: new Set(matching.flat()),
+    })
+  }
+  return grids
+}
+
+async function extractPdfTextPositions(source: Buffer): Promise<PdfTextItem[][]> {
+  const pdfjs = await loadPdfjs()
+  const loadingTask = pdfjs.getDocument({
+    data: new Uint8Array(source),
+    useSystemFonts: false,
+    disableFontFace: true,
+    verbosity: 0,
+  })
+  try {
+    const document = await loadingTask.promise
+    const pages: PdfTextItem[][] = []
+    for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber++) {
+      const page = await document.getPage(pageNumber)
+      const content = await page.getTextContent()
+      pages.push(
+        content.items
+          .flatMap((item) => {
+            if (
+              !('str' in item) ||
+              typeof item.str !== 'string' ||
+              !('transform' in item) ||
+              !item.transform
+            ) {
+              return []
+            }
+            return item.str.trim().length > 0
+              ? [{ str: item.str, transform: item.transform }]
+              : []
+          }),
+      )
+      page.cleanup()
+    }
+    return pages
+  } finally {
+    await loadingTask.destroy()
+  }
+}
+
+function cellHasText(
+  items: PdfTextItem[],
+  column: { x: number; width: number },
+  upperY: number,
+  lowerY: number,
+): boolean {
+  return items.some((item) => {
+    const x = item.transform[4] ?? Number.NaN
+    const y = item.transform[5] ?? Number.NaN
+    return (
+      Number.isFinite(x) &&
+      Number.isFinite(y) &&
+      x >= column.x + 2 &&
+      x <= column.x + column.width - 2 &&
+      y >= lowerY + 2 &&
+      y <= upperY - 2
+    )
+  })
+}
+
+function textInCell(
+  items: PdfTextItem[],
+  column: { x: number; width: number },
+  upperY: number,
+  lowerY: number,
+): string {
+  return items
+    .filter((item) => {
+      const x = item.transform[4] ?? Number.NaN
+      const y = item.transform[5] ?? Number.NaN
+      return (
+        Number.isFinite(x) &&
+        Number.isFinite(y) &&
+        x >= column.x + 2 &&
+        x <= column.x + column.width - 2 &&
+        y >= lowerY + 2 &&
+        y <= upperY - 2
+      )
+    })
+    .map((item) => item.str)
+    .join(' ')
+}
+
+function choiceValueFromHeader(text: string): string | null {
+  const normalized = text.toLocaleLowerCase('de-DE').replace(/\s+/g, ' ').trim()
+  if (/\brichtig\b/.test(normalized)) return 'richtig'
+  if (/\bfalsch\b/.test(normalized)) return 'falsch'
+  if (/\bja\b/.test(normalized)) return 'ja'
+  if (/\bnein\b/.test(normalized)) return 'nein'
+  return null
+}
+
+export async function detectPdfTableCells(source: Buffer): Promise<{
+  targets: AnswerTarget[]
+  consumedLines: Set<PdfAnswerLineRaw>
+}> {
+  const { lines, pageSizes } = await extractPdfHorizontalStrokes(source)
+  return detectPdfTableCellsFromStrokes(source, lines, pageSizes)
+}
+
+async function detectPdfTableCellsFromStrokes(
+  source: Buffer,
+  lines: PdfAnswerLineRaw[],
+  pageSizes: PageSize[],
+): Promise<{ targets: AnswerTarget[]; consumedLines: Set<PdfAnswerLineRaw> }> {
+  const grids = detectTableGrids(lines)
+  if (grids.length === 0) return { targets: [], consumedLines: new Set() }
+
+  const textPages = await extractPdfTextPositions(source)
+  const targets: AnswerTarget[] = []
+  const consumedLines = new Set<PdfAnswerLineRaw>()
+  let index = 0
+
+  for (const grid of grids) {
+    const page = pageSizes[grid.pageIndex]
+    if (!page) continue
+    for (const line of grid.lines) consumedLines.add(line)
+    const items = textPages[grid.pageIndex] ?? []
+    const headerTop = grid.yLevels[0]!
+    const headerBottom = grid.yLevels[1]!
+    const choiceColumns = new Map<number, string>()
+    for (let col = 0; col < grid.columns.length; col++) {
+      const value = choiceValueFromHeader(
+        textInCell(items, grid.columns[col]!, headerTop, headerBottom),
+      )
+      if (value) choiceColumns.set(col, value)
+    }
+    const pageText = items.map((item) => item.str).join(' ')
+    const hasChoiceColumns = choiceColumns.size >= 2
+    const isChoiceTable =
+      hasChoiceColumns && /\b(?:kreuz\w*|ankreuz\w*|markier\w*)\b/i.test(pageText)
+    const choiceCellsAreEmpty =
+      !hasChoiceColumns ||
+      Array.from({ length: grid.yLevels.length - 2 }, (_, rowOffset) =>
+        [...choiceColumns.keys()].every((col) => {
+          const row = rowOffset + 1
+          return !cellHasText(
+            items,
+            grid.columns[col]!,
+            grid.yLevels[row]!,
+            grid.yLevels[row + 1]!,
+          )
+        }),
+      ).every(Boolean)
+    // Erste Zeile enthält typischerweise die Spaltenüberschriften. Datenzeilen
+    // werden nur dann zu Zielen, wenn in der konkreten Zelle kein Text steht.
+    for (let row = 1; row < grid.yLevels.length - 1; row++) {
+      const upperY = grid.yLevels[row]!
+      const lowerY = grid.yLevels[row + 1]!
+      if (upperY - lowerY < 18) continue
+      for (let col = 0; col < grid.columns.length; col++) {
+        const column = grid.columns[col]!
+        const choiceValue = choiceColumns.get(col)
+        // Bereits angekreuzte Kontroll-/Lösungsblätter sind keine neue Aufgabe.
+        // Kontrollblätter enthalten bereits je Zeile ein X. Diese Seite ist
+        // keine neue, teilweise leere Tabellenaufgabe.
+        if (hasChoiceColumns && choiceValue && !choiceCellsAreEmpty) continue
+        if (cellHasText(items, column, upperY, lowerY)) continue
+        const insetX = Math.min(4, column.width * 0.08)
+        const insetY = Math.min(4, (upperY - lowerY) * 0.12)
+        const isChoiceCell = Boolean(isChoiceTable && choiceValue)
+        const markWidth = Math.min(18, Math.max(12, column.width * 0.28))
+        targets.push({
+          id: `pdf-table-${index}`,
+          kind: isChoiceCell ? 'choice_cell' : 'table_cell',
+          page: grid.pageIndex + 1,
+          blankIndex: index,
+          cellRef: `${grid.pageIndex}:${row}:${col}`,
+          choiceValue: choiceValue ?? null,
+          bbox: {
+            x: isChoiceCell
+              ? (column.x + (column.width - markWidth) / 2) / page.width
+              : (column.x + insetX) / page.width,
+            y: 1 - (upperY - insetY) / page.height,
+            w: isChoiceCell
+              ? markWidth / page.width
+              : Math.max(0.03, (column.width - insetX * 2) / page.width),
+            h: Math.max(0.025, (upperY - lowerY - insetY * 2) / page.height),
+          },
+          source: 'native',
+        })
+        index += 1
+      }
+    }
+  }
+  return { targets, consumedLines }
+}
+
+/** Erkennt PDF-Tabellenzellen und normale Antwortlinien in einem Durchlauf. */
+export async function detectPdfLayoutTargets(source: Buffer): Promise<{
+  tableTargets: AnswerTarget[]
+  lineTargets: AnswerTarget[]
+  shapes: ShapeBlock[]
+  rawLineCount: number
+  clusterCount: number
+}> {
+  const { lines, pageSizes } = await extractPdfHorizontalStrokes(source)
+  const table = await detectPdfTableCellsFromStrokes(source, lines, pageSizes)
+  const remainingLines = lines.filter((line) => !table.consumedLines.has(line))
+  const clusters = clusterPdfAnswerLines(remainingLines, pageSizes)
+  return {
+    tableTargets: table.targets,
+    lineTargets: pdfAnswerLinesToAnswerTargets(clusters),
+    shapes: pdfAnswerLinesToShapeBlocks(clusters),
+    rawLineCount: remainingLines.length,
+    clusterCount: clusters.length,
+  }
 }
 
 /**

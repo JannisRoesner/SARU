@@ -13,10 +13,15 @@ import {
 import {
   clusterPdfAnswerLines,
   detectPdfAnswerLines,
+  detectPdfLayoutTargets,
   extractPdfHorizontalStrokes,
 } from '../../../server/services/ai/solutions/pdf-answer-lines'
 import { buildSolutionPlan } from '../../../server/services/ai/solutions/orchestrator'
-import { applyFreeTextTaskMeta } from '../../../server/services/ai/solutions/solvers/free-text-solver'
+import {
+  applyFreeTextTaskMeta,
+  applyChoiceCellTaskMeta,
+  applyTableCellTaskMeta,
+} from '../../../server/services/ai/solutions/solvers/free-text-solver'
 import { renderPdfSolution } from '../../../server/services/ai/solutions/renderers/pdf-renderer'
 import { detectPdfBlankRegions } from '../../../server/services/ai/document-fill'
 import { loadPdfjs } from '../../../server/utils/pdfjs'
@@ -109,6 +114,70 @@ async function rasierenWritingLinesPdf(): Promise<Buffer> {
   return Buffer.from(await pdf.save())
 }
 
+async function emptyTablePdf(): Promise<Buffer> {
+  const pdf = await PDFDocument.create()
+  const page = pdf.addPage([595.28, 841.89])
+  const font = await pdf.embedFont(StandardFonts.Helvetica)
+  page.drawText('Fülle die leeren Felder der Tabelle aus.', { x: 50, y: 770, size: 12, font })
+
+  const columns = [
+    { x: 50, width: 110, heading: 'Name' },
+    { x: 160, width: 140, heading: 'Symptome' },
+    { x: 300, width: 140, heading: 'Behandlung' },
+    { x: 440, width: 105, heading: 'Schutz' },
+  ]
+  const yLevels = [700, 675, 600, 525]
+  for (const y of yLevels) {
+    for (const column of columns) {
+      page.drawLine({
+        start: { x: column.x, y },
+        end: { x: column.x + column.width, y },
+        thickness: 0.8,
+      })
+    }
+  }
+  for (const column of columns) {
+    page.drawText(column.heading, { x: column.x + 5, y: 684, size: 9, font })
+  }
+  page.drawText('Chlamydien', { x: 55, y: 636, size: 9, font })
+  page.drawText('Gonorrhoe', { x: 55, y: 561, size: 9, font })
+  return Buffer.from(await pdf.save())
+}
+
+async function choiceTablePdf(): Promise<Buffer> {
+  const pdf = await PDFDocument.create()
+  const page = pdf.addPage([595.28, 841.89])
+  const font = await pdf.embedFont(StandardFonts.Helvetica)
+  page.drawText('Kreuze an, welche Aussagen richtig und welche falsch sind.', {
+    x: 50,
+    y: 770,
+    size: 12,
+    font,
+  })
+  const columns = [
+    { x: 50, width: 330, heading: 'Aussagen' },
+    { x: 380, width: 80, heading: 'richtig' },
+    { x: 460, width: 80, heading: 'falsch' },
+  ]
+  const yLevels = [700, 675, 630, 585, 540]
+  for (const y of yLevels) {
+    for (const column of columns) {
+      page.drawLine({
+        start: { x: column.x, y },
+        end: { x: column.x + column.width, y },
+        thickness: 0.8,
+      })
+    }
+  }
+  for (const column of columns) {
+    page.drawText(column.heading, { x: column.x + 5, y: 684, size: 9, font })
+  }
+  for (const [index, label] of ['Aussage eins', 'Aussage zwei', 'Aussage drei'].entries()) {
+    page.drawText(label, { x: 55, y: 645 - index * 45, size: 9, font })
+  }
+  return Buffer.from(await pdf.save())
+}
+
 describe('detectPdfAnswerLines', () => {
   it('erkennt die transformierten breiten Schreiblinien aus AB-Rasieren', async () => {
     const source = await rasierenWritingLinesPdf()
@@ -170,6 +239,101 @@ describe('detectPdfAnswerLines', () => {
     expect(plan.tasks.find((t) => t.kind === 'free_text_inplace')!.renderMode).toBe(
       'overlay',
     )
+  })
+
+  it('erkennt leere Tabellenzellen und behandelt ihre Kanten nicht als Antwortlinien', async () => {
+    const source = await emptyTablePdf()
+    const detected = await detectPdfLayoutTargets(source)
+
+    expect(detected.tableTargets).toHaveLength(6)
+    expect(detected.tableTargets.every((target) => target.kind === 'table_cell')).toBe(true)
+    expect(detected.lineTargets).toHaveLength(0)
+
+    const plan = buildSolutionPlan({
+      documentText:
+        'Fülle die leeren Felder der Tabelle aus. Recherchiere mit den Textbausteinen auf der Rückseite.',
+      pdfBlanks: [],
+      answerTargets: detected.tableTargets,
+    })
+    const task = plan.tasks.find((item) => item.kind === 'matching_table')
+    expect(task?.targets).toHaveLength(6)
+    expect(plan.tasks).toHaveLength(1)
+
+    const positioned = applyTableCellTaskMeta(
+      {
+        summary: 'Tabelle',
+        answers: task!.targets.map((target, index) => ({
+          id: String(index + 1),
+          label: `Lücke ${index + 1}`,
+          answer: `Wert ${index + 1}`,
+          blankIndex: target.blankIndex,
+        })),
+        formFields: [],
+      },
+      plan.tasks,
+    )
+    expect(positioned.answers.every((answer) => answer.targetId?.startsWith('pdf-table-'))).toBe(
+      true,
+    )
+    expect(positioned.answers.every((answer) => answer.bbox)).toBe(true)
+  })
+
+  it('behält normale Schreiblinien im kombinierten Layout-Detektor bei', async () => {
+    const source = await writingLinesPdf()
+    const detected = await detectPdfLayoutTargets(source)
+    expect(detected.tableTargets).toHaveLength(0)
+    expect(detected.lineTargets).toHaveLength(2)
+  })
+
+  it('markiert bei richtig/falsch genau eine Auswahlzelle pro Aussage', async () => {
+    const source = await choiceTablePdf()
+    const detected = await detectPdfLayoutTargets(source)
+    expect(detected.tableTargets).toHaveLength(6)
+    expect(detected.tableTargets.every((target) => target.kind === 'choice_cell')).toBe(true)
+
+    const plan = buildSolutionPlan({
+      documentText: 'Kreuze an, welche Aussagen richtig und welche falsch sind.',
+      pdfBlanks: [],
+      answerTargets: detected.tableTargets,
+    })
+    const task = plan.tasks.find((item) => item.targets.some((target) => target.kind === 'choice_cell'))
+    expect(task?.targets).toHaveLength(6)
+
+    const positioned = applyChoiceCellTaskMeta(
+      {
+        summary: 'Auswahl',
+        answers: [
+          { id: '1', label: 'Aussage 1', answer: 'richtig', blankIndex: 0 },
+          { id: '2', label: 'Aussage 2', answer: 'falsch', blankIndex: 1 },
+          { id: '3', label: 'Aussage 3', answer: 'richtig', blankIndex: 2 },
+        ],
+        formFields: [],
+      },
+      plan.tasks,
+    )
+    expect(positioned.answers.map((answer) => answer.targetId)).toEqual([
+      detected.tableTargets[0]!.id,
+      detected.tableTargets[3]!.id,
+      detected.tableTargets[4]!.id,
+    ])
+
+    const rendered = await renderPdfSolution(source, positioned, {
+      title: 'Musterlösung',
+      sourceFileName: 'AB-Auswahl.pdf',
+      tasks: plan.tasks,
+    })
+    const pdfjs = await loadPdfjs()
+    const loadingTask = pdfjs.getDocument({ data: new Uint8Array(rendered.buffer), verbosity: 0 })
+    try {
+      const page = await (await loadingTask.promise).getPage(1)
+      const content = await page.getTextContent()
+      const marks = content.items.filter(
+        (item: { str?: string }) => item.str === 'X',
+      )
+      expect(marks).toHaveLength(3)
+    } finally {
+      await loadingTask.destroy()
+    }
   })
 
   it('modelliert AB-Rasieren als zwei offene Overlay-Tasks', async () => {

@@ -134,7 +134,7 @@ export function segmentTasks(input: SegmentTasksInput): TaskBlock[] {
       renderConfidence: 'medium',
       requiresVisionTargetRepair: ovals.some((t) => !t.nativeRef),
     })
-  } else if (uniqueShapes.filter((t) => t.kind === 'answer_line').length > 0 && blankTargets.length === 0) {
+  } else if (uniqueShapes.filter((t) => t.kind === 'answer_line').length > 0) {
     const lines = uniqueShapes.filter((t) => t.kind === 'answer_line')
     if (openUnits.length === lines.length) {
       for (let index = 0; index < lines.length; index++) {
@@ -171,12 +171,27 @@ export function segmentTasks(input: SegmentTasksInput): TaskBlock[] {
   }
 
   const tableCells = answerTargets.filter((t) => t.kind === 'table_cell')
+  const choiceCells = answerTargets.filter((t) => t.kind === 'choice_cell')
+  if (choiceCells.length >= 4) {
+    tasks.push({
+      id: `p${choiceCells[0]!.page}-choice`,
+      page: choiceCells[0]!.page,
+      bbox: { x: 0.05, y: 0.2, w: 0.9, h: 0.4 },
+      instruction: extractChoiceInstruction(document.fullText),
+      kind: 'matching_table',
+      confidence: 0.9,
+      evidence: [`${choiceCells.length} exclusive choice cells`],
+      targets: choiceCells,
+      renderMode: 'overlay',
+      renderConfidence: 'high',
+    })
+  }
   if (tableCells.length >= 2) {
     tasks.push({
       id: 'p1-table',
       page: tableCells[0]!.page,
       bbox: { x: 0.05, y: 0.2, w: 0.9, h: 0.4 },
-      instruction: 'Tabellenzellen ausfüllen',
+      instruction: extractTableInstruction(document.fullText),
       kind: 'matching_table',
       confidence: 0.7,
       evidence: [`${tableCells.length} empty table cells`],
@@ -236,6 +251,7 @@ export function segmentTasks(input: SegmentTasksInput): TaskBlock[] {
       t.targets.some((target) => target.kind === 'answer_line'),
   )
   const hasDiagram = tasks.some((t) => t.kind === 'diagram_completion')
+  const hasTableCells = tasks.some((t) => t.kind === 'matching_table')
 
   // Bildbeschriftung ohne erkannte Shapes → Appendix mit Wortliste.
   for (const unit of worksheetUnits.filter((u) => u.kind === 'image_labeling')) {
@@ -284,6 +300,9 @@ export function segmentTasks(input: SegmentTasksInput): TaskBlock[] {
     }
     // Schreiblinien vor Ort → kein zusätzlicher Appendix nur wegen „erklären/beschreiben“.
     if (hasInplaceAnswerLines) continue
+    // Eine Tabellenanweisung kann „recherchiere“ enthalten und wird von der
+    // Textheuristik sonst zusätzlich als offene Aufgabe samt Anhang angelegt.
+    if (hasTableCells && /\b(?:tabelle|tabellarisch)\b/i.test(open.instruction)) continue
     tasks.push({
       id: `p${open.page}-open-${i + 1}`,
       page: open.page,
@@ -299,6 +318,18 @@ export function segmentTasks(input: SegmentTasksInput): TaskBlock[] {
   }
 
   return tasks
+}
+
+function extractTableInstruction(text: string): string {
+  const match = text.match(
+    /(?:^|\n)\s*(?:\d+[.)]?\s*)?[^\n]{0,220}\b(?:tabelle|tabellarisch)[^\n]{0,220}/i,
+  )
+  return match?.[0]?.trim() || 'Leere Tabellenzellen ausfüllen'
+}
+
+function extractChoiceInstruction(text: string): string {
+  const match = text.match(/[^\n]{0,220}\b(?:kreuz\w*|ankreuz\w*)\b[^\n]{0,220}/i)
+  return match?.[0]?.trim() || 'Kreuze pro Aussage genau eine passende Antwort an'
 }
 
 /**

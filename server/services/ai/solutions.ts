@@ -63,7 +63,7 @@ import { ensureExtractedText } from './document-text'
 import { analyzeDocxTargets } from './solutions/docx-analyzer'
 import { logPipeline } from './solutions/logging'
 import { buildSolutionPlan } from './solutions/orchestrator'
-import { detectPdfAnswerLines } from './solutions/pdf-answer-lines'
+import { detectPdfLayoutTargets } from './solutions/pdf-answer-lines'
 import { buildClozeRepairPrompt } from './solutions/repair/cloze-repair'
 import { repairCandidateBankViaVision } from './solutions/repair/candidate-bank-vision'
 import { repairDocxTargetsViaVision } from './solutions/repair/docx-targets-vision'
@@ -80,7 +80,11 @@ import {
   formatWorksheetTasksForPrompt,
 } from './solutions/worksheet-tasks'
 import { assignCandidatesGlobally } from './solutions/solvers/cloze-solver'
-import { applyFreeTextTaskMeta } from './solutions/solvers/free-text-solver'
+import {
+  applyFreeTextTaskMeta,
+  applyChoiceCellTaskMeta,
+  applyTableCellTaskMeta,
+} from './solutions/solvers/free-text-solver'
 import { legacyFillModeFromTasks } from './solutions/task-classifier'
 import type { CandidateBank, TaskBlock } from './solutions/types'
 import { validateClozeAnswers } from './solutions/validators/cloze-validator'
@@ -255,28 +259,49 @@ export async function generateSolution(
     }
   }
 
-  let pdfAnswerLines: Awaited<ReturnType<typeof detectPdfAnswerLines>> = {
-    targets: [],
+  let pdfLayoutTargets: Awaited<ReturnType<typeof detectPdfLayoutTargets>> = {
+    tableTargets: [],
+    lineTargets: [],
     shapes: [],
     rawLineCount: 0,
     clusterCount: 0,
   }
-  // Nur wenn keine Text-Lücken gefunden wurden – Cloze bleibt prioritär.
-  if (
-    source &&
-    PDF_EXTENSIONS.has(source.extension) &&
-    detectedBlanks.length === 0
-  ) {
+  // Tabellen und Antwortlinien sind unabhängig von Textlücken: ein Arbeitsblatt
+  // kann beides enthalten. Tabellenkanten werden dabei nicht als Schreiblinien
+  // weitergereicht.
+  if (source && PDF_EXTENSIONS.has(source.extension)) {
     try {
-      pdfAnswerLines = await detectPdfAnswerLines(source.buffer)
-      if (pdfAnswerLines.clusterCount > 0) {
+      pdfLayoutTargets = await detectPdfLayoutTargets(source.buffer)
+      if (pdfLayoutTargets.clusterCount > 0) {
         log.info('PDF-Antwortlinien erkannt', {
-          rawLines: pdfAnswerLines.rawLineCount,
-          clusters: pdfAnswerLines.clusterCount,
+          rawLines: pdfLayoutTargets.rawLineCount,
+          clusters: pdfLayoutTargets.clusterCount,
+        })
+      }
+      if (pdfLayoutTargets.tableTargets.length > 0) {
+        // "gap"-Lücken entstehen bei mehrspaltigen Rückseiten häufig allein aus
+        // der Lesereihenfolge der PDF-Textebene. Echte Unterstrich-Lücken bleiben.
+        detectedBlanks = detectedBlanks.filter((blank) => blank.kind !== 'gap')
+        log.info('PDF-Tabellenzellen erkannt', {
+          cells: pdfLayoutTargets.tableTargets.length,
+          ignoredTextGaps: true,
         })
       }
     } catch (error) {
-      log.warn('PDF-Antwortlinien-Erkennung fehlgeschlagen', error)
+      log.warn('PDF-Layoutziel-Erkennung fehlgeschlagen', error)
+    }
+  }
+
+  // Ein gemeinsamer Indexraum verhindert Kollisionen, wenn ein PDF sowohl
+  // echte Lücken als auch Tabellenzellen enthält.
+  if (pdfLayoutTargets.tableTargets.length > 0 && detectedBlanks.length > 0) {
+    pdfLayoutTargets = {
+      ...pdfLayoutTargets,
+      tableTargets: pdfLayoutTargets.tableTargets.map((target, index) =>
+        target.kind === 'table_cell'
+          ? { ...target, blankIndex: detectedBlanks.length + index }
+          : target,
+      ),
     }
   }
 
@@ -287,8 +312,12 @@ export async function generateSolution(
     pdfBlanks: detectedBlanks,
     docxBlanks,
     nativeFields: docxNative.nativeFields,
-    shapes: [...docxNative.shapes, ...pdfAnswerLines.shapes],
-    answerTargets: [...docxNative.targets, ...pdfAnswerLines.targets],
+    shapes: [...docxNative.shapes, ...pdfLayoutTargets.shapes],
+    answerTargets: [
+      ...docxNative.targets,
+      ...pdfLayoutTargets.tableTargets,
+      ...pdfLayoutTargets.lineTargets,
+    ],
   })
   let { tasks, candidateBank, fillMode, blankCount } = plan
   const { document: documentModel, numberMatching } = plan
@@ -298,7 +327,6 @@ export async function generateSolution(
   if (
     source &&
     PDF_EXTENSIONS.has(source.extension) &&
-    detectedBlanks.length === 0 &&
     useVision &&
     model.trim()
   ) {
@@ -324,7 +352,10 @@ export async function generateSolution(
           documentText: analysisDocumentText,
           tasks,
           assessment,
-          nativeTargets: pdfAnswerLines.targets,
+          nativeTargets: [
+            ...pdfLayoutTargets.tableTargets,
+            ...pdfLayoutTargets.lineTargets,
+          ],
         })
         const visualTargetCount =
           visual?.tasks.flatMap((task) => task.targets).length ?? 0
@@ -473,18 +504,40 @@ export async function generateSolution(
     source: source?.fileName ?? null,
   })
 
+  const tableCellTargets = tasks
+    .filter((task) => task.kind === 'matching_table')
+    .flatMap((task) => task.targets)
+    .filter((target) => target.kind === 'table_cell')
+  const choiceCellTargets = tasks
+    .flatMap((task) => task.targets)
+    .filter((target) => target.kind === 'choice_cell')
+  const choiceRows = new Set(
+    choiceCellTargets.map((target) => (target.cellRef ?? target.id).split(':').slice(0, 2).join(':')),
+  )
+  const choiceValues = [...new Set(choiceCellTargets.map((target) => target.choiceValue).filter(Boolean))]
+  const tableInventory = tableCellTargets
+    .map(
+      (target, index) =>
+        `${target.blankIndex ?? index}: Tabelle, Zelle ${target.cellRef ?? index + 1}`,
+    )
+    .join('\n')
   const blankInventory =
     fillMode === 'lueckentext'
-      ? detectedBlanks.length
-        ? formatBlankInventory(detectedBlanks)
-        : docxBlanks.length
-          ? formatTextBlankInventory(docxBlanks)
-          : null
+      ? [
+          detectedBlanks.length
+            ? formatBlankInventory(detectedBlanks)
+            : docxBlanks.length
+              ? formatTextBlankInventory(docxBlanks)
+              : '',
+          tableInventory,
+        ]
+          .filter(Boolean)
+          .join('\n') || null
       : null
 
   const diagramTask = tasks.find((t) => t.kind === 'diagram_completion')
   const answerLineCount =
-    pdfAnswerLines.clusterCount ||
+    pdfLayoutTargets.clusterCount ||
     tasks
       .flatMap((t) => t.targets)
       .filter((t) => t.kind === 'answer_line').length ||
@@ -492,9 +545,18 @@ export async function generateSolution(
   const worksheetUnits = detectWorksheetTasks(
     documentText || documentModel.fullText || '',
   )
-  const taskInventory = worksheetUnits.length
-    ? formatWorksheetTasksForPrompt(worksheetUnits)
-    : tasks
+  const taskInventory = tableCellTargets.length || choiceCellTargets.length
+    ? tasks
+        .map(
+          (t, i) =>
+            `${i + 1}. [${t.kind}] ${t.instruction}${
+              t.targets.length ? ` (${t.targets.length} Antwortbereiche)` : ''
+            }`,
+        )
+        .join('\n')
+    : worksheetUnits.length
+      ? formatWorksheetTasksForPrompt(worksheetUnits)
+      : tasks
         .map(
           (t, i) =>
             `${i + 1}. [${t.kind}] ${t.instruction}${
@@ -518,11 +580,18 @@ export async function generateSolution(
     sourceFileName: source?.fileName ?? null,
     sourceMimeType: source?.mimeType ?? null,
     blankInventory,
-    detectedBlankCount: fillMode === 'lueckentext' ? blankCount || null : null,
+    detectedBlankCount:
+      fillMode === 'lueckentext'
+        ? blankCount || tableCellTargets.length || null
+        : null,
     fillMode,
     candidateBank,
     diagramTargetIds: diagramTask?.targets.map((t) => t.id) ?? null,
     answerLineCount,
+    choiceTask:
+      choiceRows.size > 0 && choiceValues.length >= 2
+        ? { rows: choiceRows.size, choices: choiceValues as string[] }
+        : null,
     numberMatching,
     taskInventory,
   })
@@ -746,7 +815,21 @@ export async function generateSolution(
           })),
         }
       } else if (detectedBlanks.length > 0) {
-        structured = alignAnswersToBlanks(structured, detectedBlanks)
+        // alignAnswersToBlanks verdichtet auf echte Lücken. Tabellenantworten
+        // liegen im gemeinsamen Indexraum dahinter und müssen erhalten bleiben.
+        const tableAnswers = structured.answers.filter(
+          (answer) =>
+            typeof answer.blankIndex === 'number' &&
+            answer.blankIndex >= detectedBlanks.length,
+        )
+        const aligned = alignAnswersToBlanks(structured, detectedBlanks)
+        structured = {
+          ...aligned,
+          answers: [
+            ...aligned.answers,
+            ...tableAnswers,
+          ],
+        }
         log.info('Antworten an erkannte Lücken ausgerichtet', {
           answers: structured.answers.length,
           blanks: detectedBlanks.length,
@@ -797,6 +880,8 @@ export async function generateSolution(
         )
       }
 
+      structured = applyChoiceCellTaskMeta(structured, tasks)
+      structured = applyTableCellTaskMeta(structured, tasks)
       structured = applyFreeTextTaskMeta(structured, tasks)
 
       for (const task of tasks) {

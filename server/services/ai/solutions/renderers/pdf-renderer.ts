@@ -110,17 +110,27 @@ function filterAnswersForTasks(
 
   const inplaceTargetIds = new Set(
     tasks
-      .filter((task) => task.kind === 'free_text_inplace')
+      .filter(
+        (task) => task.kind === 'free_text_inplace' || task.kind === 'matching_table',
+      )
       .flatMap((task) => task.targets)
       .filter(
         (target) =>
           target.kind === 'answer_line' ||
           target.kind === 'text_field' ||
-          target.kind === 'content_control',
+          target.kind === 'content_control' ||
+          target.kind === 'table_cell' ||
+          target.kind === 'choice_cell',
       )
       .map((target) => target.id),
   )
   if (inplaceTargetIds.size > 0) {
+    const choiceTargetIds = new Set(
+      tasks
+        .flatMap((task) => task.targets)
+        .filter((target) => target.kind === 'choice_cell')
+        .map((target) => target.id),
+    )
     const matched = solution.answers.filter(
       (answer) => answer.targetId && inplaceTargetIds.has(answer.targetId),
     )
@@ -132,7 +142,14 @@ function filterAnswersForTasks(
             answer.blankIndex == null &&
             Boolean(answer.bbox),
         )
-    return { ...solution, answers }
+    return {
+      ...solution,
+      answers: answers.map((answer) =>
+        answer.targetId && choiceTargetIds.has(answer.targetId)
+          ? { ...answer, answer: 'X', fieldType: 'luecke' as const }
+          : answer,
+      ),
+    }
   }
 
   const blankIndexes = new Set<number>()

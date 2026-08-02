@@ -113,7 +113,7 @@ export async function createSeries(
   await applySeriesTaxonomy(db, seriesId, input)
 
   queueReindex('reihe', seriesId)
-  log.info('Reihe angelegt', { seriesId, title: input.title })
+  log.info('Reihe angelegt', { title: input.title.trim() })
   return seriesId
 }
 

@@ -34,6 +34,7 @@ export type RenderConfidence = 'high' | 'medium' | 'low'
 export type AnswerTargetKind =
   | 'blank'
   | 'table_cell'
+  | 'choice_cell'
   | 'content_control'
   | 'bookmark'
   | 'text_field'
@@ -55,6 +56,8 @@ export interface AnswerTarget {
   nativeRef?: string | null
   /** Tabellenzelle: „row:col“. */
   cellRef?: string | null
+  /** Auswahlzelle: kanonischer Spaltenwert, z. B. „richtig“ oder „falsch“. */
+  choiceValue?: string | null
   /** Herkunft: native XML vs. Vision-Fallback. */
   source?: 'native' | 'vision'
 }

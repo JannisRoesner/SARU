@@ -215,7 +215,7 @@ export async function createMaterial(
   })
 
   queueReindex('material', materialId)
-  log.info('Material angelegt', { materialId, title: input.title })
+  log.info('Material angelegt', { title: input.title.trim() })
   return materialId
 }
 

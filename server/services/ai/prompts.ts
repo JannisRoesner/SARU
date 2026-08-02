@@ -42,6 +42,8 @@ export interface SolutionPromptContext {
   diagramTargetIds?: string[] | null
   /** Anzahl erkannter PDF-/DOCX-Antwortlinien-Blöcke (Schreiblinien). */
   answerLineCount?: number | null
+  /** Exklusive Ankreuzaufgabe, z. B. richtig/falsch oder ja/nein. */
+  choiceTask?: { rows: number; choices: string[] } | null
   /** Nummern-Zuordnung: answer nur als Ziffer, Legende Nummer→Begriff. */
   numberMatching?: NumberMatchingLegend | null
   /** Erkannte Teilaufgaben (offen/Glossar/Beschriftung) für den Erwartungshorizont. */
@@ -206,6 +208,15 @@ export function buildSolutionPrompt(context: SolutionPromptContext): string {
       '',
       '## Antwortformat: Nur Nummern',
       formatNumberMatchingForPrompt(context.numberMatching),
+    )
+  }
+
+  if (mode === 'lueckentext' && context.choiceTask) {
+    lines.push(
+      '',
+      `## Ankreuzaufgabe (${context.choiceTask.rows} Aussagen)`,
+      `Liefere genau eine Antwort pro Aussage in Dokumentreihenfolge (oben nach unten). Erlaubte Antworten: ${context.choiceTask.choices.join(', ')}.`,
+      'answer muss exakt einer der erlaubten Auswahlwerte sein; blankIndex ist der 0-basierte Index der Aussage. Die Anwendung zeichnet anschließend automatisch ein X in genau eine Auswahlzelle.',
     )
   }
 

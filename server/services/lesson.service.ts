@@ -153,7 +153,7 @@ export async function createLesson(
 
   queueReindex('unterrichtsstunde', lessonId)
   if (input.seriesId) queueReindex('reihe', input.seriesId)
-  log.info('Unterrichtsstunde angelegt', { lessonId, title: input.title })
+  log.info('Unterrichtsstunde angelegt', { title: input.title.trim() })
   return lessonId
 }
 
