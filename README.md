@@ -59,7 +59,6 @@ Vollständige Liste: [`.env.example`](.env.example)
 - **Frontend / Backend:** Nuxt 4 (Vue, Nitro)
 - **Datenbank:** PostgreSQL + pgvector, Drizzle ORM
 - **Auth:** Sitzungen mit signierten Cookies, scrypt-Passworthashes
-- **CI:** GitHub Actions baut und veröffentlicht das Docker-Image bei Push auf `main`
 
 ## Lizenz
 
