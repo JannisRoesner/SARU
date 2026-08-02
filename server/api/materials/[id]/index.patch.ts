@@ -3,12 +3,12 @@ import { updateMaterial } from '../../../services/material.service'
 import { recordAudit } from '../../../services/audit.service'
 import { requireEditor } from '../../../utils/auth'
 import { materialUpdateSchema } from '../../../utils/schemas'
-import { parseOrThrow, readValidatedBody, uuidSchema } from '../../../utils/validation'
+import { parseOrThrow, readZodBody, uuidSchema } from '../../../utils/validation'
 
 export default defineEventHandler(async (event) => {
   const user = await requireEditor(event)
   const id = parseOrThrow(uuidSchema, getRouterParam(event, 'id'))
-  const patch = await readValidatedBody(event, materialUpdateSchema)
+  const patch = await readZodBody(event, materialUpdateSchema)
 
   await updateMaterial(id, patch)
   await recordAudit(

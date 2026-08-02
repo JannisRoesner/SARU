@@ -4,7 +4,7 @@ import { generateSolution } from '../../../services/ai/solutions'
 import { recordAudit } from '../../../services/audit.service'
 import { requireEditor } from '../../../utils/auth'
 import { checkRateLimit } from '../../../utils/rate-limit'
-import { parseOrThrow, readValidatedBody, uuidSchema } from '../../../utils/validation'
+import { parseOrThrow, readZodBody, uuidSchema } from '../../../utils/validation'
 
 /**
  * Erzeugt eine dokumentbasierte Musterlösung (DOCX-Lücken / PDF-AcroForm /
@@ -13,7 +13,7 @@ import { parseOrThrow, readValidatedBody, uuidSchema } from '../../../utils/vali
 export default defineEventHandler(async (event) => {
   const user = await requireEditor(event)
   const id = parseOrThrow(uuidSchema, getRouterParam(event, 'id'))
-  const options = await readValidatedBody(
+  const options = await readZodBody(
     event,
     z.object({
       variantId: uuidSchema.nullish(),

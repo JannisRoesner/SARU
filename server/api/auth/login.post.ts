@@ -8,7 +8,7 @@ import { appError } from '../../utils/errors'
 import { createLogger } from '../../utils/logger'
 import { checkRateLimit, resetRateLimit } from '../../utils/rate-limit'
 import { toPublicError } from '../../utils/sanitize-error'
-import { readValidatedBody } from '../../utils/validation'
+import { readZodBody } from '../../utils/validation'
 
 const log = createLogger('auth.login')
 
@@ -22,7 +22,7 @@ const schema = z.object({
 })
 
 export default defineEventHandler(async (event) => {
-  const { email, password } = await readValidatedBody(event, schema)
+  const { email, password } = await readZodBody(event, schema)
 
   // Gegen Passwort-Raten: pro IP und pro Konto begrenzen.
   const ipKey = `login:ip:${clientIp(event) ?? 'unbekannt'}`
@@ -39,7 +39,7 @@ export default defineEventHandler(async (event) => {
     user = await findUserByEmail(email)
   } catch (error) {
     if (isError(error) && error.statusCode) throw error
-    log.error({ err: error, email }, 'Anmeldung: Datenbankfehler')
+    log.error('Anmeldung: Datenbankfehler', { err: error, email })
     throw toPublicError(
       error,
       'Die Anmeldung ist derzeit nicht möglich. Bitte später erneut versuchen oder die Administration kontaktieren.',

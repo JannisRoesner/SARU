@@ -2,11 +2,11 @@ import { getCollaboraSettings, saveCollaboraSettings } from '../../services/sett
 import { clearCollaboraDiscoveryCache } from '../../services/collabora.service'
 import { requireAdmin } from '../../utils/auth'
 import { collaboraSettingsSchema } from '../../utils/schemas'
-import { readValidatedBody } from '../../utils/validation'
+import { readZodBody } from '../../utils/validation'
 
 export default defineEventHandler(async (event) => {
   const user = await requireAdmin(event)
-  const patch = await readValidatedBody(event, collaboraSettingsSchema)
+  const patch = await readZodBody(event, collaboraSettingsSchema)
   await saveCollaboraSettings(patch, user.id)
   clearCollaboraDiscoveryCache()
   return getCollaboraSettings()

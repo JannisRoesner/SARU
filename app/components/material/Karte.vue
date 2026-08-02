@@ -110,7 +110,7 @@ const zeigtMiniatur = computed(() => {
           :aria-pressed="material.isFavorite"
           @click.stop.prevent="emit('favorit', material.id, !material.isFavorite)"
         >
-          <UiIcon name="star" :stil="material.isFavorite ? 'solid' : 'regular'" fest />
+          <UiIcon name="star" :stil="material.isFavorite ? 'fas' : 'far'" fest />
         </button>
       </div>
 

@@ -21,7 +21,7 @@ export function parseOrThrow<T>(schema: ZodType<T>, value: unknown, what = 'Die 
   return result.data
 }
 
-export async function readValidatedBody<T>(event: H3Event, schema: ZodType<T>): Promise<T> {
+export async function readZodBody<T>(event: H3Event, schema: ZodType<T>): Promise<T> {
   const body = await readBody(event).catch(() => undefined)
   return parseOrThrow(schema, body ?? {}, 'Die übermittelten Daten')
 }

@@ -107,7 +107,7 @@ export async function repairDocxTargetsViaVision(args: {
     parts.push({
       type: 'image',
       mimeType: page.mimeType,
-      dataBase64: page.base64,
+      base64: page.base64,
     })
   }
 

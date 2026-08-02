@@ -1,6 +1,7 @@
 import { and, eq, gt, lt } from 'drizzle-orm'
 import type { H3Event } from 'h3'
 import { deleteCookie, getCookie, getRequestHeader, setCookie } from 'h3'
+import type { Role } from '#shared/types/domain'
 import { useDatabase } from '../database/client'
 import { sessions, users, type User } from '../database/schema'
 import { generateToken, hashToken } from './crypto'
@@ -10,8 +11,6 @@ export const SESSION_COOKIE = 'saru_session'
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000
 /** Sliding expiration: erst nach dieser Zeit wird die Gültigkeit verlängert. */
 const SESSION_REFRESH_AFTER_MS = 24 * 60 * 60 * 1000
-
-export type Role = 'admin' | 'lehrkraft' | 'leser'
 
 /** Höhere Zahl schließt alle Rechte der niedrigeren Rollen ein. */
 const roleRank: Record<Role, number> = { leser: 1, lehrkraft: 2, admin: 3 }

@@ -2,7 +2,8 @@ import { SCHOOL_FORMS } from '#shared/types/domain'
 import { and, asc, count, eq, ne } from 'drizzle-orm'
 import { useDatabase } from '../database/client'
 import { users, type UserPreferences } from '../database/schema'
-import { destroyAllSessions, toSafeUser, type Role, type SafeUser } from '../utils/auth'
+import type { Role } from '#shared/types/domain'
+import { destroyAllSessions, toSafeUser, type SafeUser } from '../utils/auth'
 import { hashPassword, verifyPassword } from '../utils/crypto'
 import { conflict, invalidInput, notFound } from '../utils/errors'
 import { createLogger } from '../utils/logger'
@@ -183,19 +184,24 @@ export async function changeOwnPassword(
 
 export async function updatePreferences(
   userId: string,
-  preferences: UserPreferences & { visibleSchoolForms?: UserPreferences['visibleSchoolForms'] | null },
+  preferences: Partial<Omit<UserPreferences, 'visibleSchoolForms'>> & {
+    visibleSchoolForms?: UserPreferences['visibleSchoolForms'] | null
+  },
 ): Promise<SafeUser> {
   const db = useDatabase()
   const [current] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
   if (!current) throw notFound('Das Benutzerkonto')
 
-  const merged: UserPreferences = { ...current.preferences, ...preferences }
+  const { visibleSchoolForms, ...otherPreferences } = preferences
+  const merged: UserPreferences = { ...current.preferences, ...otherPreferences }
   if (
-    preferences.visibleSchoolForms === null ||
-    !preferences.visibleSchoolForms?.length ||
-    preferences.visibleSchoolForms.length >= SCHOOL_FORMS.length
+    visibleSchoolForms === null ||
+    !visibleSchoolForms?.length ||
+    visibleSchoolForms.length >= SCHOOL_FORMS.length
   ) {
     delete merged.visibleSchoolForms
+  } else {
+    merged.visibleSchoolForms = visibleSchoolForms
   }
 
   const [updated] = await db

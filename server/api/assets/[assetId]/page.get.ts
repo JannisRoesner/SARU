@@ -53,6 +53,6 @@ export default defineEventHandler(async (event) => {
   setResponseHeader(event, 'cache-control', 'private, max-age=300')
   setResponseHeader(event, 'x-content-type-options', 'nosniff')
   setResponseHeader(event, 'content-disposition', `inline; filename="page-${page}.png"`)
-  setResponseHeader(event, 'content-length', String(png.length))
+  setResponseHeader(event, 'content-length', png.length)
   return png
 })

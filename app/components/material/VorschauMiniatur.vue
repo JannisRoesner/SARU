@@ -17,7 +17,14 @@ const props = withDefaults(
     groesse?: 'sm' | 'md' | 'lg'
     klickbar?: boolean
   }>(),
-  { groesse: 'md', klickbar: false },
+  {
+    assetId: null,
+    fileName: null,
+    mimeType: null,
+    materialType: null,
+    groesse: 'md',
+    klickbar: false,
+  },
 )
 
 const emit = defineEmits<{ klick: [] }>()

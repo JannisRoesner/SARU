@@ -95,7 +95,7 @@ watch(page, syncQuery)
 
     <UiFehlerzustand v-if="error" :text="toApiFehler(error).nachricht" @erneut="refresh()" />
     <template v-else>
-      <UiSkelett v-if="status === 'pending'" art="cards" :zeilen="4" />
+      <UiSkelett v-if="status === 'pending'" art="karten" :zeilen="4" />
       <UiLeerzustand
         v-else-if="!(data?.items.length)"
         icon="layer-group"

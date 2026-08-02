@@ -12,7 +12,14 @@ withDefaults(
     max?: string | number
     step?: string | number
   }>(),
-  { type: 'text' },
+  {
+    type: 'text',
+    placeholder: undefined,
+    icon: undefined,
+    min: undefined,
+    max: undefined,
+    step: undefined,
+  },
 )
 
 const attrs = useAttrs()

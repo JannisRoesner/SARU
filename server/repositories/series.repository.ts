@@ -115,23 +115,6 @@ function whereClause(filters: SeriesFilters): SQL {
   return conditions.length === 0 ? sql`true` : sql.join(conditions, sql` and `)
 }
 
-function orderClause(sort: SeriesSort, ids?: string[]): SQL {
-  switch (sort) {
-    case 'titel':
-      return sql`r.title asc`
-    case 'datum_alt':
-      return sql`r.start_date asc nulls last`
-    case 'fortschritt':
-      return sql`("progress"->>'percent')::int desc`
-    case 'relevanz':
-      if (ids?.length) return sql`array_position(${pgArray(ids, 'uuid[]')}, r.id)`
-      return sql`r.updated_at desc`
-    case 'datum_neu':
-    default:
-      return sql`r.start_date desc nulls last, r.updated_at desc`
-  }
-}
-
 export async function listSeries(
   options: { filters?: SeriesFilters; sort?: SeriesSort; page?: number; pageSize?: number } = {},
   db: Database = useDatabase(),

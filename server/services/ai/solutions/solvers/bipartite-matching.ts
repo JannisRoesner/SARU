@@ -24,14 +24,15 @@ function exactAssignment(scores: number[][]): AssignmentResult {
   dp[0] = 0
 
   for (let mask = 0; mask < size; mask++) {
-    if (!Number.isFinite(dp[mask])) continue
+    const currentScore = dp[mask] ?? Number.NEGATIVE_INFINITY
+    if (!Number.isFinite(currentScore)) continue
     const blank = bitCount(mask)
     if (blank >= n) continue
     for (let c = 0; c < m; c++) {
       if (mask & (1 << c)) continue
       const next = mask | (1 << c)
-      const score = dp[mask] + (scores[blank]![c] ?? 0)
-      if (score > dp[next]) {
+      const score = currentScore + (scores[blank]![c] ?? 0)
+      if (score > (dp[next] ?? Number.NEGATIVE_INFINITY)) {
         dp[next] = score
         parent[next] = mask
         chosen[next] = c
@@ -44,8 +45,9 @@ function exactAssignment(scores: number[][]): AssignmentResult {
   let bestScore = Number.NEGATIVE_INFINITY
   for (let mask = 0; mask < size; mask++) {
     if (bitCount(mask) !== Math.min(n, m)) continue
-    if (dp[mask] > bestScore) {
-      bestScore = dp[mask]
+    const score = dp[mask] ?? Number.NEGATIVE_INFINITY
+    if (score > bestScore) {
+      bestScore = score
       bestMask = mask
     }
   }
@@ -53,10 +55,11 @@ function exactAssignment(scores: number[][]): AssignmentResult {
   const assignment = new Array(n).fill(-1)
   let mask = bestMask
   for (let blank = Math.min(n, m) - 1; blank >= 0; blank--) {
-    const c = chosen[mask]
+    const c = chosen[mask] ?? -1
     if (c < 0) break
     assignment[blank] = c
-    mask = parent[mask]
+    mask = parent[mask] ?? -1
+    if (mask < 0 && blank > 0) break
   }
 
   return {

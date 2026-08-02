@@ -56,7 +56,7 @@ function resolveReusePolicy(
 }
 
 const WORDLIST_HEADER =
-  /(?:^|\n)\s*(?:wortliste|wörter(?:liste)?|begriffe|word\s*bank|füllen sie die lücken mit(?: den wörtern)?)\s*[:\-]?\s*/gi
+  /(?:^|\n)\s*(?:wortliste|wörter(?:liste)?|begriffe|word\s*bank|füllen sie die lücken mit(?: den wörtern)?)\s*[:-]?\s*/gi
 
 const WORDLIST_MENTION =
   /wortliste|wörter(?:liste)?|begriffe|word\s*bank|füllen sie die lücken mit/i
@@ -144,7 +144,7 @@ function extractFromSingleText(text: string, blankCount: number): CandidateBank 
 /** „Ordne … zu: Harnröhre, Hoden, …“ ohne zwingend „Bild“. */
 function extractFromAssignColonList(text: string): CandidateTerm[] {
   const m = text.match(
-    /ordn\w*.{0,80}begriffe[^:]{0,40}:\s*((?:[\p{Lu}][\p{L}\p{N}\-]*)(?:\s*,\s*[\p{Lu}][\p{L}\p{N}\-]*){1,12})/iu,
+    /ordn\w*.{0,80}begriffe[^:]{0,40}:\s*((?:[\p{Lu}][\p{L}\p{N}-]*)(?:\s*,\s*[\p{Lu}][\p{L}\p{N}-]*){1,12})/iu,
   )
   if (!m?.[1]) return []
   return extractInlineTermList(m[1]).map((v, i) => makeTerm(v, i))
@@ -188,13 +188,13 @@ export function extractCandidateBank(
 function extractFromWordlistSection(text: string): CandidateTerm[] {
   const matches = [...text.matchAll(WORDLIST_HEADER)]
   if (matches.length === 0) {
-    const inline = text.match(/wortliste\s*[:\-]?\s*([^\n]{8,400})/i)
+    const inline = text.match(/wortliste\s*[:-]?\s*([^\n]{8,400})/i)
     if (inline?.[1]) {
       return tokenizeCandidateLine(inline[1]).map((v, i) => makeTerm(v, i))
     }
     // Wortlisten-Box ohne explizite Überschrift: kompakte Zeile mit Schrägstrichen.
     const slashList = text.match(
-      /(?:^|\n)\s*([\p{L}][\p{L}\p{N}äöüÄÖÜß\-]{1,30}(?:\s*\/\s*[\p{L}][\p{L}\p{N}äöüÄÖÜß\-]{1,30}){3,})\s*(?:\n|$)/u,
+      /(?:^|\n)\s*([\p{L}][\p{L}\p{N}äöüÄÖÜß-]{1,30}(?:\s*\/\s*[\p{L}][\p{L}\p{N}äöüÄÖÜß-]{1,30}){3,})\s*(?:\n|$)/u,
     )
     if (slashList?.[1]) {
       return tokenizeCandidateLine(slashList[1]).map((v, i) => makeTerm(v, i))

@@ -187,7 +187,7 @@ watch(
     </div>
 
     <UiFehlerzustand v-if="error" :text="toApiFehler(error).nachricht" @erneut="refresh()" />
-    <UiSkelett v-else-if="status === 'pending' || !data" art="list" :zeilen="6" />
+    <UiSkelett v-else-if="status === 'pending' || !data" art="liste" :zeilen="6" />
 
     <template v-else>
       <header class="mb-6 flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">

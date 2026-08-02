@@ -15,7 +15,14 @@ const props = withDefaults(
     to?: string
     type?: 'button' | 'submit' | 'reset'
   }>(),
-  { variante: 'sekundaer', groesse: 'md', type: 'button' },
+  {
+    variante: 'sekundaer',
+    groesse: 'md',
+    icon: undefined,
+    iconRechts: undefined,
+    to: undefined,
+    type: 'button',
+  },
 )
 
 const VARIANTEN = {

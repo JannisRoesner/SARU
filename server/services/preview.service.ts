@@ -1,8 +1,8 @@
 import { eq } from 'drizzle-orm'
 import { readFile } from 'node:fs/promises'
 import { useDatabase } from '../database/client'
-import { materialAssets, type User } from '../database/schema'
-import { hasRole } from '../utils/auth'
+import { materialAssets } from '../database/schema'
+import { hasRole, type SafeUser } from '../utils/auth'
 import {
   buildCollaboraIframeUrl,
   createWopiAccessToken,
@@ -43,7 +43,7 @@ export interface AssetPreviewInfo {
  */
 export async function getAssetPreviewInfo(
   assetId: string,
-  user: User,
+  user: SafeUser,
   requestOrigin: string,
 ): Promise<AssetPreviewInfo | null> {
   const [asset] = await useDatabase()

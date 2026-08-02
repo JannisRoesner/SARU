@@ -13,7 +13,7 @@ import type { MaterialSummary } from '~~/server/repositories/material.repository
 const route = useRoute()
 const id = computed(() => String(route.params.id))
 const { darfBearbeiten } = useSitzung()
-const { aufruf, laeuft } = useApi()
+const { aufruf } = useApi()
 const { lerngruppenOptionen, themenOptionen, schlagwortNamen } = useTaxonomie()
 
 const { data, status, error, refresh } = await useFetch<LessonDetail>(
@@ -209,7 +209,7 @@ function phaseGeaendert(phase: LessonPhaseDetail) {
 <template>
   <div>
     <UiFehlerzustand v-if="error" :text="toApiFehler(error).nachricht" @erneut="refresh()" />
-    <UiSkelett v-else-if="status === 'pending' || !data" art="list" :zeilen="8" />
+    <UiSkelett v-else-if="status === 'pending' || !data" art="liste" :zeilen="8" />
 
     <template v-else>
       <div class="mb-2">

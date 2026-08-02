@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { recordAudit } from '../../services/audit.service'
 import { createUser } from '../../services/user.service'
 import { requireAdmin } from '../../utils/auth'
-import { readValidatedBody } from '../../utils/validation'
+import { readZodBody } from '../../utils/validation'
 
 const schema = z.object({
   email: z.string().email('Bitte eine gültige E-Mail-Adresse angeben.'),
@@ -14,7 +14,7 @@ const schema = z.object({
 
 export default defineEventHandler(async (event) => {
   const admin = await requireAdmin(event)
-  const input = await readValidatedBody(event, schema)
+  const input = await readZodBody(event, schema)
 
   const user = await createUser(input)
   await recordAudit(

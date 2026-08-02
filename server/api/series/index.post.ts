@@ -3,11 +3,11 @@ import { createSeries } from '../../services/series.service'
 import { recordAudit } from '../../services/audit.service'
 import { requireEditor } from '../../utils/auth'
 import { seriesCreateSchema } from '../../utils/schemas'
-import { readValidatedBody } from '../../utils/validation'
+import { readZodBody } from '../../utils/validation'
 
 export default defineEventHandler(async (event) => {
   const user = await requireEditor(event)
-  const input = await readValidatedBody(event, seriesCreateSchema)
+  const input = await readZodBody(event, seriesCreateSchema)
 
   const id = await createSeries(input, user.id)
   await recordAudit(

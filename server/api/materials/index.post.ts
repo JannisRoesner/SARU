@@ -3,11 +3,11 @@ import { createMaterial } from '../../services/material.service'
 import { recordAudit } from '../../services/audit.service'
 import { requireEditor } from '../../utils/auth'
 import { materialCreateSchema } from '../../utils/schemas'
-import { readValidatedBody } from '../../utils/validation'
+import { readZodBody } from '../../utils/validation'
 
 export default defineEventHandler(async (event) => {
   const user = await requireEditor(event)
-  const input = await readValidatedBody(event, materialCreateSchema)
+  const input = await readZodBody(event, materialCreateSchema)
 
   const id = await createMaterial(input, user.id)
   await recordAudit(

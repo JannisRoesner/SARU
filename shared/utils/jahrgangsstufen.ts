@@ -133,7 +133,7 @@ export function formatJahrgaenge(stufen: GradeLevel[] | null | undefined): strin
   while (i < sortiert.length) {
     const start = sortiert[i]!
     if (typeof start === 'number') {
-      let end = start
+      let end: number = start
       let j = i + 1
       while (j < sortiert.length && typeof sortiert[j] === 'number' && (sortiert[j] as number) === end + 1) {
         end = sortiert[j] as number
@@ -155,6 +155,5 @@ export function jahrgangsstufenOptionen(): { value: GradeLevel; label: string }[
   return alleJahrgangsstufen.map((stufe) => ({
     value: stufe,
     label: jahrgangsstufeLabel(stufe),
-  }))
-}
-
+  }))
+}

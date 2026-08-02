@@ -55,14 +55,16 @@ export default defineEventHandler(async (event) => {
       checksum: stored.checksum,
       extractedText: null,
       extractionError: null,
-      extractionStatus: isExtractable(asset.fileName) ? 'ausstehend' : 'nicht_unterstuetzt',
+      extractionStatus: isExtractable(asset.fileName ?? '')
+        ? 'ausstehend'
+        : 'nicht_unterstuetzt',
     })
     .where(eq(materialAssets.id, fileId))
 
   void deleteThumbnail(fileId)
     .catch(() => {})
     .finally(() => {
-      queueThumbnailGeneration(fileId, asset.mimeType, asset.fileName)
+      queueThumbnailGeneration(fileId, asset.mimeType ?? 'application/octet-stream', asset.fileName)
     })
   void extractAssetText(fileId)
 

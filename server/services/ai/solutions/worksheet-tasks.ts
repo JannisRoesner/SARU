@@ -22,7 +22,7 @@ export interface WorksheetTaskUnit {
 
 /** „Ordne … dem Bild zu:“ + Kommaliste großgeschriebener Begriffe. */
 const IMAGE_LABELING =
-  /ordn\w*.{0,100}(?:bild|abbildung|skizze|schema|zeichnung).{0,60}zu\s*:?\s*((?:[\p{Lu}][\p{L}\p{N}\-]*)(?:\s*,\s*[\p{Lu}][\p{L}\p{N}\-]*){1,12})/iu
+  /ordn\w*.{0,100}(?:bild|abbildung|skizze|schema|zeichnung).{0,60}zu\s*:?\s*((?:[\p{Lu}][\p{L}\p{N}-]*)(?:\s*,\s*[\p{Lu}][\p{L}\p{N}-]*){1,12})/iu
 
 const GLOSSARY =
   /vervollständig\w*\s+das\s+glossar|glossar\s*[„"']|begriff\s+bedeutung/i
@@ -118,7 +118,7 @@ export function extractGlossaryTerms(text: string): string[] {
     .trim()
   // Einzelne großgeschriebene Terme (ggf. mit Bindestrich)
   const terms = chunk.match(
-    /(?:[\p{Lu}][\p{L}\p{N}\-]*(?:-[\p{Lu}][\p{L}\p{N}\-]*)*)/gu,
+    /(?:[\p{Lu}][\p{L}\p{N}-]*(?:-[\p{Lu}][\p{L}\p{N}-]*)*)/gu,
   )
   if (!terms) return []
   return [...new Set(terms.map((t) => t.trim()).filter((t) => t.length >= 3))]

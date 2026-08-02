@@ -39,6 +39,16 @@ watch(
 function drucken() {
   if (import.meta.client) window.print()
 }
+
+function phasennamen(
+  stunde: SeriesDetail['lessons'][number] | LessonDetail,
+): string[] {
+  if (!('phases' in stunde) || !Array.isArray(stunde.phases)) return []
+  return stunde.phases.flatMap((phase) => {
+    if (!phase || typeof phase !== 'object' || !('name' in phase)) return []
+    return typeof phase.name === 'string' ? [phase.name] : []
+  })
+}
 </script>
 
 <template>
@@ -103,8 +113,8 @@ function drucken() {
               </td>
               <td class="py-2 pr-2">{{ lessonStatuses.label(stunde.status) }}</td>
               <td class="py-2 text-ink-muted">
-                <template v-if="'phases' in stunde && stunde.phases?.length">
-                  {{ stunde.phases.map((p) => p.name).join(' · ') }}
+                <template v-if="phasennamen(stunde).length">
+                  {{ phasennamen(stunde).join(' · ') }}
                 </template>
                 <template v-else-if="laedtDetails">…</template>
                 <template v-else>–</template>

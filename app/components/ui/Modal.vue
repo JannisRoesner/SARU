@@ -8,7 +8,7 @@ const props = withDefaults(
     /** Schließen per Escape oder Klick auf den Hintergrund unterbinden. */
     fest?: boolean
   }>(),
-  { breite: 'md', fest: false },
+  { beschreibung: undefined, icon: undefined, breite: 'md', fest: false },
 )
 
 const offen = defineModel<boolean>({ required: true })
@@ -52,8 +52,8 @@ watch(offen, async (istOffen) => {
   document.body.style.overflow = istOffen ? 'hidden' : ''
   if (istOffen) {
     await nextTick()
-    dialog.value?.querySelector<HTMLElement>('[data-autofokus]')?.focus() ??
-      dialog.value?.focus()
+    const fokusziel = dialog.value?.querySelector<HTMLElement>('[data-autofokus]') ?? dialog.value
+    fokusziel?.focus()
   }
 })
 

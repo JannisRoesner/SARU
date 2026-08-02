@@ -252,7 +252,7 @@ const { favoritSetzen } = useMaterialAktionen(() => refresh())
         </p>
       </div>
 
-      <UiSkelett v-if="status === 'pending'" art="list" :zeilen="5" />
+      <UiSkelett v-if="status === 'pending'" art="liste" :zeilen="5" />
       <UiLeerzustand
         v-else-if="!(data?.treffer.length)"
         icon="magnifying-glass"
@@ -277,10 +277,10 @@ const { favoritSetzen } = useMaterialAktionen(() => refresh())
             v-else
             :reihe="treffer.datensatz as SeriesSummary"
           />
-          <p
+          <SucheSnippet
             v-if="treffer.snippet"
+            :text="treffer.snippet"
             class="treffer -mt-1 mb-3 rounded-lg bg-surface-sunken/60 px-3 py-2 text-xs leading-relaxed text-ink-muted"
-            v-html="treffer.snippet"
           />
         </template>
       </div>

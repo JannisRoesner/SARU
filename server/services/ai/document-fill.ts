@@ -1067,7 +1067,7 @@ export function fillDocxDocument(
   // Bookmarks: Text zwischen bookmarkStart/End ersetzen, wenn Name zur Antwort passt.
   xml = xml.replace(
     /<w:bookmarkStart([^>]*w:name="([^"]+)"[^>]*)\/>\s*([\s\S]*?)<w:bookmarkEnd[^>]*\/>/g,
-    (full, _attrs: string, name: string, inner: string) => {
+    (full, _attrs: string, name: string, _inner: string) => {
       if (name.startsWith('_')) return full
       const match =
         solution.answers.find((a) => a.label.toLowerCase() === name.toLowerCase()) ??
@@ -1623,7 +1623,7 @@ export function isLikelyLayoutGap(
     /^[\p{L}\p{N}\s/\-–—]+$/u.test(left) &&
     /^[\p{L}\p{N}\s/\-–—,]+$/u.test(right)
   ) {
-    // „Name“ ↔ „Symptome Behandlung Schutz“ o. Ä.
+    // „Name“ ↔ „Symptome Behandlung Schutz“ o. Ä.
     const leftWords = left.split(/\s+/).filter(Boolean)
     const rightWords = right.split(/\s+/).filter(Boolean)
     if (leftWords.length <= 3 && rightWords.length <= 6) return true

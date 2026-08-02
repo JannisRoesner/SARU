@@ -3,11 +3,11 @@ import { recordAudit } from '../../services/audit.service'
 import { maskSecret } from '../../utils/crypto'
 import { requireAdmin } from '../../utils/auth'
 import { hermesSettingsSchema } from '../../utils/schemas'
-import { readValidatedBody } from '../../utils/validation'
+import { readZodBody } from '../../utils/validation'
 
 export default defineEventHandler(async (event) => {
   const user = await requireAdmin(event)
-  const patch = await readValidatedBody(event, hermesSettingsSchema)
+  const patch = await readZodBody(event, hermesSettingsSchema)
 
   await saveHermesSettings(patch, user.id)
   await recordAudit(

@@ -27,7 +27,7 @@ interface AnalyseErgebnis {
   confidence: number
 }
 
-const { data: laeufe, refresh } = await useFetch<ImportLauf[]>('/api/imports', {
+const { data: laeufe } = await useFetch<ImportLauf[]>('/api/imports', {
   default: () => [],
 })
 

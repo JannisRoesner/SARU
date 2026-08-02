@@ -194,11 +194,10 @@ watch(offen, async (istOffen) => {
                       {{ searchEntityTypes.label(eintrag.treffer.entityType) }}
                     </UiBadge>
                   </span>
-                  <!-- eslint-disable-next-line vue/no-v-html -- Nur <mark> aus ts_headline, serverseitig erzeugt. -->
-                  <span
+                  <SucheSnippet
                     v-if="eintrag.treffer.snippet"
+                    :text="eintrag.treffer.snippet"
                     class="treffer mt-0.5 line-clamp-2 block text-xs leading-relaxed text-ink-muted"
-                    v-html="eintrag.treffer.snippet"
                   />
                   <span
                     v-if="eintrag.treffer.matchedIn.includes('inhalt') && eintrag.treffer.sourceLabel"

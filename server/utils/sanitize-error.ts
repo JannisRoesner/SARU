@@ -5,8 +5,6 @@ import { createLogger } from './logger'
 
 const log = createLogger('errors')
 
-export { istTechnischeMeldung, oeffentlicheFehlermeldung }
-
 export function toPublicError(
   error: unknown,
   fallback = 'Es ist ein interner Fehler aufgetreten. Bitte später erneut versuchen.',
@@ -19,6 +17,6 @@ export function toPublicError(
     return error
   }
 
-  log.error({ err: error }, 'Unbehandelter Serverfehler')
+  log.error('Unbehandelter Serverfehler', { err: error })
   return appError('INTERNER_FEHLER', oeffentlicheFehlermeldung(error, fallback), { cause: error })
 }

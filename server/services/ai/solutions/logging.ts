@@ -17,6 +17,7 @@ export type SolutionPipelineEvent =
   | 'task.validation_passed'
   | 'render.task_completed'
   | 'render.route_selected'
+  | 'render.prefilled_highlighted'
   | 'render.fallback_appendix'
   | 'solution.run.completed'
   | 'solution.run.failed'

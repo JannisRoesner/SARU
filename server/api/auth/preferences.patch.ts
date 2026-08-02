@@ -2,7 +2,7 @@ import { SCHOOL_FORMS } from '#shared/types/domain'
 import { z } from 'zod'
 import { updatePreferences } from '../../services/user.service'
 import { requireUser } from '../../utils/auth'
-import { readValidatedBody } from '../../utils/validation'
+import { readZodBody } from '../../utils/validation'
 
 const schema = z.object({
   theme: z.enum(['hell', 'dunkel', 'system']).optional(),
@@ -16,6 +16,6 @@ const schema = z.object({
 
 export default defineEventHandler(async (event) => {
   const user = await requireUser(event)
-  const preferences = await readValidatedBody(event, schema)
+  const preferences = await readZodBody(event, schema)
   return { user: await updatePreferences(user.id, preferences) }
 })

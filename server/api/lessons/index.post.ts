@@ -3,11 +3,11 @@ import { createLesson } from '../../services/lesson.service'
 import { recordAudit } from '../../services/audit.service'
 import { requireEditor } from '../../utils/auth'
 import { lessonCreateSchema } from '../../utils/schemas'
-import { readValidatedBody } from '../../utils/validation'
+import { readZodBody } from '../../utils/validation'
 
 export default defineEventHandler(async (event) => {
   const user = await requireEditor(event)
-  const input = await readValidatedBody(event, lessonCreateSchema)
+  const input = await readZodBody(event, lessonCreateSchema)
 
   const id = await createLesson(input, user.id)
   await recordAudit(

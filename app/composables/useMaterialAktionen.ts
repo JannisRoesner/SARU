@@ -43,7 +43,9 @@ export function useMaterialAktionen(nachAenderung?: () => unknown) {
     if (!ergebnis) return null
     hinweise.erfolg('Kopie angelegt.', {
       text: 'Öffnen',
-      ausfuehren: () => navigateTo(`/materialien/${ergebnis.id}`),
+      ausfuehren: () => {
+        void navigateTo(`/materialien/${ergebnis.id}`)
+      },
     })
     await fertig()
     return ergebnis.id

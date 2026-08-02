@@ -3,7 +3,7 @@ import { recordAudit } from '../../services/audit.service'
 import { updateUser } from '../../services/user.service'
 import { requireAdmin } from '../../utils/auth'
 import { invalidInput } from '../../utils/errors'
-import { readValidatedBody, uuidSchema } from '../../utils/validation'
+import { readZodBody, uuidSchema } from '../../utils/validation'
 
 const schema = z.object({
   name: z.string().min(2).max(120).optional(),
@@ -16,7 +16,7 @@ const schema = z.object({
 export default defineEventHandler(async (event) => {
   const admin = await requireAdmin(event)
   const id = uuidSchema.parse(getRouterParam(event, 'id'))
-  const input = await readValidatedBody(event, schema)
+  const input = await readZodBody(event, schema)
 
   // Selbstsperre und versehentliche Selbst-Herabstufung abfangen.
   if (id === admin.id && (input.isActive === false || (input.role && input.role !== 'admin'))) {

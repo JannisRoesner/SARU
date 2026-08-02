@@ -10,7 +10,13 @@ const props = withDefaults(
     /** Bei destruktiven Aktionen: exakt diesen Text eintippen lassen. */
     tippBestaetigung?: string | null
   }>(),
-  { bestaetigen: 'Bestätigen', abbrechen: 'Abbrechen', gefahr: false, tippBestaetigung: null },
+  {
+    bestaetigen: 'Bestätigen',
+    abbrechen: 'Abbrechen',
+    gefahr: false,
+    icon: undefined,
+    tippBestaetigung: null,
+  },
 )
 
 const emit = defineEmits<{ bestaetigt: []; abgebrochen: [] }>()

@@ -8,8 +8,6 @@ useHead({ title: 'Unterrichtsstunden' })
 const route = useRoute()
 const router = useRouter()
 const { darfBearbeiten } = useSitzung()
-const { fachOptionen, lerngruppenOptionen } = useTaxonomie()
-
 const suche = ref(String(route.query.q ?? ''))
 const sort = ref(String(route.query.sort ?? 'datum_neu'))
 const page = ref(Number(route.query.page ?? 1) || 1)
@@ -116,7 +114,7 @@ watch(page, syncQuery)
         <span class="font-medium text-ink">{{ formatZahl(data?.total ?? 0) }}</span>
         Stunden
       </p>
-      <UiSkelett v-if="status === 'pending'" art="list" :zeilen="5" />
+      <UiSkelett v-if="status === 'pending'" art="liste" :zeilen="5" />
       <UiLeerzustand
         v-else-if="!(data?.items.length)"
         icon="chalkboard-user"

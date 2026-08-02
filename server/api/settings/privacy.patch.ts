@@ -2,11 +2,11 @@ import { getPrivacySettings, savePrivacySettings } from '../../services/settings
 import { recordAudit } from '../../services/audit.service'
 import { requireAdmin } from '../../utils/auth'
 import { privacySettingsSchema } from '../../utils/schemas'
-import { readValidatedBody } from '../../utils/validation'
+import { readZodBody } from '../../utils/validation'
 
 export default defineEventHandler(async (event) => {
   const user = await requireAdmin(event)
-  const patch = await readValidatedBody(event, privacySettingsSchema)
+  const patch = await readZodBody(event, privacySettingsSchema)
 
   await savePrivacySettings(patch, user.id)
   await recordAudit(

@@ -118,7 +118,7 @@ const { favoritSetzen } = useMaterialAktionen(() => refresh())
             </UiButton>
           </template>
 
-          <UiSkelett v-if="status === 'pending'" art="list" :zeilen="2" />
+          <UiSkelett v-if="status === 'pending'" art="liste" :zeilen="2" />
           <div
             v-else-if="!data?.zuletztBearbeitet.length"
             class="flex min-h-[11rem] items-center justify-center"
@@ -152,7 +152,7 @@ const { favoritSetzen } = useMaterialAktionen(() => refresh())
             </UiButton>
           </template>
 
-          <UiSkelett v-if="status === 'pending'" art="list" :zeilen="3" />
+          <UiSkelett v-if="status === 'pending'" art="liste" :zeilen="3" />
           <div
             v-else-if="!data?.naechsteStunden.length"
             class="flex min-h-[11rem] items-center justify-center"
@@ -185,7 +185,7 @@ const { favoritSetzen } = useMaterialAktionen(() => refresh())
             </UiButton>
           </template>
 
-          <UiSkelett v-if="status === 'pending'" art="cards" :zeilen="2" />
+          <UiSkelett v-if="status === 'pending'" art="karten" :zeilen="2" />
           <div
             v-else-if="!data?.aktiveReihen.length"
             class="flex min-h-[11rem] items-center justify-center"
@@ -213,7 +213,7 @@ const { favoritSetzen } = useMaterialAktionen(() => refresh())
             </UiButton>
           </template>
 
-          <UiSkelett v-if="status === 'pending'" art="list" :zeilen="3" />
+          <UiSkelett v-if="status === 'pending'" art="liste" :zeilen="3" />
           <div
             v-else-if="!data?.favoriten.length"
             class="flex min-h-[11rem] items-center justify-center"

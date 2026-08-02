@@ -15,7 +15,7 @@ export interface AutosaveOptionen<T> {
  * Beim Verlassen der Seite wird eine noch ausstehende Änderung sofort
  * geschrieben, damit nichts verloren geht.
  */
-export function useAutosave<T extends object>(quelle: Ref<T>, optionen: AutosaveOptionen<T>) {
+export function useAutosave<T extends object>(quelle: T | Ref<T>, optionen: AutosaveOptionen<T>) {
   const { verzoegerungMs = 1200, speichern, gueltig } = optionen
 
   const zustand = ref<SpeicherZustand>('unveraendert')
@@ -64,7 +64,7 @@ export function useAutosave<T extends object>(quelle: Ref<T>, optionen: Autosave
   }
 
   const beobachter = watch(
-    quelle,
+    quelle as Ref<T>,
     () => {
       zustand.value = 'geaendert'
       if (zeitgeber) clearTimeout(zeitgeber)

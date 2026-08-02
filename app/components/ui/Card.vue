@@ -14,7 +14,16 @@ const props = withDefaults(
     /** Anfangszustand, wenn nichts gespeichert ist. */
     standardOffen?: boolean
   }>(),
-  { blank: false, einklappbar: false, standardOffen: true },
+  {
+    titel: undefined,
+    untertitel: undefined,
+    icon: undefined,
+    blank: false,
+    to: undefined,
+    einklappbar: false,
+    einklappId: undefined,
+    standardOffen: true,
+  },
 )
 
 const persistent = props.einklappbar && props.einklappId

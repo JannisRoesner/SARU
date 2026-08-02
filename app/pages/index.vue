@@ -50,8 +50,8 @@ function anmeldenOeffnen() {
 
 <template>
   <StartDashboard v-if="angemeldet" />
-  <template v-else>
+  <div v-else class="contents">
     <StartLanding @anmelden="anmeldenOeffnen" />
     <AuthAnmeldeModal v-model="anmeldeOffen" :weiter="weiter" />
-  </template>
+  </div>
 </template>

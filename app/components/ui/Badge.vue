@@ -9,7 +9,7 @@ const props = withDefaults(
     /** Eigene Farbe, z. B. die Fachfarbe aus der Datenbank. */
     farbe?: string | null
   }>(),
-  { ton: 'neutral', groesse: 'sm' },
+  { ton: 'neutral', icon: undefined, groesse: 'sm', farbe: null },
 )
 
 const TOENE = {

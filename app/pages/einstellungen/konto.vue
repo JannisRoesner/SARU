@@ -184,7 +184,7 @@ async function speichern() {
         <p class="text-sm text-ink-muted">
           Meldet dieses Gerät ab. Andere Anmeldungen bleiben bestehen.
         </p>
-        <UiButton variante="leise" icon="right-from-bracket" @click="abmelden">
+        <UiButton variante="still" icon="right-from-bracket" @click="abmelden">
           Abmelden
         </UiButton>
       </div>

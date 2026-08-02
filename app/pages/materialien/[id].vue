@@ -84,9 +84,10 @@ watch(
 const autosave = useAutosave(formular, {
   gueltig: () => geladen.value && Boolean(formular.title.trim()) && darfBearbeiten.value,
   speichern: async (daten) => {
-    await $fetch(`/api/materials/${id.value}`, {
+    await aufruf(`/api/materials/${id.value}`, {
       method: 'PATCH',
       body: daten,
+      stumm: true,
     })
   },
 })
@@ -235,7 +236,9 @@ async function kiLoesung() {
       : ''
     hinweise.erfolg(`Dokument angelegt${strategie}. Öffnen?`, {
       text: 'Zur Lösung',
-      ausfuehren: () => navigateTo(`/materialien/${ergebnis.solutionMaterialId}`),
+      ausfuehren: () => {
+        void navigateTo(`/materialien/${ergebnis.solutionMaterialId}`)
+      },
     })
   }
 }
@@ -354,7 +357,7 @@ const loesungBearbeitbar = computed(() => loesungEditorModus.value !== null)
 <template>
   <div>
     <UiFehlerzustand v-if="error" :text="toApiFehler(error).nachricht" @erneut="refresh()" />
-    <UiSkelett v-else-if="status === 'pending' || !data" art="list" :zeilen="8" />
+    <UiSkelett v-else-if="status === 'pending' || !data" art="liste" :zeilen="8" />
 
     <template v-else>
       <div class="mb-2">

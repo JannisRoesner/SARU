@@ -25,6 +25,12 @@ const passende = computed(() => {
     .slice(0, 8)
 })
 
+function listeVerzoegertSchliessen() {
+  globalThis.setTimeout(() => {
+    listeOffen.value = false
+  }, 150)
+}
+
 function hinzufuegen(text: string) {
   const sauber = text.trim()
   if (!sauber || werte.value.length >= props.max) return
@@ -97,7 +103,7 @@ function beiTaste(event: KeyboardEvent) {
         class="h-7 min-w-[8rem] flex-1 bg-transparent px-1 text-sm text-ink placeholder:text-ink-subtle focus:outline-none"
         @keydown="beiTaste"
         @focus="listeOffen = true"
-        @blur="setTimeout(() => (listeOffen = false), 150)"
+        @blur="listeVerzoegertSchliessen"
       >
     </div>
 

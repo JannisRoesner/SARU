@@ -192,7 +192,7 @@ const mehr = [
           </div>
 
           <h1 class="mt-8 text-3xl leading-[1.15] tracking-tight text-ink sm:text-4xl lg:text-[2.75rem]">
-            Dein Archiv für Materialien,<br class="hidden sm:block" />
+            Dein Archiv für Materialien,<br class="hidden sm:block">
             Stunden und Reihen
           </h1>
           <p class="mx-auto mt-4 max-w-xl text-base leading-relaxed text-ink-muted sm:text-lg">

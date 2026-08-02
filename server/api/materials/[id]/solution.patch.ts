@@ -3,7 +3,7 @@ import { getMaterialDetail } from '../../../repositories/material.repository'
 import { updateSolutionStructure } from '../../../services/ai/solutions'
 import { recordAudit } from '../../../services/audit.service'
 import { requireEditor } from '../../../utils/auth'
-import { parseOrThrow, readValidatedBody, uuidSchema } from '../../../utils/validation'
+import { parseOrThrow, readZodBody, uuidSchema } from '../../../utils/validation'
 
 const bboxSchema = z
   .object({
@@ -49,7 +49,7 @@ const structuredSolutionSchema = z.object({
 export default defineEventHandler(async (event) => {
   const user = await requireEditor(event)
   const id = parseOrThrow(uuidSchema, getRouterParam(event, 'id'))
-  const body = await readValidatedBody(
+  const body = await readZodBody(
     event,
     z.object({
       structuredSolution: structuredSolutionSchema,

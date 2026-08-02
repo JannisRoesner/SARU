@@ -7,7 +7,7 @@ withDefaults(
     /** Kompakt für Bereiche innerhalb einer Karte. */
     klein?: boolean
   }>(),
-  { icon: 'inbox', klein: false },
+  { icon: 'inbox', text: undefined, klein: false },
 )
 </script>
 

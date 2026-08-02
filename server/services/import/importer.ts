@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { isError } from 'h3'
 import { oeffentlicheFehlermeldung } from '#shared/utils/public-error'
+import { normalizeGradeLevel } from '#shared/utils/jahrgangsstufen'
 import { desc, eq, sql } from 'drizzle-orm'
 import { useDatabase } from '../../database/client'
 import {
@@ -206,7 +207,7 @@ export async function analyzeImport(
     seriesTitle: buildSeriesTitle(parsed),
     subjectName: parsed.course.subjectName ?? undefined,
     learningGroupName: parsed.course.groupName ?? undefined,
-    gradeLevel: parsed.course.gradeLevel,
+    gradeLevel: normalizeGradeLevel(parsed.course.gradeLevel),
     schoolYear: parsed.course.schoolYear ?? undefined,
     createMaterials: true,
     linkDuplicates: true,
@@ -287,8 +288,6 @@ function buildSeriesTitle(parsed: ParsedExport): string {
   if (parsed.course.halfYear) parts.push(`${parsed.course.halfYear}. Halbjahr`)
   return parts.join(' · ')
 }
-
-import { normalizeGradeLevel } from '#shared/utils/jahrgangsstufen'
 
 async function findExistingLearningGroupId(
   name: string | null,
@@ -401,13 +400,15 @@ export async function commitImport(
   }
 
   const mappedGradeLevel = normalizeGradeLevel(mapping.gradeLevel)
+  const numericLearningGroupGradeLevel =
+    typeof mappedGradeLevel === 'number' ? mappedGradeLevel : null
 
   let learningGroupId: string | null = mapping.learningGroupId ?? null
   if (!learningGroupId && mapping.learningGroupName) {
     learningGroupId = await getOrCreateLearningGroup({
       name: mapping.learningGroupName,
       subjectId,
-      gradeLevel: mappedGradeLevel,
+      gradeLevel: numericLearningGroupGradeLevel,
       schoolYear: mapping.schoolYear ?? null,
       schoolForm: mapping.schoolForm ?? null,
     })

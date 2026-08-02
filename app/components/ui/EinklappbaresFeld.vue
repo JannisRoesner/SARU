@@ -16,7 +16,9 @@ const props = withDefaults(
     immerOffen?: boolean
   }>(),
   {
+    placeholder: undefined,
     zeilen: 4,
+    hinweis: undefined,
     schwellwert: 360,
     leerVorschau: 'Kein Inhalt',
     immerOffen: false,

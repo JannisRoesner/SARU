@@ -2,12 +2,12 @@ import { useDatabase } from '../../database/client'
 import { savedSearches } from '../../database/schema'
 import { requireUser } from '../../utils/auth'
 import { savedSearchSchema } from '../../utils/schemas'
-import { readValidatedBody } from '../../utils/validation'
+import { readZodBody } from '../../utils/validation'
 
 /** Legt eine gespeicherte Suche an oder überschreibt die gleichnamige. */
 export default defineEventHandler(async (event) => {
   const user = await requireUser(event)
-  const input = await readValidatedBody(event, savedSearchSchema)
+  const input = await readZodBody(event, savedSearchSchema)
 
   const [saved] = await useDatabase()
     .insert(savedSearches)

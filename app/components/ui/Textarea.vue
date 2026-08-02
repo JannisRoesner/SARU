@@ -10,7 +10,7 @@ const props = withDefaults(
     /** Feste Maximalhöhe mit internem Scroll statt Seitenwachstum. */
     begrenzt?: boolean
   }>(),
-  { zeilen: 3, waechst: true, begrenzt: false },
+  { placeholder: undefined, zeilen: 3, waechst: true, begrenzt: false },
 )
 
 const waechstAktiv = computed(() => props.waechst && !props.begrenzt)

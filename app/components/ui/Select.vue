@@ -12,7 +12,7 @@ withDefaults(
     disabled?: boolean
     fehlerhaft?: boolean
   }>(),
-  {},
+  { platzhalter: undefined },
 )
 
 const wert = defineModel<string | number | null>()

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { materialTypes, origins } from '#shared/utils/labels'
+import { materialTypes } from '#shared/utils/labels'
 import type { MaterialSummary, MaterialFacets } from '~~/server/repositories/material.repository'
 import type { Paginated } from '#shared/types/domain'
 
@@ -216,7 +216,7 @@ const aktiveFilter = computed(() => {
         </p>
       </div>
 
-      <UiSkelett v-if="status === 'pending'" art="list" :zeilen="6" />
+      <UiSkelett v-if="status === 'pending'" art="liste" :zeilen="6" />
       <UiLeerzustand
         v-else-if="!eintraege.length"
         icon="folder-open"

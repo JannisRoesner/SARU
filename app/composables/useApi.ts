@@ -92,7 +92,7 @@ export function useApi() {
     const { erfolgsmeldung, stumm, ...fetchOptions } = options
     laeuft.value = true
     try {
-      const ergebnis = await $fetch<T>(request, fetchOptions)
+      const ergebnis = (await $fetch(request, fetchOptions)) as T
       if (erfolgsmeldung) hinweise.erfolg(erfolgsmeldung)
       return ergebnis
     } catch (error) {

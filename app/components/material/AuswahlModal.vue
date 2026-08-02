@@ -54,7 +54,7 @@ function waehlen(material: MaterialSummary) {
     </UiField>
 
     <div class="mt-4 max-h-[50vh] space-y-2 overflow-y-auto">
-      <UiSkelett v-if="status === 'pending'" art="list" :zeilen="4" />
+      <UiSkelett v-if="status === 'pending'" art="liste" :zeilen="4" />
       <UiLeerzustand
         v-else-if="!eintraege.length"
         klein

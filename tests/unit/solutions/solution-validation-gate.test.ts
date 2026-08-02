@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { extractCandidateBank } from '../../../server/services/ai/solutions/candidate-bank'
+import {
+  extractCandidateBank,
+  normalizeCandidate,
+} from '../../../server/services/ai/solutions/candidate-bank'
 import {
   assertClozeValidationPassed,
   hasPlaceholderAnswers,
@@ -10,7 +13,6 @@ import {
 } from '../../../server/services/ai/solutions/validators/cloze-validator'
 import type { CandidateBank } from '../../../server/services/ai/solutions/types'
 import type { StructuredSolution } from '../../../server/services/ai/document-fill'
-import { normalizeCandidate } from '../../../server/services/ai/solutions/candidate-bank'
 
 const VORHAUT_WORDS = [
   'Eichel',

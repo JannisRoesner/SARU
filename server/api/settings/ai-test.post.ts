@@ -3,7 +3,7 @@ import { getAiSettings } from '../../services/settings.service'
 import { requireAdmin } from '../../utils/auth'
 import { checkRateLimit } from '../../utils/rate-limit'
 import { aiTestSchema } from '../../utils/schemas'
-import { readValidatedBody } from '../../utils/validation'
+import { readZodBody } from '../../utils/validation'
 
 /**
  * Prüft die Verbindung zum konfigurierten Anbieter. Nicht übermittelte Felder
@@ -12,7 +12,7 @@ import { readValidatedBody } from '../../utils/validation'
  */
 export default defineEventHandler(async (event) => {
   const user = await requireAdmin(event)
-  const patch = await readValidatedBody(event, aiTestSchema)
+  const patch = await readZodBody(event, aiTestSchema)
 
   checkRateLimit(`ki-test:${user.id}`, {
     limit: 10,
