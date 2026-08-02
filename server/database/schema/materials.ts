@@ -72,6 +72,13 @@ export interface AiMeta {
   layoutVisionChecked?: boolean
   /** Aufgaben oder Antwortbereiche aus dem Vision-Check übernommen. */
   layoutVisionRepaired?: boolean
+  /** Visuelle Prüfung des fertig gerenderten PDFs. */
+  qualityVision?: {
+    status: 'passed' | 'warning' | 'unavailable'
+    issues: string[]
+    checkedAt: string
+    model?: string
+  }
   sourceFileName?: string
   /** text_layer | vision – Herkunft des für Metadaten genutzten Extrakts. */
   extractionMethod?: string

@@ -89,6 +89,33 @@ describe('assessPdfLayoutPlan', () => {
     expect(assessment.inplaceTaskCount).toBe(2)
     expect(assessment.answerTargetCount).toBe(2)
   })
+
+  it('erzwingt die visuelle Prüfung für PDFs auch bei plausibler lokaler Geometrie', () => {
+    const assessment = assessPdfLayoutPlan({
+      documentText: 'Kreuze an, welche Aussagen richtig und falsch sind.',
+      tasks: [
+        task({
+          kind: 'matching_table',
+          renderMode: 'overlay',
+          confidence: 0.95,
+          targets: [
+            {
+              id: 'choice-1',
+              kind: 'choice_cell',
+              page: 1,
+              bbox: { x: 0.7, y: 0.4, w: 0.03, h: 0.03 },
+              choiceValue: 'richtig',
+              source: 'native',
+            },
+          ],
+        }),
+      ],
+      requireVision: true,
+    })
+
+    expect(assessment.shouldCheck).toBe(true)
+    expect(assessment.reasons).toContain('PDF layout requires mandatory visual verification')
+  })
 })
 
 describe('parsePdfLayoutVisionResponse', () => {

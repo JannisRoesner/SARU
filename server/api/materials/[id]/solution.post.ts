@@ -1,7 +1,5 @@
 import { z } from 'zod'
-import { getMaterialDetail } from '../../../repositories/material.repository'
-import { generateSolution } from '../../../services/ai/solutions'
-import { recordAudit } from '../../../services/audit.service'
+import { enqueueSolutionGeneration } from '../../../services/ai/solutions'
 import { requireEditor } from '../../../utils/auth'
 import { checkRateLimit } from '../../../utils/rate-limit'
 import { parseOrThrow, readZodBody, uuidSchema } from '../../../utils/validation'
@@ -30,23 +28,7 @@ export default defineEventHandler(async (event) => {
     message: 'Es wurden zu viele KI-Anfragen gestellt. Bitte später erneut versuchen.',
   })
 
-  const result = await generateSolution(id, user.id, options)
-  await recordAudit(
-    {
-      userId: user.id,
-      action: 'ki.musterloesung_erzeugt',
-      entityType: 'material',
-      entityId: id,
-      details: {
-        modell: result.model,
-        loesung: result.solutionMaterialId,
-        strategie: result.fillStrategy,
-        hermes: result.hermesUsed,
-      },
-    },
-    event,
-  )
-
-  setResponseStatus(event, 201)
-  return { ...result, loesung: await getMaterialDetail(result.solutionMaterialId) }
+  const job = await enqueueSolutionGeneration(id, user.id, options)
+  setResponseStatus(event, 202)
+  return job
 })

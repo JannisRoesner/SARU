@@ -7,6 +7,7 @@ import { aiJobs, materialAssets, materialVariants } from '../../database/schema'
 import { oeffentlicheFehlermeldung } from '#shared/utils/public-error'
 import { appError } from '../../utils/errors'
 import { createLogger } from '../../utils/logger'
+import { recordAudit } from '../audit.service'
 import { materialTypes, schoolForms } from '#shared/utils/labels'
 import { getMaterialDetail } from '../../repositories/material.repository'
 import {
@@ -71,6 +72,10 @@ import {
   assessPdfLayoutPlan,
   repairPdfLayoutViaVision,
 } from './solutions/repair/pdf-layout-vision'
+import {
+  verifyPdfSolutionViaVision,
+  type PdfSolutionQualityResult,
+} from './solutions/repair/pdf-solution-vision'
 import { mergeNativeAndVisualTargets } from './solutions/docx-target-merger'
 import { renderPdfSolution } from './solutions/renderers/pdf-renderer'
 import { renderDocxSolution } from './solutions/renderers/docx-renderer'
@@ -122,6 +127,8 @@ export interface GenerateSolutionOptions {
   /** Bilder/PDFs mitschicken, sofern der Anbieter das kann. */
   useVision?: boolean
   model?: string
+  /** Interne Job-ID für asynchron gestartete Läufe. Nicht aus der API befüllbar. */
+  jobId?: string
 }
 
 export interface GenerateSolutionResult {
@@ -133,6 +140,73 @@ export interface GenerateSolutionResult {
   fillStrategy: string
   hermesUsed: boolean
   fileName: string | null
+}
+
+export interface QueuedSolutionJob {
+  jobId: string
+  status: 'wartend'
+}
+
+/**
+ * Stellt die aufwendige Erzeugung in die lokale Prozesswarteschlange. Die
+ * Datenbank hält den Status fest; die HTTP-Anfrage kann sofort zurückkehren.
+ */
+export async function enqueueSolutionGeneration(
+  materialId: string,
+  userId: string | null,
+  options: GenerateSolutionOptions = {},
+): Promise<QueuedSolutionJob> {
+  const db = useDatabase()
+  const settings = await getAiSettings()
+  const provisionalModel =
+    options.model?.trim() || settings.visionModel?.trim() || settings.chatModel?.trim() || 'pending'
+  const [job] = await db
+    .insert(aiJobs)
+    .values({
+      userId,
+      materialId,
+      kind: 'musterloesung',
+      provider: settings.provider,
+      model: provisionalModel,
+      status: 'wartend',
+    })
+    .returning({ id: aiJobs.id })
+
+  const jobId = job!.id
+  setImmediate(() => {
+    void generateSolution(materialId, userId, { ...options, jobId })
+      .then((result) =>
+        recordAudit({
+          userId,
+          action: 'ki.musterloesung_erzeugt',
+          entityType: 'material',
+          entityId: materialId,
+          details: {
+            modell: result.model,
+            loesung: result.solutionMaterialId,
+            strategie: result.fillStrategy,
+            hermes: result.hermesUsed,
+          },
+        }),
+      )
+      .catch(async (error) => {
+        // Fehler vor dem regulären try/catch in generateSolution (z. B. Einstellungen)
+        // müssen den wartenden Job ebenfalls abschließen.
+        await db
+          .update(aiJobs)
+          .set({
+            status: 'fehlgeschlagen',
+            errorMessage: oeffentlicheFehlermeldung(
+              error,
+              'Die KI-Musterlösung konnte nicht erzeugt werden.',
+            ),
+            finishedAt: new Date(),
+          })
+          .where(eq(aiJobs.id, jobId))
+      })
+  })
+
+  return { jobId, status: 'wartend' }
 }
 
 interface SourceAsset {
@@ -333,6 +407,7 @@ export async function generateSolution(
     const assessment = assessPdfLayoutPlan({
       documentText: analysisDocumentText,
       tasks,
+      requireVision: true,
     })
     if (assessment.shouldCheck) {
       pdfLayoutVisionChecked = true
@@ -359,10 +434,17 @@ export async function generateSolution(
         })
         const visualTargetCount =
           visual?.tasks.flatMap((task) => task.targets).length ?? 0
+        const localHasChoiceCells = tasks.some((task) =>
+          task.targets.some((target) => target.kind === 'choice_cell'),
+        )
+        const visualHasChoiceCells = visual?.tasks.some((task) =>
+          task.targets.some((target) => target.kind === 'choice_cell'),
+        )
         const canAdoptVisualPlan = Boolean(
           visual &&
+            visual.verdict === 'repair' &&
             visual.tasks.length > 0 &&
-            visual.verdict !== 'no_targets' &&
+            (!localHasChoiceCells || visualHasChoiceCells) &&
             (visualTargetCount > 0 || tasks.length === 0),
         )
         if (visual && canAdoptVisualPlan) {
@@ -606,21 +688,33 @@ export async function generateSolution(
   const privacy = await getPrivacySettings()
   const startedAt = Date.now()
 
-  const [job] = await db
-    .insert(aiJobs)
-    .values({
-      userId,
-      materialId,
-      kind: 'musterloesung',
-      // Enum kennt nur OpenAI-kompatible Anbieter; Hermes wird in aiMeta vermerkt.
-      provider: settings.provider,
-      model,
-      status: 'laeuft',
-      prompt: privacy.storeAiPrompts ? prompt.slice(0, 100_000) : null,
-    })
-    .returning({ id: aiJobs.id })
-
-  const jobId = job!.id
+  let jobId = options.jobId
+  if (jobId) {
+    await db
+      .update(aiJobs)
+      .set({
+        provider: settings.provider,
+        model,
+        status: 'laeuft',
+        prompt: privacy.storeAiPrompts ? prompt.slice(0, 100_000) : null,
+      })
+      .where(eq(aiJobs.id, jobId))
+  } else {
+    const [job] = await db
+      .insert(aiJobs)
+      .values({
+        userId,
+        materialId,
+        kind: 'musterloesung',
+        // Enum kennt nur OpenAI-kompatible Anbieter; Hermes wird in aiMeta vermerkt.
+        provider: settings.provider,
+        model,
+        status: 'laeuft',
+        prompt: privacy.storeAiPrompts ? prompt.slice(0, 100_000) : null,
+      })
+      .returning({ id: aiJobs.id })
+    jobId = job!.id
+  }
   const runId = jobId
 
   logPipeline('solution.run.started', {
@@ -920,6 +1014,30 @@ export async function generateSolution(
       throw appError('KI_FEHLER', 'Es konnte kein Lösungsdokument erzeugt werden.')
     }
 
+    let qualityVision: PdfSolutionQualityResult | null = null
+    if (
+      source &&
+      source.extension === 'pdf' &&
+      filled.mimeType === 'application/pdf' &&
+      useVision &&
+      settings.enabled &&
+      model.trim()
+    ) {
+      qualityVision = await verifyPdfSolutionViaVision({
+        source: source.buffer,
+        sourceFileName: source.fileName,
+        rendered: filled.buffer,
+        renderedFileName: filled.fileName,
+        settings,
+        model,
+      })
+      log.info('PDF-Musterlösung visuell qualitätsgeprüft', {
+        status: qualityVision.status,
+        issues: qualityVision.issues,
+        model: qualityVision.model ?? null,
+      })
+    }
+
     const summaryMd = [
       AI_CONTENT_NOTICE_MD,
       '',
@@ -960,6 +1078,7 @@ export async function generateSolution(
           hermesUsed,
           layoutVisionChecked: pdfLayoutVisionChecked,
           layoutVisionRepaired: pdfLayoutRepairedViaVision,
+          qualityVision: qualityVision ?? undefined,
           sourceFileName: source?.fileName,
           structuredSolution: structured,
         },

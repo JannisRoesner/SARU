@@ -29,6 +29,8 @@ export interface PdfVisionLayoutResult {
 export function assessPdfLayoutPlan(args: {
   documentText: string
   tasks: TaskBlock[]
+  /** PDFs werden vor dem Füllen immer mindestens einmal visuell gegengeprüft. */
+  requireVision?: boolean
 }): PdfLayoutAssessment {
   const worksheetTasks = detectWorksheetTasks(args.documentText)
   const openTaskCount = worksheetTasks.filter((task) => task.kind === 'open_ended').length
@@ -39,6 +41,10 @@ export function assessPdfLayoutPlan(args: {
   )
   const answerTargetCount = inplaceTasks.flatMap((task) => task.targets).length
   const reasons: string[] = []
+
+  if (args.requireVision) {
+    reasons.push('PDF layout requires mandatory visual verification')
+  }
 
   if (args.tasks.length === 0) {
     reasons.push(
@@ -104,7 +110,7 @@ export function buildPdfLayoutVisionPrompt(args: {
   return [
     'Du prüfst ausschließlich das Layout eines Arbeitsblatts, nicht seine Lösungen.',
     'Erkenne sichtbare Aufgaben und die jeweils dazugehörigen beschreibbaren Antwortbereiche.',
-    'Antwortbereiche können Linienblöcke, leere Kästen, Tabellenzellen oder Diagrammziele sein.',
+    'Antwortbereiche können Linienblöcke, leere Kästen, Tabellenzellen, exklusive Auswahlzellen oder Diagrammziele sein.',
     'Dekorationen, Trennlinien, Kopf-/Fußzeilen und bereits bedruckte Flächen sind keine Antwortbereiche.',
     '',
     `Plausibilitätsprobleme: ${args.assessment.reasons.join('; ')}`,
@@ -112,7 +118,7 @@ export function buildPdfLayoutVisionPrompt(args: {
     `Bisheriger Plan: ${JSON.stringify(currentPlan)}`,
     '',
     'Antworte ausschließlich als JSON:',
-    '{"verdict":"confirm|repair|no_targets","tasks":[{"instruction":"…","kind":"open_response|short_answer|table|diagram|no_response","page":1,"confidence":0.0,"answerRegions":[{"kind":"line_block|box|table_cell|diagram_target","bbox":{"x":0.1,"y":0.2,"w":0.8,"h":0.15}}]}]}',
+    '{"verdict":"confirm|repair|no_targets","tasks":[{"instruction":"…","kind":"open_response|short_answer|table|choice|diagram|no_response","page":1,"confidence":0.0,"answerRegions":[{"kind":"line_block|box|table_cell|choice_cell|diagram_target","bbox":{"x":0.1,"y":0.2,"w":0.8,"h":0.15}}]}]}',
     '',
     'Regeln:',
     '- bbox normalisiert 0–1, Ursprung oben links',
@@ -148,6 +154,8 @@ function mapTargetKind(raw: string): AnswerTargetKind {
   switch (raw.toLowerCase()) {
     case 'table_cell':
       return 'table_cell'
+    case 'choice_cell':
+      return 'choice_cell'
     case 'diagram_target':
       return 'shape_box'
     case 'box':
@@ -160,6 +168,8 @@ function mapTargetKind(raw: string): AnswerTargetKind {
 function mapTaskKind(raw: string, hasTargets: boolean): TaskKind {
   switch (raw.toLowerCase()) {
     case 'table':
+      return hasTargets ? 'matching_table' : 'free_text_separate'
+    case 'choice':
       return hasTargets ? 'matching_table' : 'free_text_separate'
     case 'diagram':
       return hasTargets ? 'diagram_completion' : 'free_text_separate'

@@ -50,7 +50,7 @@ export interface SolutionPromptContext {
   taskInventory?: string | null
 }
 
-export const SOLUTION_PROMPT_VERSION = '8-number-matching'
+export const SOLUTION_PROMPT_VERSION = '9-vision-qa-choice-tables'
 
 const SOLUTION_JSON_SCHEMA = `{
   "summary": "kurzer Überblick in 1–2 Sätzen",

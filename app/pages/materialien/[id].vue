@@ -128,6 +128,74 @@ const neueRelation = reactive({
   note: '',
 })
 const kiAnweisung = ref('')
+type LoesungsJobStatus = 'wartend' | 'laeuft' | 'erfolgreich' | 'fehlgeschlagen'
+const loesungsJob = ref<{
+  id: string
+  status: LoesungsJobStatus
+  resultMaterialId: string | null
+  errorMessage: string | null
+  qualityVision?: { status: 'passed' | 'warning' | 'unavailable'; issues: string[] } | null
+} | null>(null)
+let loesungsJobTimer: ReturnType<typeof setInterval> | null = null
+
+const loesungsJobAktiv = computed(
+  () => loesungsJob.value?.status === 'wartend' || loesungsJob.value?.status === 'laeuft',
+)
+
+function loesungsJobPollingStoppen() {
+  if (!loesungsJobTimer) return
+  clearInterval(loesungsJobTimer)
+  loesungsJobTimer = null
+}
+
+async function loesungsJobAktualisieren() {
+  if (!loesungsJob.value) return
+  try {
+    const result = await $fetch<{
+      job: {
+        id: string
+        status: LoesungsJobStatus
+        resultMaterialId: string | null
+        errorMessage: string | null
+        qualityVision?: { status: 'passed' | 'warning' | 'unavailable'; issues: string[] } | null
+      } | null
+    }>(`/api/materials/${id.value}/solution-job`)
+    const job = result.job
+    if (!job || job.id !== loesungsJob.value.id) return
+    loesungsJob.value = job
+    if (job.status === 'wartend' || job.status === 'laeuft') return
+
+    loesungsJobPollingStoppen()
+    if (job.status === 'fehlgeschlagen') {
+      hinweise.fehler(job.errorMessage || 'Die Musterlösung konnte nicht erzeugt werden.')
+      return
+    }
+    await refresh()
+    if (job.qualityVision?.status === 'warning') {
+      hinweise.warnung(
+        `Visuelle Qualitätsprüfung meldet: ${job.qualityVision.issues[0] || 'Bitte Musterlösung kontrollieren.'}`,
+      )
+    } else if (job.qualityVision?.status === 'unavailable') {
+      hinweise.warnung('Die visuelle Qualitätsprüfung war für diese Musterlösung nicht verfügbar.')
+    }
+    hinweise.erfolg('Musterlösung im Hintergrund erstellt. Öffnen?', {
+      text: 'Zur Lösung',
+      ausfuehren: () => {
+        if (job.resultMaterialId) void navigateTo(`/materialien/${job.resultMaterialId}`)
+      },
+    })
+  } catch {
+    // Beim nächsten Intervall erneut versuchen; der Hintergrundlauf läuft weiter.
+  }
+}
+
+function loesungsJobPollingStarten() {
+  loesungsJobPollingStoppen()
+  void loesungsJobAktualisieren()
+  loesungsJobTimer = setInterval(() => void loesungsJobAktualisieren(), 2500)
+}
+
+onBeforeUnmount(loesungsJobPollingStoppen)
 
 async function varianteAnlegen() {
   const body = istMoodleKurs.value
@@ -218,28 +286,24 @@ async function relationLoeschen(relationId: string) {
 
 async function kiLoesung() {
   const ergebnis = await aufruf<{
-    solutionMaterialId: string
-    fillStrategy?: string
-    hermesUsed?: boolean
-    fileName?: string | null
+    jobId: string
+    status: 'wartend'
   }>(`/api/materials/${id.value}/solution`, {
     method: 'POST',
     body: { userInstructions: kiAnweisung.value || null },
-    erfolgsmeldung: 'Musterlösung als Dokument erzeugt.',
   })
   if (ergebnis) {
     kiOffen.value = false
     kiAnweisung.value = ''
-    await refresh()
-    const strategie = ergebnis.fillStrategy
-      ? ` (${ergebnis.fillStrategy}${ergebnis.hermesUsed ? ', Hermes' : ''})`
-      : ''
-    hinweise.erfolg(`Dokument angelegt${strategie}. Öffnen?`, {
-      text: 'Zur Lösung',
-      ausfuehren: () => {
-        void navigateTo(`/materialien/${ergebnis.solutionMaterialId}`)
-      },
-    })
+    loesungsJob.value = {
+      id: ergebnis.jobId,
+      status: ergebnis.status,
+      resultMaterialId: null,
+      errorMessage: null,
+      qualityVision: null,
+    }
+    loesungsJobPollingStarten()
+    hinweise.erfolg('Die Musterlösung wird im Hintergrund erstellt. Du kannst weiterarbeiten.')
   }
 }
 
@@ -421,6 +485,7 @@ const loesungBearbeitbar = computed(() => loesungEditorModus.value !== null)
             variante="sekundaer"
             icon="wand-magic-sparkles"
             title="Musterlösung erstellen"
+            :disabled="loesungsJobAktiv"
             @click="kiOffen = true"
           >
             <span class="sm:hidden">KI-Lösung</span>
@@ -462,6 +527,18 @@ const loesungBearbeitbar = computed(() => loesungEditorModus.value !== null)
           />
         </LayoutAktionen>
       </header>
+
+      <div
+        v-if="loesungsJobAktiv"
+        class="flex items-center gap-3 rounded-xl border border-primary/25 bg-primary-soft px-4 py-3 text-sm text-primary-strong"
+        role="status"
+      >
+        <UiIcon name="circle-notch" dreht fest />
+        <span>
+          Musterlösung wird im Hintergrund {{ loesungsJob?.status === 'wartend' ? 'vorbereitet' : 'erstellt' }}.
+          Du kannst weiterarbeiten und diese Seite auch verlassen.
+        </span>
+      </div>
 
       <div class="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
         <div class="min-w-0 space-y-5">
@@ -984,8 +1061,9 @@ const loesungBearbeitbar = computed(() => loesungEditorModus.value !== null)
           nachbearbeitet werden. Bei PDFs ohne Formularfelder schreibt die KI die Lösungen
           als Text in die Lücken auf den Originalseiten (visuelles Overlay).
         </p>
-        <p v-if="laeuft" class="rounded-lg bg-primary-soft px-3 py-2 text-primary-strong">
-          Musterlösung wird erzeugt – je nach Modell und Seitenzahl kann das einige Minuten dauern …
+        <p>
+          Nach dem Start wird die Musterlösung im Hintergrund erzeugt. Du kannst das Modal schließen
+          und währenddessen weiterarbeiten.
         </p>
       </div>
       <UiField label="Zusätzliche Anweisung">
@@ -993,12 +1071,12 @@ const loesungBearbeitbar = computed(() => loesungEditorModus.value !== null)
           v-model="kiAnweisung"
           :zeilen="4"
           placeholder="z. B. Lücken knapp ausfüllen, Erwartungshorizont für offene Aufgaben …"
-          :disabled="laeuft"
+          :disabled="laeuft || loesungsJobAktiv"
         />
       </UiField>
       <template #aktionen>
         <UiButton variante="sekundaer" :disabled="laeuft" @click="kiOffen = false">Abbrechen</UiButton>
-        <UiButton variante="primaer" icon="wand-magic-sparkles" :laedt="laeuft" @click="kiLoesung">
+        <UiButton variante="primaer" icon="wand-magic-sparkles" :laedt="laeuft" :disabled="loesungsJobAktiv" @click="kiLoesung">
           Musterlösung erstellen
         </UiButton>
       </template>
