@@ -65,6 +65,7 @@ import { analyzeDocxTargets } from './solutions/docx-analyzer'
 import { logPipeline } from './solutions/logging'
 import { buildSolutionPlan } from './solutions/orchestrator'
 import { detectPdfLayoutTargets } from './solutions/pdf-answer-lines'
+import { fusePdfClozeTargets } from './solutions/pdf-cloze-target-fusion'
 import { buildClozeRepairPrompt } from './solutions/repair/cloze-repair'
 import { repairCandidateBankViaVision } from './solutions/repair/candidate-bank-vision'
 import { repairDocxTargetsViaVision } from './solutions/repair/docx-targets-vision'
@@ -97,6 +98,10 @@ import {
   assertClozeValidationPassed,
   hasPlaceholderAnswers,
 } from './solutions/validators/validation-gate'
+import {
+  assertAnswerCoverage,
+  inspectAnswerCoverage,
+} from './solutions/validators/answer-coverage'
 
 const log = createLogger('ai:solutions')
 
@@ -380,7 +385,7 @@ export async function generateSolution(
   }
 
   const analysisDocumentText = textForAnalysis || pdfExtractText || docxNative.fullText
-  const plan = buildSolutionPlan({
+  const planInput = () => ({
     documentText: analysisDocumentText,
     pdfText: pdfExtractText || null,
     pdfBlanks: detectedBlanks,
@@ -393,6 +398,56 @@ export async function generateSolution(
       ...pdfLayoutTargets.lineTargets,
     ],
   })
+  let plan = buildSolutionPlan(planInput())
+  let pdfClozeTargetsFused = false
+
+  // Manche PDFs stellen jede Lücke als grafische Linie dar, während die
+  // Textanalyse nur einen Teil davon erkennt. Wenn Textlücken, Linien und
+  // Wortliste geometrisch/anzahlmäßig übereinstimmen, sind sie ein einziges
+  // Cloze-Inventar – keine zusätzliche Freitextaufgabe.
+  if (
+    source &&
+    PDF_EXTENSIONS.has(source.extension) &&
+    detectedBlanks.length > 0 &&
+    pdfLayoutTargets.lineTargets.length > detectedBlanks.length
+  ) {
+    try {
+      const pdf = await PDFDocument.load(source.buffer)
+      const fusion = fusePdfClozeTargets({
+        blanks: detectedBlanks,
+        lineTargets: pdfLayoutTargets.lineTargets,
+        candidateBank: plan.candidateBank,
+        pageSizes: pdf.getPages().map((page) => page.getSize()),
+      })
+      if (fusion) {
+        const previousBlankCount = detectedBlanks.length
+        const remainingLineTargets = pdfLayoutTargets.lineTargets.filter(
+          (target) => !fusion.consumedLineTargetIds.has(target.id),
+        )
+        detectedBlanks = fusion.blanks
+        pdfLayoutTargets = {
+          ...pdfLayoutTargets,
+          lineTargets: remainingLineTargets,
+          shapes: pdfLayoutTargets.shapes.filter(
+            (shape) => !fusion.consumedLineTargetIds.has(shape.id),
+          ),
+          clusterCount: remainingLineTargets.length,
+        }
+        plan = buildSolutionPlan(planInput())
+        pdfClozeTargetsFused = true
+        log.info('PDF-Lückengeometrien zusammengeführt', {
+          textBlanks: previousBlankCount,
+          matchedTextBlanks: fusion.matchedBlankCount,
+          canonicalBlanks: detectedBlanks.length,
+          consumedLines: fusion.consumedLineTargetIds.size,
+          candidateCount: plan.candidateBank?.candidates.length ?? 0,
+        })
+      }
+    } catch (error) {
+      log.warn('PDF-Lückengeometrien konnten nicht zusammengeführt werden', error)
+    }
+  }
+
   let { tasks, candidateBank, fillMode, blankCount } = plan
   const { document: documentModel, numberMatching } = plan
 
@@ -443,6 +498,7 @@ export async function generateSolution(
         const canAdoptVisualPlan = Boolean(
           visual &&
             visual.verdict === 'repair' &&
+            !pdfClozeTargetsFused &&
             visual.tasks.length > 0 &&
             (!localHasChoiceCells || visualHasChoiceCells) &&
             (visualTargetCount > 0 || tasks.length === 0),
@@ -959,7 +1015,36 @@ export async function generateSolution(
         })
       }
 
-      // Sicherheit: keine ???-Platzhalter als fertige Musterlösung speichern.
+      structured = applyChoiceCellTaskMeta(structured, tasks)
+      structured = applyTableCellTaskMeta(structured, tasks)
+      structured = applyFreeTextTaskMeta(structured, tasks)
+
+      // Vision ist gut für visuelle Plausibilität, aber nicht zuverlässig beim
+      // Zählen. Deshalb muss jedes geometrisch erwartete Ziel deterministisch
+      // eine nichtleere, gebundene Antwort besitzen.
+      const coverage = inspectAnswerCoverage(structured, tasks)
+      const targetsExpected = Boolean(candidateBank?.candidates.length)
+      const coverageFailed =
+        coverage.status === 'partial' ||
+        (coverage.status === 'no_targets' && targetsExpected)
+      if (coverageFailed) {
+        logPipeline('solution.run.failed', {
+          jobId,
+          runId,
+          errorCode:
+            coverage.status === 'no_targets'
+              ? 'NO_ANSWER_TARGETS_DETECTED'
+              : 'ANSWER_TARGETS_PARTIALLY_FILLED',
+          expectedTargets: coverage.expected,
+          filledTargets: coverage.filled,
+          missingTargetIds: coverage.missingTargetIds,
+        })
+      }
+      assertAnswerCoverage(structured, tasks, {
+        targetsExpected,
+      })
+
+      // Sicherheit für Antworten außerhalb des Zielinventars.
       if (hasPlaceholderAnswers(structured.answers)) {
         logPipeline('solution.run.failed', {
           jobId,
@@ -973,10 +1058,6 @@ export async function generateSolution(
           { details: { errorCode: 'CLOZE_VALIDATION_FAILED_AFTER_REPAIR' } },
         )
       }
-
-      structured = applyChoiceCellTaskMeta(structured, tasks)
-      structured = applyTableCellTaskMeta(structured, tasks)
-      structured = applyFreeTextTaskMeta(structured, tasks)
 
       for (const task of tasks) {
         logPipeline('task.solved', {
