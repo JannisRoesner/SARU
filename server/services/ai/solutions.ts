@@ -67,6 +67,10 @@ import { detectPdfAnswerLines } from './solutions/pdf-answer-lines'
 import { buildClozeRepairPrompt } from './solutions/repair/cloze-repair'
 import { repairCandidateBankViaVision } from './solutions/repair/candidate-bank-vision'
 import { repairDocxTargetsViaVision } from './solutions/repair/docx-targets-vision'
+import {
+  assessPdfLayoutPlan,
+  repairPdfLayoutViaVision,
+} from './solutions/repair/pdf-layout-vision'
 import { mergeNativeAndVisualTargets } from './solutions/docx-target-merger'
 import { renderPdfSolution } from './solutions/renderers/pdf-renderer'
 import { renderDocxSolution } from './solutions/renderers/docx-renderer'
@@ -77,6 +81,7 @@ import {
 } from './solutions/worksheet-tasks'
 import { assignCandidatesGlobally } from './solutions/solvers/cloze-solver'
 import { applyFreeTextTaskMeta } from './solutions/solvers/free-text-solver'
+import { legacyFillModeFromTasks } from './solutions/task-classifier'
 import type { CandidateBank, TaskBlock } from './solutions/types'
 import { validateClozeAnswers } from './solutions/validators/cloze-validator'
 import {
@@ -275,8 +280,9 @@ export async function generateSolution(
     }
   }
 
+  const analysisDocumentText = textForAnalysis || pdfExtractText || docxNative.fullText
   const plan = buildSolutionPlan({
-    documentText: textForAnalysis || pdfExtractText || docxNative.fullText,
+    documentText: analysisDocumentText,
     pdfText: pdfExtractText || null,
     pdfBlanks: detectedBlanks,
     docxBlanks,
@@ -284,14 +290,74 @@ export async function generateSolution(
     shapes: [...docxNative.shapes, ...pdfAnswerLines.shapes],
     answerTargets: [...docxNative.targets, ...pdfAnswerLines.targets],
   })
-  let {
-    tasks,
-    candidateBank,
-    fillMode,
-    blankCount,
-    document: documentModel,
-    numberMatching,
-  } = plan
+  let { tasks, candidateBank, fillMode, blankCount } = plan
+  const { document: documentModel, numberMatching } = plan
+
+  let pdfLayoutVisionChecked = false
+  let pdfLayoutRepairedViaVision = false
+  if (
+    source &&
+    PDF_EXTENSIONS.has(source.extension) &&
+    detectedBlanks.length === 0 &&
+    useVision &&
+    model.trim()
+  ) {
+    const assessment = assessPdfLayoutPlan({
+      documentText: analysisDocumentText,
+      tasks,
+    })
+    if (assessment.shouldCheck) {
+      pdfLayoutVisionChecked = true
+      log.info('PDF-Layout benötigt Vision-Plausibilitätscheck', {
+        reasons: assessment.reasons,
+        worksheetTasks: assessment.worksheetTaskCount,
+        openTasks: assessment.openTaskCount,
+        inplaceTasks: assessment.inplaceTaskCount,
+        answerTargets: assessment.answerTargetCount,
+      })
+      try {
+        const visual = await repairPdfLayoutViaVision({
+          buffer: source.buffer,
+          fileName: source.fileName,
+          settings,
+          model,
+          documentText: analysisDocumentText,
+          tasks,
+          assessment,
+          nativeTargets: pdfAnswerLines.targets,
+        })
+        const visualTargetCount =
+          visual?.tasks.flatMap((task) => task.targets).length ?? 0
+        const canAdoptVisualPlan = Boolean(
+          visual &&
+            visual.tasks.length > 0 &&
+            visual.verdict !== 'no_targets' &&
+            (visualTargetCount > 0 || tasks.length === 0),
+        )
+        if (visual && canAdoptVisualPlan) {
+          tasks = visual.tasks
+          fillMode = legacyFillModeFromTasks(tasks)
+          blankCount = 0
+          pdfLayoutRepairedViaVision = true
+          log.info('PDF-Layoutplan per Vision repariert', {
+            verdict: visual.verdict,
+            rawTasks: visual.rawTaskCount,
+            tasks: tasks.length,
+            answerTargets: visualTargetCount,
+            fillMode,
+          })
+        } else {
+          log.info('PDF-Layoutplan nach Vision-Check unverändert', {
+            verdict: visual?.verdict ?? null,
+            tasks: visual?.tasks.length ?? 0,
+            answerTargets: visualTargetCount,
+          })
+        }
+      } catch (error) {
+        log.warn('PDF-Layout-Vision-Check fehlgeschlagen – nativer Plan bleibt aktiv', error)
+      }
+    }
+  }
 
   let candidateBankRepairedViaVision = false
   const needsBankRepair = tasks.some((t) => t.requiresCandidateBankRepair)
@@ -429,11 +495,12 @@ export async function generateSolution(
   const taskInventory = worksheetUnits.length
     ? formatWorksheetTasksForPrompt(worksheetUnits)
     : tasks
-        .filter(
-          (t) =>
-            t.kind === 'free_text_separate' || t.kind === 'matching_inline',
+        .map(
+          (t, i) =>
+            `${i + 1}. [${t.kind}] ${t.instruction}${
+              t.targets.length ? ` (${t.targets.length} Antwortbereiche)` : ''
+            }`,
         )
-        .map((t, i) => `${i + 1}. ${t.instruction}`)
         .join('\n') || null
   const prompt = buildSolutionPrompt({
     title: material.title,
@@ -806,6 +873,8 @@ export async function generateSolution(
           fillMode,
           fillStrategy: filled.strategy,
           hermesUsed,
+          layoutVisionChecked: pdfLayoutVisionChecked,
+          layoutVisionRepaired: pdfLayoutRepairedViaVision,
           sourceFileName: source?.fileName,
           structuredSolution: structured,
         },

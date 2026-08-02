@@ -22,15 +22,39 @@ export interface PdfAnswerLineTarget {
 
 const MIN_LINE_WIDTH_PT = 48
 const MAX_LINE_PAGE_FRACTION = 0.72
+const MAX_REPEATED_LINE_PAGE_FRACTION = 0.94
 const MAX_LINE_SLOPE_PT = 2.5
 const MAX_RECT_HEIGHT_PT = 2.5
-const CLUSTER_MAX_DY_PT = 22
+const CLUSTER_MAX_DY_PT = 24
 const CLUSTER_MAX_DX_PT = 18
 const HEADER_FOOTER_BAND = 0.06
+const WIDE_LINE_PEER_MAX_DY_PT = 30
 
 interface PageSize {
   width: number
   height: number
+}
+
+type PdfMatrix = [number, number, number, number, number, number]
+
+const IDENTITY_MATRIX: PdfMatrix = [1, 0, 0, 1, 0, 0]
+
+function multiplyMatrices(current: PdfMatrix, next: PdfMatrix): PdfMatrix {
+  const [a1, b1, c1, d1, e1, f1] = current
+  const [a2, b2, c2, d2, e2, f2] = next
+  return [
+    a1 * a2 + c1 * b2,
+    b1 * a2 + d1 * b2,
+    a1 * c2 + c1 * d2,
+    b1 * c2 + d1 * d2,
+    a1 * e2 + c1 * f2 + e1,
+    b1 * e2 + d1 * f2 + f1,
+  ]
+}
+
+function transformPoint(matrix: PdfMatrix, x: number, y: number): [number, number] {
+  const [a, b, c, d, e, f] = matrix
+  return [a * x + c * y + e, b * x + d * y + f]
 }
 
 function isNearHorizontal(x0: number, y0: number, x1: number, y1: number): boolean {
@@ -52,7 +76,7 @@ function pushLine(
   const x = Math.min(x0, x1)
   const y = Math.min(y0, y1)
   const width = Math.abs(x1 - x0)
-  if (width > page.width * MAX_LINE_PAGE_FRACTION) return
+  if (width > page.width * MAX_REPEATED_LINE_PAGE_FRACTION) return
   const yTopNorm = 1 - (y + Math.abs(y1 - y0) / 2) / page.height
   if (yTopNorm < HEADER_FOOTER_BAND || yTopNorm > 1 - HEADER_FOOTER_BAND) return
   out.push({
@@ -64,13 +88,37 @@ function pushLine(
   })
 }
 
+function filterDecorativeWideLines(
+  lines: PdfAnswerLineRaw[],
+  pageSizes: PageSize[],
+): PdfAnswerLineRaw[] {
+  return lines.filter((line, index) => {
+    const page = pageSizes[line.pageIndex]
+    if (!page || line.width <= page.width * MAX_LINE_PAGE_FRACTION) return true
+
+    return lines.some((candidate, candidateIndex) => {
+      if (candidateIndex === index || candidate.pageIndex !== line.pageIndex) return false
+      const dy = Math.abs(candidate.y - line.y)
+      return (
+        dy > 0.5 &&
+        dy <= WIDE_LINE_PEER_MAX_DY_PT &&
+        Math.abs(candidate.x - line.x) <= CLUSTER_MAX_DX_PT &&
+        Math.abs(candidate.width - line.width) <= Math.max(24, line.width * 0.1)
+      )
+    })
+  })
+}
+
 function asNumberArray(value: unknown): number[] | null {
   if (!value) return null
   if (Array.isArray(value) && value.every((n) => typeof n === 'number')) {
     return value as number[]
   }
-  if (ArrayBuffer.isView(value) && typeof (value as ArrayLike<number>).length === 'number') {
-    return Array.from(value as ArrayLike<number>)
+  if (
+    ArrayBuffer.isView(value) &&
+    typeof (value as unknown as ArrayLike<number>).length === 'number'
+  ) {
+    return Array.from(value as unknown as ArrayLike<number>)
   }
   return null
 }
@@ -105,48 +153,64 @@ export async function extractPdfHorizontalStrokes(
       const { fnArray, argsArray } = opList
       let penX = 0
       let penY = 0
+      let matrix: PdfMatrix = [...IDENTITY_MATRIX]
+      const matrixStack: PdfMatrix[] = []
 
       for (let i = 0; i < fnArray.length; i++) {
         const fn = fnArray[i]!
         const args = argsArray[i]
 
+        if (fn === pdfjs.OPS.save) {
+          matrixStack.push([...matrix])
+          continue
+        }
+
+        if (fn === pdfjs.OPS.restore) {
+          matrix = matrixStack.pop() ?? [...IDENTITY_MATRIX]
+          continue
+        }
+
+        if (fn === pdfjs.OPS.transform) {
+          const values = asNumberArray(args)
+          if (values && values.length >= 6) {
+            matrix = multiplyMatrices(matrix, values.slice(0, 6) as PdfMatrix)
+          }
+          continue
+        }
+
         if (fn === pdfjs.OPS.constructPath) {
           const pathArgs = Array.isArray(args) ? args : []
-          // Häufig: [strokeOp, pathData, minMaxOrPoints]
-          const points =
-            asNumberArray(pathArgs[2]) ??
-            asNumberArray(pathArgs[1]) ??
-            asNumberArray(pathArgs[0])
+          const paintOperation = pathArgs[0]
+          const isStroked =
+            paintOperation === pdfjs.OPS.stroke ||
+            paintOperation === pdfjs.OPS.closeStroke ||
+            paintOperation === pdfjs.OPS.fillStroke ||
+            paintOperation === pdfjs.OPS.eoFillStroke
+          if (!isStroked) continue
+
+          // pdf.js 6 liefert [paintOp, [pathOps], minMax]. Die minMax-Werte
+          // liegen vor der aktuellen Transformationsmatrix im lokalen User-Space.
+          const points = asNumberArray(pathArgs[2])
           if (points && points.length >= 4) {
-            // Paare als Segmente lesen; bei genau 4 Werten eine Linie.
-            if (points.length === 4) {
+            const [a, b, c, d] = points
+            if (
+              Number.isFinite(a) &&
+              Number.isFinite(b) &&
+              Number.isFinite(c) &&
+              Number.isFinite(d) &&
+              Math.abs(d! - b!) <= MAX_LINE_SLOPE_PT
+            ) {
+              const start = transformPoint(matrix, a!, b!)
+              const end = transformPoint(matrix, c!, d!)
               pushLine(
                 lines,
                 pageNumber - 1,
                 pageSize,
-                points[0]!,
-                points[1]!,
-                points[2]!,
-                points[3]!,
+                start[0],
+                start[1],
+                end[0],
+                end[1],
               )
-            } else {
-              for (let p = 0; p + 3 < points.length; p += 2) {
-                // Nur wenn Muster wie x,y,x,y,... ohne Op-Codes
-                if (points.every((n) => Number.isFinite(n))) {
-                  // skip interleaved op-code streams (values like 0/1 between coords)
-                }
-              }
-              // Robuster: wenn minMax [minX,minY,maxX,maxY] und Höhe klein → Linie
-              const [a, b, c, d] = points
-              if (
-                Number.isFinite(a) &&
-                Number.isFinite(b) &&
-                Number.isFinite(c) &&
-                Number.isFinite(d) &&
-                Math.abs(d! - b!) <= MAX_LINE_SLOPE_PT
-              ) {
-                pushLine(lines, pageNumber - 1, pageSize, a!, b!, c!, d!)
-              }
             }
           }
           continue
@@ -164,7 +228,17 @@ export async function extractPdfHorizontalStrokes(
         if (fn === pdfjs.OPS.lineTo) {
           const pts = asNumberArray(args)
           if (pts && pts.length >= 2) {
-            pushLine(lines, pageNumber - 1, pageSize, penX, penY, pts[0]!, pts[1]!)
+            const start = transformPoint(matrix, penX, penY)
+            const end = transformPoint(matrix, pts[0]!, pts[1]!)
+            pushLine(
+              lines,
+              pageNumber - 1,
+              pageSize,
+              start[0],
+              start[1],
+              end[0],
+              end[1],
+            )
             penX = pts[0]!
             penY = pts[1]!
           }
@@ -179,14 +253,16 @@ export async function extractPdfHorizontalStrokes(
               Math.abs(rh!) <= MAX_RECT_HEIGHT_PT &&
               Math.abs(rw!) >= MIN_LINE_WIDTH_PT
             ) {
+              const start = transformPoint(matrix, rx!, ry! + rh! / 2)
+              const end = transformPoint(matrix, rx! + rw!, ry! + rh! / 2)
               pushLine(
                 lines,
                 pageNumber - 1,
                 pageSize,
-                rx!,
-                ry! + rh! / 2,
-                rx! + rw!,
-                ry! + rh! / 2,
+                start[0],
+                start[1],
+                end[0],
+                end[1],
               )
             }
           }
@@ -196,7 +272,7 @@ export async function extractPdfHorizontalStrokes(
       page.cleanup()
     }
 
-    return { lines, pageSizes }
+    return { lines: filterDecorativeWideLines(lines, pageSizes), pageSizes }
   } finally {
     await loadingTask.destroy()
   }

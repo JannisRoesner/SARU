@@ -37,7 +37,7 @@ export function splitWorksheetUnits(text: string): string[] {
 
   // Aufgabenstarts + Seiten-/Glossar-Grenzen (PDF oft ohne Satzende vor „Vervollständige“).
   const parts = normalized.split(
-    /(?:(?<=[.!?])\s+(?=(?:Ordne\b|Stelle dir vor\b|Welche\b|Wenn\b|Vervollständige\b|Beschreibe\b|Erörtere\b))|\s+(?=Vervollständige\b)|\s+(?=Du bist kein Werwolf\b))/u,
+    /(?:(?<=[.!?])\s+(?=(?:Ordne\b|Stelle dir vor\b|Welche\b|Worauf\b|Wenn\b|Vervollständige\b|Beschreibe\b|Erkläre\b|Erörtere\b))|\s+(?=Vervollständige\b)|\s+(?=Du bist kein Werwolf\b))/u,
   )
 
   const units: string[] = []

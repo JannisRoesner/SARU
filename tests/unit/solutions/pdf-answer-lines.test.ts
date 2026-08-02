@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
+import {
+  concatTransformationMatrix,
+  lineTo,
+  moveTo,
+  PDFDocument,
+  popGraphicsState,
+  pushGraphicsState,
+  rgb,
+  StandardFonts,
+  stroke,
+} from 'pdf-lib'
 import {
   clusterPdfAnswerLines,
   detectPdfAnswerLines,
@@ -9,6 +19,7 @@ import { buildSolutionPlan } from '../../../server/services/ai/solutions/orchest
 import { applyFreeTextTaskMeta } from '../../../server/services/ai/solutions/solvers/free-text-solver'
 import { renderPdfSolution } from '../../../server/services/ai/solutions/renderers/pdf-renderer'
 import { detectPdfBlankRegions } from '../../../server/services/ai/document-fill'
+import { loadPdfjs } from '../../../server/utils/pdfjs'
 
 async function writingLinesPdf(opts?: {
   withUnderscoreCloze?: boolean
@@ -59,7 +70,58 @@ async function writingLinesPdf(opts?: {
   return Buffer.from(await pdf.save())
 }
 
+async function rasierenWritingLinesPdf(): Promise<Buffer> {
+  const pdf = await PDFDocument.create()
+  const page = pdf.addPage([595.28, 841.89])
+  const font = await pdf.embedFont(StandardFonts.Helvetica)
+  page.drawText('Worauf sollten Mädchen und Jungen dabei achten?', {
+    x: 30,
+    y: 500,
+    size: 12,
+    font,
+  })
+  page.drawText(
+    'Erkläre kurz, wie Epilieren und Wachsen funktioniert. Erläutere auch die Vor- und Nachteile.',
+    { x: 30, y: 260, size: 10, font, maxWidth: 535 },
+  )
+
+  for (const y of [470.8611, 448.7534, 426.5993, 404.6695, 382.5617, 360.4077, 337.5461, 315.4382, 293.2842]) {
+    page.pushOperators(
+      pushGraphicsState(),
+      concatTransformationMatrix(1, 0, 0, 1, 29.8015, y),
+      moveTo(0, 0),
+      lineTo(534.969, 0),
+      stroke(),
+      popGraphicsState(),
+    )
+  }
+  for (const y of [191.9809, 170.731, 149.4366, 128.2184, 105.3612]) {
+    page.pushOperators(
+      pushGraphicsState(),
+      concatTransformationMatrix(1, 0, 0, 1, 29.4183, y),
+      moveTo(0, 0),
+      lineTo(534.969, 0),
+      stroke(),
+      popGraphicsState(),
+    )
+  }
+
+  return Buffer.from(await pdf.save())
+}
+
 describe('detectPdfAnswerLines', () => {
+  it('erkennt die transformierten breiten Schreiblinien aus AB-Rasieren', async () => {
+    const source = await rasierenWritingLinesPdf()
+    const detected = await detectPdfAnswerLines(source)
+    const extracted = await extractPdfHorizontalStrokes(source)
+    const clusters = clusterPdfAnswerLines(extracted.lines, extracted.pageSizes)
+
+    expect(detected.rawLineCount).toBe(14)
+    expect(detected.clusterCount).toBe(2)
+    expect(detected.targets).toHaveLength(2)
+    expect(clusters.map((target) => target.lineCount)).toEqual([9, 5])
+  })
+
   it('erkennt und clustert Schreiblinien ohne Cloze zu erzeugen', async () => {
     const source = await writingLinesPdf()
     const blanks = await detectPdfBlankRegions(source)
@@ -108,6 +170,23 @@ describe('detectPdfAnswerLines', () => {
     expect(plan.tasks.find((t) => t.kind === 'free_text_inplace')!.renderMode).toBe(
       'overlay',
     )
+  })
+
+  it('modelliert AB-Rasieren als zwei offene Overlay-Tasks', async () => {
+    const source = await rasierenWritingLinesPdf()
+    const detected = await detectPdfAnswerLines(source)
+    const plan = buildSolutionPlan({
+      documentText:
+        'Worauf sollten Mädchen und Jungen dabei achten? Erkläre kurz, wie Epilieren und Wachsen funktioniert. Erläutere auch die Vor- und Nachteile.',
+      pdfBlanks: [],
+      shapes: detected.shapes,
+      answerTargets: detected.targets,
+    })
+
+    expect(plan.tasks).toHaveLength(2)
+    expect(plan.tasks.every((task) => task.kind === 'free_text_inplace')).toBe(true)
+    expect(plan.tasks.every((task) => task.renderMode === 'overlay')).toBe(true)
+    expect(plan.tasks.every((task) => task.targets.length === 1)).toBe(true)
   })
 
   it('lässt Underscore-Cloze priorisieren und überspringt Linien-Detection in der Pipeline-Logik', async () => {
@@ -169,6 +248,66 @@ describe('detectPdfAnswerLines', () => {
       tasks: plan.tasks,
     })
     expect(rendered.strategy).toBe('pdf_overlay')
+  })
+
+  it('hält langen Lösungstext innerhalb des Rasieren-Linienblocks', async () => {
+    const source = await rasierenWritingLinesPdf()
+    const detected = await detectPdfAnswerLines(source)
+    const plan = buildSolutionPlan({
+      documentText:
+        'Worauf sollten Mädchen und Jungen dabei achten? Erkläre kurz, wie Epilieren und Wachsen funktioniert. Erläutere auch die Vor- und Nachteile.',
+      pdfBlanks: [],
+      shapes: detected.shapes,
+      answerTargets: detected.targets,
+    })
+    const solution = applyFreeTextTaskMeta(
+      {
+        summary: 'Rasieren',
+        answers: [
+          { id: '1', label: 'Aufgabe 1', answer: 'FITCHECK1 Hygiene beachten.' },
+          {
+            id: '2',
+            label: 'Aufgabe 2',
+            answer: Array.from({ length: 300 }, () => 'FITCHECK2').join(' '),
+          },
+        ],
+        formFields: [],
+      },
+      plan.tasks,
+    )
+    const rendered = await renderPdfSolution(source, solution, {
+      title: 'Musterlösung',
+      sourceFileName: 'AB-Rasieren.pdf',
+      tasks: plan.tasks,
+    })
+
+    expect(rendered.strategy).toBe('pdf_overlay')
+    const pdfjs = await loadPdfjs()
+    const loadingTask = pdfjs.getDocument({
+      data: new Uint8Array(rendered.buffer),
+      disableFontFace: true,
+      useSystemFonts: false,
+      verbosity: 0,
+    })
+    try {
+      const page = await (await loadingTask.promise).getPage(1)
+      const content = await page.getTextContent()
+      const fittedItems = content.items.filter(
+        (item: { str?: string }) => item.str?.includes('FITCHECK2'),
+      ) as Array<{ str: string; transform: number[] }>
+      const target = detected.targets[1]!.bbox!
+      const top = 841.89 * (1 - target.y)
+      const bottom = top - 841.89 * target.h
+
+      expect(fittedItems.length).toBeGreaterThan(0)
+      expect(Math.max(...fittedItems.map((item) => item.transform[5]!))).toBeLessThan(top)
+      expect(Math.min(...fittedItems.map((item) => item.transform[5]!))).toBeGreaterThanOrEqual(
+        bottom,
+      )
+      expect(fittedItems.at(-1)!.str.endsWith('...')).toBe(true)
+    } finally {
+      await loadingTask.destroy()
+    }
   })
 })
 

@@ -1,6 +1,5 @@
 import type { PdfBlankRegion, TextBlankInfo } from '../document-fill'
-import type { CandidateBank } from './types'
-import type { AnswerTarget, DocumentModel, TaskBlock } from './types'
+import type { AnswerTarget, CandidateBank, DocumentModel, TaskBlock } from './types'
 import {
   detectWorksheetTasks,
   type WorksheetTaskUnit,
@@ -62,6 +61,7 @@ export function segmentTasks(input: SegmentTasksInput): TaskBlock[] {
       }))
 
   const worksheetUnits = detectWorksheetTasks(document.fullText)
+  const openUnits = worksheetUnits.filter((u) => u.kind === 'open_ended')
   const blankTargets = suppressLayoutBlanksWhenWorksheetOpen(
     rawBlankTargets,
     worksheetUnits,
@@ -136,19 +136,38 @@ export function segmentTasks(input: SegmentTasksInput): TaskBlock[] {
     })
   } else if (uniqueShapes.filter((t) => t.kind === 'answer_line').length > 0 && blankTargets.length === 0) {
     const lines = uniqueShapes.filter((t) => t.kind === 'answer_line')
-    tasks.push({
-      id: 'p1-lines',
-      page: lines[0]!.page,
-      bbox: lines[0]!.bbox ?? { x: 0, y: 0, w: 1, h: 0.3 },
-      instruction: 'Antwortlinien ausfüllen',
-      kind: 'free_text_inplace',
-      confidence: 0.7,
-      evidence: [`${lines.length} answer line blocks detected`],
-      targets: lines,
-      // Overlay: PDF zeichnet auf die Linien; DOCX-native bleibt über Classifier möglich.
-      renderMode: 'overlay',
-      renderConfidence: 'medium',
-    })
+    if (openUnits.length === lines.length) {
+      for (let index = 0; index < lines.length; index++) {
+        const line = lines[index]!
+        const open = openUnits[index]!
+        tasks.push({
+          id: `p${line.page}-open-lines-${index + 1}`,
+          page: line.page,
+          bbox: line.bbox ?? { x: 0, y: 0, w: 1, h: 0.3 },
+          instruction: open.instruction,
+          kind: 'free_text_inplace',
+          confidence: Math.min(0.95, open.confidence + 0.05),
+          evidence: [...open.evidence, 'matching answer line block detected'],
+          targets: [line],
+          renderMode: 'overlay',
+          renderConfidence: 'high',
+        })
+      }
+    } else {
+      tasks.push({
+        id: 'p1-lines',
+        page: lines[0]!.page,
+        bbox: lines[0]!.bbox ?? { x: 0, y: 0, w: 1, h: 0.3 },
+        instruction: openUnits[0]?.instruction ?? 'Antwortlinien ausfüllen',
+        kind: 'free_text_inplace',
+        confidence: 0.7,
+        evidence: [`${lines.length} answer line blocks detected`],
+        targets: lines,
+        // Overlay: PDF zeichnet auf die Linien; DOCX-native bleibt über Classifier möglich.
+        renderMode: 'overlay',
+        renderConfidence: 'medium',
+      })
+    }
   }
 
   const tableCells = answerTargets.filter((t) => t.kind === 'table_cell')
@@ -258,7 +277,6 @@ export function segmentTasks(input: SegmentTasksInput): TaskBlock[] {
     })
   }
 
-  const openUnits = worksheetUnits.filter((u) => u.kind === 'open_ended')
   for (let i = 0; i < openUnits.length; i++) {
     const open = openUnits[i]!
     if (blankTargets.length > 0 && /wortliste|füllen sie die lücken/i.test(open.instruction)) {

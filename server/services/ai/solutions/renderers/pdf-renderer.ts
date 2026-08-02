@@ -108,11 +108,38 @@ function filterAnswersForTasks(
       : { ...solution, answers: [] }
   }
 
+  const inplaceTargetIds = new Set(
+    tasks
+      .filter((task) => task.kind === 'free_text_inplace')
+      .flatMap((task) => task.targets)
+      .filter(
+        (target) =>
+          target.kind === 'answer_line' ||
+          target.kind === 'text_field' ||
+          target.kind === 'content_control',
+      )
+      .map((target) => target.id),
+  )
+  if (inplaceTargetIds.size > 0) {
+    const matched = solution.answers.filter(
+      (answer) => answer.targetId && inplaceTargetIds.has(answer.targetId),
+    )
+    const answers = matched.length
+      ? matched
+      : solution.answers.filter(
+          (answer) =>
+            answer.fieldType === 'freitext' &&
+            answer.blankIndex == null &&
+            Boolean(answer.bbox),
+        )
+    return { ...solution, answers }
+  }
+
   const blankIndexes = new Set<number>()
   let hasBlankTargets = false
   for (const task of tasks) {
     for (const target of task.targets) {
-      if (typeof target.blankIndex === 'number') {
+      if (target.kind === 'blank' && typeof target.blankIndex === 'number') {
         blankIndexes.add(target.blankIndex)
         hasBlankTargets = true
       }
@@ -122,7 +149,9 @@ function filterAnswersForTasks(
   // Freitext-Appendix: Antworten ohne blankIndex oder fieldType freitext.
   if (!hasBlankTargets) {
     const answers = solution.answers.filter(
-      (a) => a.fieldType === 'freitext' || a.blankIndex == null,
+      (a) =>
+        (a.fieldType === 'freitext' || a.blankIndex == null) &&
+        !a.targetId,
     )
     return {
       ...solution,

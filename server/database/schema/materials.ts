@@ -68,6 +68,10 @@ export interface AiMeta {
   /** lueckentext = Antworten in Dokumentlücken; offen = Erwartungshorizont ohne Lückenfüllung. */
   fillMode?: 'lueckentext' | 'offen'
   hermesUsed?: boolean
+  /** Unsicheren PDF-Aufgabenplan zusätzlich visuell geprüft. */
+  layoutVisionChecked?: boolean
+  /** Aufgaben oder Antwortbereiche aus dem Vision-Check übernommen. */
+  layoutVisionRepaired?: boolean
   sourceFileName?: string
   /** text_layer | vision – Herkunft des für Metadaten genutzten Extrakts. */
   extractionMethod?: string

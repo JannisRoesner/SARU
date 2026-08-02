@@ -2406,16 +2406,42 @@ function drawPlacement(
 ): void {
   const { width, height } = page.getSize()
   const boxWidth = Math.max(24, placement.boxWidth)
-  const fontSize = placement.fontSize
-  const lines = wrapTextToWidth(placement.text, font, fontSize, boxWidth)
+  const minimumFontSize = placement.fieldType === 'freitext' ? 6 : placement.fontSize
+  let fontSize = placement.fontSize
+  let lines = wrapTextToWidth(placement.text, font, fontSize, boxWidth)
+  let lineHeight = fontSize + (placement.fieldType === 'freitext' ? 3 : 2)
+  const fittedLineCount = () =>
+    Math.max(
+      1,
+      1 +
+        Math.floor(
+          Math.max(0, placement.boxHeight - placement.fontSize) / lineHeight,
+        ),
+    )
+  let fitted = fittedLineCount()
+
+  while (
+    placement.fieldType === 'freitext' &&
+    lines.length > fitted &&
+    fontSize > minimumFontSize
+  ) {
+    fontSize = Math.max(minimumFontSize, fontSize - 0.5)
+    lines = wrapTextToWidth(placement.text, font, fontSize, boxWidth)
+    lineHeight = fontSize + 3
+    fitted = fittedLineCount()
+  }
+
   if (lines.length === 0) return
 
-  const lineHeight = fontSize + (placement.fieldType === 'freitext' ? 3 : 2)
   let baseline = Math.min(height - 4, Math.max(4, placement.baselineY))
-  const fitted = Math.max(1, Math.floor(placement.boxHeight / lineHeight) || 1)
-  const fallback =
-    placement.fieldType === 'freitext' ? 8 : placement.source === 'bbox' ? 3 : 2
-  const visible = lines.slice(0, Math.max(fitted, fallback))
+  const visible = lines.slice(0, fitted)
+  if (lines.length > fitted && visible.length > 0) {
+    let last = visible[visible.length - 1]!.replace(/[.,;:!?\s]+$/g, '')
+    while (last && font.widthOfTextAtSize(`${last}...`, fontSize) > boxWidth) {
+      last = last.slice(0, -1).trimEnd()
+    }
+    visible[visible.length - 1] = last ? `${last}...` : '...'
+  }
   const x = Math.min(Math.max(8, placement.x), width - 16)
 
   for (const line of visible) {
