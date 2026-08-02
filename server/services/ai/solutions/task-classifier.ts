@@ -170,15 +170,16 @@ export function classifyTasks(tasks: TaskBlock[]): TaskBlock[] {
 export function legacyFillModeFromTasks(
   tasks: TaskBlock[],
 ): 'lueckentext' | 'offen' {
-  // Nur wenn es echte In-place-Ziele gibt → Lückentext/Overlay.
-  // Appendix-only (Glossar, offene Fragen, Bildbeschriftung ohne Shapes) → offen.
-  const hasInplaceTargets = tasks.some(
-    (t) =>
-      (t.renderMode === 'overlay' || t.renderMode === 'native') &&
-      t.targets.length > 0,
-  )
-  if (hasInplaceTargets) return 'lueckentext'
-  if (tasks.some((t) => t.kind === 'cloze' && t.targets.length > 0)) {
+  // Der Füllmodus beschreibt die Semantik des Antwortformats, nicht die
+  // Renderposition. Offene Antworten können auf Schreiblinien im Original
+  // stehen und bleiben trotzdem Freitext statt Lückentext.
+  if (
+    tasks.some(
+      (t) =>
+        (t.kind === 'cloze' || t.kind === 'matching_table') &&
+        t.targets.length > 0,
+    )
+  ) {
     return 'lueckentext'
   }
   return 'offen'

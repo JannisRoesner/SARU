@@ -687,6 +687,9 @@ export async function generateSolution(
   const worksheetUnits = detectWorksheetTasks(
     documentText || documentModel.fullText || '',
   )
+  const hasOpenInplaceTasks = tasks.some(
+    (task) => task.kind === 'free_text_inplace' && task.targets.length > 0,
+  )
   const taskInventory = tableCellTargets.length || choiceCellTargets.length
     ? tasks
         .map(
@@ -736,6 +739,7 @@ export async function generateSolution(
         : null,
     numberMatching,
     taskInventory,
+    inplaceOpenAnswers: hasOpenInplaceTasks,
   })
 
   if (!documentText && !source && !material.content?.trim()) {
@@ -931,7 +935,9 @@ export async function generateSolution(
         Math.max(settings.maxOutputTokens || 4000, 1200 + blankCount * 220),
       )
 
-      const systemPrompt = solutionSystemPromptForMode(fillMode)
+      const systemPrompt = solutionSystemPromptForMode(fillMode, {
+        inplaceOpenAnswers: hasOpenInplaceTasks,
+      })
       const compactRetryInstruction = [
         '',
         'WICHTIGER RETRY: Die vorige Ausgabe war unvollständig.',
@@ -1034,8 +1040,6 @@ export async function generateSolution(
             ...a,
             fieldType: 'freitext' as const,
             blankIndex: null,
-            leftContext: null,
-            rightContext: null,
             bbox: null,
           })),
         }
@@ -1571,9 +1575,12 @@ async function buildFilledDocument(
   const hasMixedRender =
     tasks.some((t) => t.renderMode === 'overlay' || t.renderMode === 'native') &&
     tasks.some((t) => t.renderMode === 'appendix')
+  const hasInplaceRender = tasks.some(
+    (task) => task.renderMode === 'overlay' || task.renderMode === 'native',
+  )
 
   // Offene Aufgabe ohne Antwortfelder: separates blankes PDF (Aufgabennummer + Lösung).
-  if (fillMode === 'offen' && !hasMixedRender) {
+  if (fillMode === 'offen' && !hasMixedRender && !hasInplaceRender) {
     if (source && PDF_EXTENSIONS.has(source.extension)) {
       const acro = await fillPdfAcroForm(source.buffer, solution)
       if (acro) {

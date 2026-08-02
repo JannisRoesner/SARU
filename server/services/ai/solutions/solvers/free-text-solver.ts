@@ -1,6 +1,38 @@
 import type { StructuredSolution } from '../../document-fill'
 import type { TaskBlock } from '../types'
 
+interface InplaceTarget {
+  id: string
+  page: number
+  bbox: NonNullable<TaskBlock['targets'][number]['bbox']>
+  instruction: string
+}
+
+function significantWords(text: string): Set<string> {
+  return new Set(
+    text
+      .toLocaleLowerCase('de-DE')
+      .match(/[\p{L}\p{N}]{4,}/gu)
+      ?.filter((word) => !['aufgabe', 'antwort', 'bitte', 'kurz', 'dabei'].includes(word)) ?? [],
+  )
+}
+
+function taskMatchScore(
+  answer: { label?: string | null; leftContext?: string | null; rightContext?: string | null },
+  target: InplaceTarget,
+): number {
+  const answerWords = significantWords(
+    `${answer.label ?? ''} ${answer.leftContext ?? ''} ${answer.rightContext ?? ''}`,
+  )
+  if (answerWords.size === 0) return 0
+  const instructionWords = significantWords(target.instruction)
+  let matches = 0
+  for (const word of instructionWords) {
+    if (answerWords.has(word)) matches += 1
+  }
+  return matches
+}
+
 /**
  * Markiert Freitext-Aufgaben:
  * - free_text_inplace: fieldType freitext, bbox von Answer-Line-Targets behalten/zuweisen
@@ -16,11 +48,33 @@ export function applyFreeTextTaskMeta(
     return solution
   }
 
-  const lineTargets = inplaceTasks
-    .flatMap((t) => t.targets)
-    .filter((t) => t.bbox && (t.kind === 'answer_line' || t.kind === 'text_field'))
+  const lineTargets: InplaceTarget[] = inplaceTasks.flatMap((task) =>
+    task.targets
+      .filter((target) => target.bbox && (target.kind === 'answer_line' || target.kind === 'text_field'))
+      .map((target) => ({
+        id: target.id,
+        page: target.page,
+        bbox: target.bbox!,
+        instruction: task.instruction,
+      })),
+  )
 
-  let lineCursor = 0
+  const usedTargetIds = new Set<string>()
+
+  const nextTargetFor = (answer: StructuredSolution['answers'][number]): InplaceTarget | undefined => {
+    const explicit = answer.targetId
+      ? lineTargets.find((target) => target.id === answer.targetId && !usedTargetIds.has(target.id))
+      : undefined
+    if (explicit) return explicit
+
+    const scored = lineTargets
+      .filter((target) => !usedTargetIds.has(target.id))
+      .map((target) => ({ target, score: taskMatchScore(answer, target) }))
+      .sort((a, b) => b.score - a.score)
+    if (scored[0]?.score && scored[0].score > 0) return scored[0].target
+
+    return lineTargets.find((target) => !usedTargetIds.has(target.id))
+  }
 
   return {
     ...solution,
@@ -32,23 +86,18 @@ export function applyFreeTextTaskMeta(
         /\n/.test(a.answer)
 
       if (inplaceTasks.length > 0 && looksFreitext) {
-        if (a.bbox) {
-          return {
-            ...a,
-            fieldType: 'freitext' as const,
-            blankIndex: null,
-          }
-        }
-        const target = lineTargets[lineCursor]
-        if (target?.bbox) {
-          lineCursor += 1
+        const target = nextTargetFor(a)
+        if (target) {
+          usedTargetIds.add(target.id)
           return {
             ...a,
             fieldType: 'freitext' as const,
             blankIndex: null,
             page: target.page,
             bbox: target.bbox,
-            targetId: a.targetId ?? target.id,
+            // Native Zielgeometrie ist verbindlich. Modell-bboxes sind für
+            // Freitextlinien nur eine unverbindliche Schätzung.
+            targetId: target.id,
           }
         }
         return {

@@ -48,9 +48,11 @@ export interface SolutionPromptContext {
   numberMatching?: NumberMatchingLegend | null
   /** Erkannte Teilaufgaben (offen/Glossar/Beschriftung) für den Erwartungshorizont. */
   taskInventory?: string | null
+  /** Offene Aufgaben mit nativen Schreibbereichen im Original-PDF. */
+  inplaceOpenAnswers?: boolean
 }
 
-export const SOLUTION_PROMPT_VERSION = '9-vision-qa-choice-tables'
+export const SOLUTION_PROMPT_VERSION = '10-open-inplace-lines'
 
 const SOLUTION_JSON_SCHEMA = `{
   "summary": "kurzer Überblick in 1–2 Sätzen",
@@ -132,6 +134,22 @@ ${SOLUTION_JSON_SCHEMA}
 - Erfinde keine Inhalte, die dem Material widersprechen.
 - Behandle durchgehenden Sachtext, Materialien und Abbildungen NICHT als Lückentext.`
 
+export const SOLUTION_SYSTEM_PROMPT_OFFEN_INPLACE = `Du bist eine erfahrene deutsche Lehrkraft und erstellst Musterlösungen für Unterrichtsmaterialien.
+
+Ziel: Das Material enthält offene Fragen mit vorgesehenen Schreibbereichen im Original. Die Anwendung ordnet jede Antwort selbst dem passenden Schreibbereich zu.
+
+Regeln:
+- Antworte ausschließlich auf Deutsch und ausschließlich als JSON-Objekt.
+- Löse jede Teilaufgabe separat und in derselben Reihenfolge wie im Inventar.
+- label und leftContext müssen die zugehörige Aufgabenstellung klar erkennen lassen.
+- fieldType: immer "freitext"; blankIndex und bbox: immer null. Keine eigenen Koordinaten oder targetIds erfinden.
+- answer: knapper, fachlich korrekter Erwartungshorizont; Stichpunkte mit „- “ sind erlaubt.
+- Keine Markdown-Syntax außer „- “ für Aufzählungen.
+- Erfinde keine Inhalte, die dem Material widersprechen.
+
+Schema:
+${SOLUTION_JSON_SCHEMA}`
+
 /** @deprecated Nutzen Sie solutionSystemPromptForMode – bleibt als Alias für Lückentext. */
 export const SOLUTION_SYSTEM_PROMPT = SOLUTION_SYSTEM_PROMPT_LUECKENTEXT
 
@@ -140,20 +158,30 @@ export function resolveSolutionFillMode(context: SolutionPromptContext): Solutio
   return context.blankInventory?.trim() ? 'lueckentext' : 'offen'
 }
 
-export function solutionSystemPromptForMode(mode: SolutionFillMode): string {
+export function solutionSystemPromptForMode(
+  mode: SolutionFillMode,
+  options: { inplaceOpenAnswers?: boolean } = {},
+): string {
+  if (mode === 'offen' && options.inplaceOpenAnswers) {
+    return SOLUTION_SYSTEM_PROMPT_OFFEN_INPLACE
+  }
   return mode === 'offen' ? SOLUTION_SYSTEM_PROMPT_OFFEN : SOLUTION_SYSTEM_PROMPT_LUECKENTEXT
 }
 
 export function buildSolutionPrompt(context: SolutionPromptContext): string {
   const mode = resolveSolutionFillMode(context)
+  const inplaceOpenAnswers = mode === 'offen' && Boolean(context.inplaceOpenAnswers)
   const lines: string[] = []
 
   if (mode === 'offen') {
     lines.push(
       'Erstelle eine Musterlösung (Erwartungshorizont) für das folgende Unterrichtsmaterial.',
-      'Es wurden KEINE ausfüllbaren Dokumentlücken/Antwortfelder erkannt – offene / gemischte Aufgaben.',
-      'Die Lösung wird als separates PDF mit Aufgabennummer und Lösungstext erzeugt (kein Overlay).',
-      'fieldType ist freitext; blankIndex, leftContext, rightContext und bbox sind null.',
+      inplaceOpenAnswers
+        ? 'Es wurden offene Aufgaben mit vorgesehenen Schreibbereichen erkannt. Die Anwendung platziert Antworten selbst in diese Bereiche.'
+        : 'Es wurden KEINE ausfüllbaren Dokumentlücken/Antwortfelder erkannt – offene / gemischte Aufgaben.',
+      inplaceOpenAnswers
+        ? 'fieldType ist freitext; blankIndex und bbox sind null. leftContext soll die jeweilige Aufgabenstellung wiedergeben.'
+        : 'Die Lösung wird als separates PDF mit Aufgabennummer und Lösungstext erzeugt (kein Overlay).',
       'Löse JEDE erkannte Teilaufgabe separat (eigene answer mit klarem label).',
     )
   } else {
@@ -285,7 +313,9 @@ export function buildSolutionPrompt(context: SolutionPromptContext): string {
   if (mode === 'offen') {
     lines.push(
       'Erkenne Aufgabenstellungen multimodal. Materialtexte und GUIs sind Kontext, keine Lücken.',
-      'Für jede Aufgabe: label (Aufgabennummer) + answer (Erwartungshorizont) + page + fieldType="freitext" + blankIndex=null + bbox=null.',
+      inplaceOpenAnswers
+        ? 'Für jede Aufgabe: label + answer + page + fieldType="freitext" + blankIndex=null + leftContext (Aufgabenstellung) + bbox=null. Keine eigenen Koordinaten oder targetIds ausgeben.'
+        : 'Für jede Aufgabe: label (Aufgabennummer) + answer (Erwartungshorizont) + page + fieldType="freitext" + blankIndex=null + bbox=null.',
       'Kein Markdown in den Antworttexten: Aufzählungen nur mit „- “, keine Sternchen oder Fettsyntax.',
       'Beschreibe nur sichtbare UI-/Materialelemente; unterscheide Eingabe, Aktion und Ausgabe.',
     )

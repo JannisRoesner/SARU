@@ -15,7 +15,11 @@ import {
   validateClozeAnswers,
 } from '../../../server/services/ai/solutions/validators/cloze-validator'
 import type { CandidateBank } from '../../../server/services/ai/solutions/types'
-import { buildSolutionPrompt, SOLUTION_SYSTEM_PROMPT_LUECKENTEXT } from '../../../server/services/ai/prompts'
+import {
+  buildSolutionPrompt,
+  SOLUTION_SYSTEM_PROMPT_LUECKENTEXT,
+  solutionSystemPromptForMode,
+} from '../../../server/services/ai/prompts'
 
 /** Erwartete Wortliste des AB „Die Vorhaut“. */
 const VORHAUT_WORDS = [
@@ -263,5 +267,26 @@ describe('prompts – Candidate Bank', () => {
     expect(prompt).toContain('Spitze')
     expect(prompt).toContain(formatCandidateBankForPrompt(bank).split('\n')[0]!)
     expect(prompt).toMatch(/jeden genau einmal/i)
+  })
+
+  it('behandelt offene Aufgaben auf Schreiblinien nicht als Lückentext', () => {
+    const prompt = buildSolutionPrompt({
+      title: 'AB Rasieren',
+      subjects: ['Biologie'],
+      gradeLevels: [],
+      topics: [],
+      competencies: [],
+      learningObjectives: [],
+      fillMode: 'offen',
+      answerLineCount: 2,
+      inplaceOpenAnswers: true,
+      taskInventory: '1. Intimrasur\n2. Epilieren und Wachsen',
+    })
+
+    expect(prompt).toContain('vorgesehenen Schreibbereichen')
+    expect(prompt).not.toContain('separates PDF')
+    expect(solutionSystemPromptForMode('offen', { inplaceOpenAnswers: true })).toContain(
+      'Keine eigenen Koordinaten',
+    )
   })
 })

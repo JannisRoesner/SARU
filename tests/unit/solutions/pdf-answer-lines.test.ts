@@ -233,7 +233,7 @@ describe('detectPdfAnswerLines', () => {
       answerTargets: detected.targets,
     })
 
-    expect(plan.fillMode).toBe('lueckentext')
+    expect(plan.fillMode).toBe('offen')
     expect(plan.tasks.some((t) => t.kind === 'free_text_inplace')).toBe(true)
     expect(plan.tasks.some((t) => t.kind === 'free_text_separate')).toBe(false)
     expect(plan.tasks.find((t) => t.kind === 'free_text_inplace')!.renderMode).toBe(
@@ -351,6 +351,53 @@ describe('detectPdfAnswerLines', () => {
     expect(plan.tasks.every((task) => task.kind === 'free_text_inplace')).toBe(true)
     expect(plan.tasks.every((task) => task.renderMode === 'overlay')).toBe(true)
     expect(plan.tasks.every((task) => task.targets.length === 1)).toBe(true)
+    expect(plan.fillMode).toBe('offen')
+  })
+
+  it('bindet vertauschte Freitextantworten anhand ihres Aufgabenbezugs an native Linien', async () => {
+    const source = await rasierenWritingLinesPdf()
+    const detected = await detectPdfAnswerLines(source)
+    const plan = buildSolutionPlan({
+      documentText:
+        'Worauf sollten Mädchen und Jungen dabei achten? Erkläre kurz, wie Epilieren und Wachsen funktioniert. Erläutere auch die Vor- und Nachteile.',
+      pdfBlanks: [],
+      shapes: detected.shapes,
+      answerTargets: detected.targets,
+    })
+    const positioned = applyFreeTextTaskMeta(
+      {
+        summary: 'Rasieren',
+        answers: [
+          {
+            id: '1',
+            label: 'Epilieren und Wachsen',
+            answer: 'Epilieren entfernt Haare an der Wurzel.',
+            blankIndex: null,
+            leftContext: 'Erkläre kurz, wie Epilieren und Wachsen funktioniert.',
+            bbox: { x: 0.7, y: 0.1, w: 0.1, h: 0.1 },
+          },
+          {
+            id: '2',
+            label: 'Sicherheit im Intimbereich',
+            answer: 'Saubere Klinge verwenden und Haut schonen.',
+            blankIndex: null,
+            leftContext: 'Worauf sollten Mädchen und Jungen dabei achten?',
+            bbox: { x: 0.7, y: 0.2, w: 0.1, h: 0.1 },
+          },
+        ],
+        formFields: [],
+      },
+      plan.tasks,
+    )
+
+    expect(positioned.answers.map((answer) => answer.targetId)).toEqual([
+      detected.targets[1]!.id,
+      detected.targets[0]!.id,
+    ])
+    expect(positioned.answers.map((answer) => answer.bbox)).toEqual([
+      detected.targets[1]!.bbox,
+      detected.targets[0]!.bbox,
+    ])
   })
 
   it('lässt Underscore-Cloze priorisieren und überspringt Linien-Detection in der Pipeline-Logik', async () => {
