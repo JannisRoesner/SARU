@@ -5,7 +5,10 @@ import {
   formatCandidateBankForPrompt,
   normalizeCandidate,
 } from '../../../server/services/ai/solutions/candidate-bank'
-import { assignCandidatesGlobally } from '../../../server/services/ai/solutions/solvers/cloze-solver'
+import {
+  assignCandidatesGlobally,
+  countCandidateBackedBlanks,
+} from '../../../server/services/ai/solutions/solvers/cloze-solver'
 import { maximumWeightAssignment } from '../../../server/services/ai/solutions/solvers/bipartite-matching'
 import {
   sanitizeOutOfBankAnswers,
@@ -194,6 +197,34 @@ describe('assignCandidatesGlobally', () => {
     }
     const validation = validateClozeAnswers(assigned, bank, 9)
     expect(validation.valid).toBe(true)
+  })
+
+  it('füllt fehlende Modellantworten nicht willkürlich mit Restwörtern auf', () => {
+    const bank = vorhautBank()
+    const incomplete = solutionFromWords([
+      'Spitze',
+      'unterschiedlich',
+      'lang',
+      'Hautschichten',
+      'Schleimhaut',
+      '???',
+      '???',
+      '???',
+      '???',
+    ])
+    const blanks = VORHAUT_WORDS.map((_, i) => ({
+      blankIndex: i,
+      leftText: 'Kontext',
+      rightText: '.',
+      page: 1,
+    }))
+
+    expect(countCandidateBackedBlanks(incomplete, bank, blanks)).toBe(5)
+    const assigned = assignCandidatesGlobally(incomplete, bank, blanks)
+    expect(assigned.answers.map((answer) => answer.answer)).toEqual(
+      incomplete.answers.map((answer) => answer.answer),
+    )
+    expect(validateClozeAnswers(assigned, bank, 9).valid).toBe(false)
   })
 })
 

@@ -37,6 +37,7 @@ import {
   fillPdfAcroForm,
   formatBlankInventory,
   formatTextBlankInventory,
+  isCompleteStructuredSolutionJson,
   overlayPdfAnswers,
   parseStructuredSolution,
   solutionFileName,
@@ -85,7 +86,10 @@ import {
   detectWorksheetTasks,
   formatWorksheetTasksForPrompt,
 } from './solutions/worksheet-tasks'
-import { assignCandidatesGlobally } from './solutions/solvers/cloze-solver'
+import {
+  assignCandidatesGlobally,
+  countCandidateBackedBlanks,
+} from './solutions/solvers/cloze-solver'
 import {
   applyFreeTextTaskMeta,
   applyChoiceCellTaskMeta,
@@ -927,17 +931,88 @@ export async function generateSolution(
         Math.max(settings.maxOutputTokens || 4000, 1200 + blankCount * 220),
       )
 
-      const completion = await chatCompletion(
+      const systemPrompt = solutionSystemPromptForMode(fillMode)
+      const compactRetryInstruction = [
+        '',
+        'WICHTIGER RETRY: Die vorige Ausgabe war unvollständig.',
+        'Antworte diesmal extrem kompakt und ausschließlich als vollständiges JSON.',
+        `Erkannte Lücken: ${blankCount}; erkannte Aufgaben: ${tasks.length}.`,
+        'Schema: {"summary":"Musterlösung","answers":[{"answer":"Text","blankIndex":0}],"formFields":[]}',
+        fillMode === 'lueckentext'
+          ? 'Für jede Lücke genau ein Objekt mit answer und blankIndex ausgeben.'
+          : 'Für offene Aufgaben darf blankIndex null sein; dann zusätzlich eine kurze label angeben.',
+        'Keine Kontexte, Begründungen, Markdown- oder sonstigen Zusatzfelder.',
+      ].join('\n')
+      let completion = await chatCompletion(
         settings,
         [
           {
             role: 'system',
-            parts: [{ type: 'text', text: solutionSystemPromptForMode(fillMode) }],
+            parts: [{ type: 'text', text: systemPrompt }],
           },
           { role: 'user', parts },
         ],
-        { model, maxOutputTokens: solutionMaxTokens },
+        {
+          model,
+          temperature: 0,
+          maxOutputTokens: solutionMaxTokens,
+          jsonMode: true,
+        },
       )
+
+      const firstResponseIncomplete =
+        completion.finishReason === 'length' ||
+        !isCompleteStructuredSolutionJson(completion.text)
+      if (firstResponseIncomplete) {
+        log.warn('Unvollständige strukturierte Modellantwort – kompakter Retry', {
+          finishReason: completion.finishReason ?? null,
+          outputTokens: completion.outputTokens ?? null,
+          chars: completion.text.length,
+          recoveredAnswers: parseStructuredSolution(completion.text).answers.length,
+        })
+        completion = await chatCompletion(
+          settings,
+          [
+            {
+              role: 'system',
+              parts: [{ type: 'text', text: systemPrompt }],
+            },
+            {
+              role: 'user',
+              parts: [
+                ...parts,
+                {
+                  type: 'text',
+                  text: compactRetryInstruction,
+                },
+              ],
+            },
+          ],
+          {
+            model,
+            temperature: 0,
+            maxOutputTokens: solutionMaxTokens,
+            jsonMode: true,
+          },
+        )
+      }
+
+      if (
+        completion.finishReason === 'length' ||
+        !isCompleteStructuredSolutionJson(completion.text)
+      ) {
+        throw appError(
+          'KI_FEHLER',
+          'Das Sprachmodell hat auch beim zweiten Versuch keine vollständige strukturierte Antwort geliefert. Es wurde keine unvollständige Musterlösung gespeichert.',
+          {
+            details: {
+              errorCode: 'INCOMPLETE_STRUCTURED_MODEL_RESPONSE',
+              finishReason: completion.finishReason ?? null,
+              outputTokens: completion.outputTokens ?? null,
+            },
+          },
+        )
+      }
 
       usedModel = completion.model
       structured = parseStructuredSolution(completion.text)
@@ -1104,6 +1179,12 @@ export async function generateSolution(
       settings.enabled &&
       model.trim()
     ) {
+      const choiceTargetIds = new Set(
+        tasks
+          .flatMap((task) => task.targets)
+          .filter((target) => target.kind === 'choice_cell')
+          .map((target) => target.id),
+      )
       qualityVision = await verifyPdfSolutionViaVision({
         source: source.buffer,
         sourceFileName: source.fileName,
@@ -1111,6 +1192,21 @@ export async function generateSolution(
         renderedFileName: filled.fileName,
         settings,
         model,
+        expectedOverlays: structured?.answers
+          .filter(
+            (answer) =>
+              answer.bbox &&
+              answer.page != null &&
+              answer.page > 0,
+          )
+          .map((answer) => ({
+            text:
+              answer.targetId && choiceTargetIds.has(answer.targetId)
+                ? 'X'
+                : answer.answer,
+            page: answer.page!,
+            bbox: answer.bbox!,
+          })) ?? [],
       })
       log.info('PDF-Musterlösung visuell qualitätsgeprüft', {
         status: qualityVision.status,
@@ -1349,8 +1445,21 @@ async function enforceCandidateBankConstraints(args: {
           },
           { role: 'user', parts: [{ type: 'text', text: repairPrompt }] },
         ],
-        { model, maxOutputTokens: settings.maxOutputTokens },
+        {
+          model,
+          temperature: 0,
+          maxOutputTokens: settings.maxOutputTokens,
+          jsonMode: true,
+        },
       )
+      if (
+        repairCompletion.finishReason === 'length' ||
+        !isCompleteStructuredSolutionJson(repairCompletion.text)
+      ) {
+        throw new Error(
+          `Wortlisten-Repair unvollständig (finishReason=${repairCompletion.finishReason ?? 'unbekannt'})`,
+        )
+      }
       const repaired = parseStructuredSolution(repairCompletion.text)
       const pdfBlanks = blanks.filter((b): b is PdfBlankRegion => 'pageIndex' in b)
       structured =
@@ -1366,20 +1475,34 @@ async function enforceCandidateBankConstraints(args: {
                   blanks[i] && 'rightText' in blanks[i]! ? blanks[i]!.rightText : a.rightContext,
               })),
             }
+      log.info('Wortlisten-Repair geparst', {
+        answers: structured.answers.length,
+        mapping: summarizeAnswersForLog(structured.answers),
+      })
       validation = validateClozeAnswers(structured, candidateBank, blankCount)
     } catch (error) {
       log.warn('Wortlisten-Repair fehlgeschlagen', error)
     }
   }
 
-  // Globale Zuordnung bei once-Policy – kann Fehlzuordnungen korrigieren.
-  if (candidateBank.reusePolicy === 'once') {
-    const frames = blanks.map((b) => ({
-      blankIndex: b.blankIndex,
-      leftText: 'leftText' in b ? b.leftText : '',
-      rightText: 'rightText' in b ? b.rightText : '',
-      page: 'pageIndex' in b ? b.pageIndex + 1 : 1,
-    }))
+  const frames = blanks.map((b) => ({
+    blankIndex: b.blankIndex,
+    leftText: 'leftText' in b ? b.leftText : '',
+    rightText: 'rightText' in b ? b.rightText : '',
+    page: 'pageIndex' in b ? b.pageIndex + 1 : 1,
+  }))
+  const candidateBackedBlankCount = countCandidateBackedBlanks(
+    structured,
+    candidateBank,
+    frames,
+  )
+
+  // Globale Zuordnung bei once-Policy darf nur vorhandene Kandidatenantworten
+  // entwirren. Fehlende Antworten werden nicht aus Restwörtern geraten.
+  if (
+    candidateBank.reusePolicy === 'once' &&
+    candidateBackedBlankCount === blankCount
+  ) {
     structured = assignCandidatesGlobally(structured, candidateBank, frames)
     validation = validateClozeAnswers(structured, candidateBank, blankCount)
     if (validation.valid) {
@@ -1418,6 +1541,20 @@ async function enforceCandidateBankConstraints(args: {
     errorCode: 'CLOZE_VALIDATION_FAILED_AFTER_REPAIR',
     violations: validation.violations,
   })
+  if (candidateBackedBlankCount < blankCount) {
+    throw appError(
+      'UNGUELTIGE_EINGABE',
+      `Es wurden ${blankCount} Lücken erkannt, aber nur ${candidateBackedBlankCount} zuverlässig mit Begriffen aus der Wortliste ausgefüllt. Es wurde keine unvollständige Musterlösung gespeichert.`,
+      {
+        details: {
+          errorCode: 'ANSWER_TARGETS_PARTIALLY_FILLED',
+          expected: blankCount,
+          filled: candidateBackedBlankCount,
+          violations: validation.violations,
+        },
+      },
+    )
+  }
   assertClozeValidationPassed(validation)
   return structured
 }

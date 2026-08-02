@@ -3,6 +3,7 @@ import { PDFDocument, StandardFonts } from 'pdf-lib'
 import { renderPdfSolution } from '../../../server/services/ai/solutions/renderers/pdf-renderer'
 import type { TaskBlock } from '../../../server/services/ai/solutions/types'
 import type { StructuredSolution } from '../../../server/services/ai/document-fill'
+import { loadPdfjs } from '../../../server/utils/pdfjs'
 
 async function sourcePdf(): Promise<Buffer> {
   const pdf = await PDFDocument.create()
@@ -82,5 +83,57 @@ describe('renderPdfSolution hybrid', () => {
     expect(filled.strategy).toBe('pdf_hybrid')
     const out = await PDFDocument.load(filled.buffer)
     expect(out.getPageCount()).toBeGreaterThan(1)
+  })
+
+  it('behält kanonische Antwort-bbox statt Lückenindizes erneut zu erkennen', async () => {
+    const pdf = await PDFDocument.create()
+    const font = await pdf.embedFont(StandardFonts.Helvetica)
+    const page = pdf.addPage([595, 842])
+    page.drawText('____________', { x: 50, y: 700, size: 12, font })
+    const source = Buffer.from(await pdf.save())
+    const bbox = { x: 0.65, y: 0.3, w: 0.2, h: 0.03 }
+    const tasks: TaskBlock[] = [
+      {
+        id: 'p1-t1',
+        page: 1,
+        bbox: { x: 0, y: 0, w: 1, h: 1 },
+        instruction: 'Lückentext',
+        kind: 'cloze',
+        confidence: 1,
+        evidence: ['canonical fusion'],
+        targets: [{ id: 'blank-0', kind: 'blank', page: 1, blankIndex: 0, bbox }],
+        renderMode: 'overlay',
+      },
+    ]
+    const filled = await renderPdfSolution(
+      source,
+      {
+        summary: 'Test',
+        answers: [
+          {
+            id: '1',
+            label: 'Lücke 1',
+            answer: 'Zielwort',
+            page: 1,
+            blankIndex: 0,
+            fieldType: 'luecke',
+            bbox,
+          },
+        ],
+        formFields: [],
+      },
+      { title: 'Test', sourceFileName: 'test.pdf', tasks },
+    )
+
+    const pdfjs = await loadPdfjs()
+    const loadingTask = pdfjs.getDocument({ data: new Uint8Array(filled.buffer) })
+    const document = await loadingTask.promise
+    const renderedPage = await document.getPage(1)
+    const content = await renderedPage.getTextContent()
+    const overlay = content.items.find(
+      (item) => 'str' in item && item.str === 'Zielwort',
+    )
+    expect(overlay && 'transform' in overlay ? overlay.transform[4] : 0).toBeGreaterThan(350)
+    await loadingTask.destroy()
   })
 })

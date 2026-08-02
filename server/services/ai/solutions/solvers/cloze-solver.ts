@@ -11,6 +11,27 @@ export interface BlankFrame {
 }
 
 /**
+ * Prüft, ob für jede Lücke bereits eine echte Kandidatenentscheidung vorliegt.
+ * Die globale Zuordnung darf Duplikate auflösen, aber niemals fehlende
+ * Modellantworten durch beliebige Restwörter auffüllen.
+ */
+export function countCandidateBackedBlanks(
+  solution: StructuredSolution,
+  bank: CandidateBank,
+  blanks: BlankFrame[],
+): number {
+  const hasIndexedAnswers = solution.answers.some(
+    (answer) => typeof answer.blankIndex === 'number',
+  )
+  return blanks.filter((blank, index) => {
+    const answer =
+      solution.answers.find((candidate) => candidate.blankIndex === blank.blankIndex) ??
+      (!hasIndexedAnswers ? solution.answers[index] : undefined)
+    return Boolean(answer && matchAnswerToCandidate(answer.answer, bank))
+  }).length
+}
+
+/**
  * Baut eine Score-Matrix aus Modell-Antworten: hohe Scores für genannte
  * Kandidaten in der Modell-Reihenfolge, Bonus wenn Grammatik-Kontext passt.
  * Anschließend globale bijektive Zuordnung.
@@ -26,6 +47,9 @@ export function assignCandidatesGlobally(
 
   const n = blanks.length
   const m = bank.candidates.length
+  if (countCandidateBackedBlanks(solution, bank, blanks) !== n) {
+    return solution
+  }
   const scores: number[][] = Array.from({ length: n }, () => Array(m).fill(0))
 
   // Modell-Präferenz: Antwort i schlägt Kandidat vor → hoher Score an Blank i.

@@ -68,7 +68,10 @@ export async function renderPdfSolution(
 
   let base = source
   if (wantsOverlay) {
-    const overlay = await overlayPdfAnswers(base, overlayAnswers)
+    // Die Antworten wurden vor diesem Schritt bereits mit dem kanonischen
+    // Zielinventar angereichert. Eine erneute, möglicherweise unvollständige
+    // Lückenerkennung darf diese bboxes nicht anhand gleicher Indizes ersetzen.
+    const overlay = await overlayPdfAnswers(base, overlayAnswers, { preferBBox: true })
     base = overlay.buffer
   }
 

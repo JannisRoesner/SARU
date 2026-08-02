@@ -36,6 +36,8 @@ export interface ChatResult {
   model: string
   inputTokens?: number
   outputTokens?: number
+  /** Anbietergrund für das Ende, typischerweise `stop` oder `length`. */
+  finishReason?: string | null
 }
 
 /** Anbieter, die PDF-Dateien direkt im Chat-Request akzeptieren. */
@@ -104,7 +106,10 @@ function serializeParts(parts: ChatPart[], provider: AiProviderId): unknown {
 }
 
 interface ChatCompletionResponse {
-  choices?: { message?: { content?: string | null } }[]
+  choices?: {
+    message?: { content?: string | null }
+    finish_reason?: string | null
+  }[]
   usage?: { prompt_tokens?: number; completion_tokens?: number }
   error?: { message?: string }
   model?: string
@@ -117,7 +122,7 @@ export async function chatCompletion(
     model?: string
     temperature?: number
     maxOutputTokens?: number
-    /** Erzwingt JSON-Ausgabe (Ollama: format=json, sonst response_format). */
+    /** Erzwingt JSON-Ausgabe über das OpenAI-kompatible response_format. */
     jsonMode?: boolean
   } = {},
 ): Promise<ChatResult> {
@@ -137,11 +142,10 @@ export async function chatCompletion(
   }
 
   if (options.jsonMode) {
-    if (settings.provider === 'ollama') {
-      body.format = 'json'
-    } else {
-      body.response_format = { type: 'json_object' }
-    }
+    // Dieser Client verwendet für alle Anbieter /v1/chat/completions. Auch
+    // Ollamas OpenAI-kompatible Schnittstelle erwartet hier response_format;
+    // `format` gehört ausschließlich zu Ollamas nativer /api/chat-Route.
+    body.response_format = { type: 'json_object' }
   }
 
   const started = Date.now()
@@ -161,6 +165,9 @@ export async function chatCompletion(
     provider: settings.provider,
     model,
     dauerMs: Date.now() - started,
+    finishReason: payload.choices?.[0]?.finish_reason ?? null,
+    inputTokens: payload.usage?.prompt_tokens,
+    outputTokens: payload.usage?.completion_tokens,
   })
 
   return {
@@ -168,6 +175,7 @@ export async function chatCompletion(
     model: payload.model ?? model,
     inputTokens: payload.usage?.prompt_tokens,
     outputTokens: payload.usage?.completion_tokens,
+    finishReason: payload.choices?.[0]?.finish_reason ?? null,
   }
 }
 

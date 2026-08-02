@@ -63,7 +63,9 @@ export function buildClozeRepairPrompt(context: ClozeRepairContext): string {
       : '- Bevorzuge die Kandidaten; erfinde keine neuen Wörter.',
     '- Jede answer muss grammatisch in den Satzrahmen passen.',
     '- Liefere genau eine answer pro blankIndex (0…n-1).',
-    '- Schema wie zuvor: JSON mit summary, answers[{id,label,answer,page,blankIndex,leftContext,rightContext,fieldType}], formFields, notesForTeacher, uncertainties.',
+    '- Antworte kompakt, damit die Ausgabe nicht abgeschnitten wird.',
+    '- Exaktes Schema: {"summary":"Korrigierte Lückenzuordnung","answers":[{"answer":"Begriff","blankIndex":0}],"formFields":[]}',
+    '- In answers ausschließlich answer und blankIndex ausgeben; keine Kontexte, Erklärungen oder Zusatzfelder.',
     '- Nur JSON, kein Markdown.',
   )
 

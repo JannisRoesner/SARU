@@ -22,6 +22,7 @@ import {
   overlayPdfAnswers,
   parseStructuredSolution,
   recoverTruncatedSolutionJson,
+  isCompleteStructuredSolutionJson,
   sanitizePdfText,
   solutionToMarkdown,
   topLeftNormToPdfBaseline,
@@ -95,6 +96,14 @@ async function worksheetPdf(pageCount = 2): Promise<Buffer> {
 }
 
 describe('parseStructuredSolution', () => {
+  it('unterscheidet vollständiges JSON von rekonstruierbaren Teilantworten', () => {
+    const complete = '{"summary":"Test","answers":[],"formFields":[]}'
+    const truncated = '{"summary":"Test","answers":[{"answer":"A","blankIndex":0}'
+    expect(isCompleteStructuredSolutionJson(complete)).toBe(true)
+    expect(isCompleteStructuredSolutionJson(`\`\`\`json\n${complete}\n\`\`\``)).toBe(true)
+    expect(isCompleteStructuredSolutionJson(truncated)).toBe(false)
+  })
+
   it('liest reines JSON', () => {
     const result = parseStructuredSolution(
       JSON.stringify({

@@ -1,6 +1,7 @@
 import { extractJsonObject } from '../../../../utils/json-parse'
 import type { AiSettings } from '../../../settings.service'
 import { chatCompletion, supportsNativePdf, type ChatPart } from '../../client'
+import type { SolutionBBox } from '../../document-fill'
 import { rasterizePdf } from '../../rasterize'
 
 export interface PdfSolutionQualityResult {
@@ -10,7 +11,23 @@ export interface PdfSolutionQualityResult {
   model?: string
 }
 
-function qualityPrompt(): string {
+function qualityPrompt(
+  expectedOverlays: Array<{ text: string; page: number; bbox: SolutionBBox }>,
+): string {
+  const inventory = expectedOverlays.map((entry, index) => ({
+    index: index + 1,
+    text: entry.text,
+    page: entry.page,
+    bbox: entry.bbox,
+  }))
+  const inventoryRule = inventory.length > 0
+    ? [
+        `- Erwartet werden exakt ${inventory.length} Overlays. Prüfe jedes gegen dieses verbindliche Inventar: ${JSON.stringify(inventory)}`,
+        '- bbox ist normalisiert (0–1) und hat den Ursprung oben links. Fehlt ein Inventareintrag, liegt er außerhalb seiner bbox oder steht dort ein anderer Lösungstext, ist verdict=warning.',
+      ]
+    : [
+        '- Es liegt kein geometrisches Overlay-Inventar vor; prüfe Lösungsseiten und Anhänge allgemein auf Lesbarkeit und Vollständigkeit.',
+      ]
   return [
     'Du prüfst die visuelle Qualität einer automatisch erzeugten Musterlösung.',
     'Du erhältst zuerst das Original-Arbeitsblatt und anschließend die gerenderte Musterlösung.',
@@ -20,6 +37,7 @@ function qualityPrompt(): string {
     '- Bei Ankreuzaufgaben ist pro Aussage höchstens eine Option markiert.',
     '- Es fehlen keine offensichtlich vorgesehenen Einträge.',
     '- Der Lösungstext ist lesbar und nicht abgeschnitten.',
+    ...inventoryRule,
     'Fachliche Richtigkeit sollst du nur beanstanden, wenn sie unmittelbar offensichtlich ist.',
     'Antworte ausschließlich als JSON: {"verdict":"pass|warning","issues":["kurzer konkreter Hinweis"]}.',
     'Nutze verdict="warning" nur bei einem sichtbaren, konkreten Problem. Ohne sichtbares Problem: pass mit leerem issues-Array.',
@@ -67,8 +85,11 @@ export async function verifyPdfSolutionViaVision(args: {
   renderedFileName: string
   settings: AiSettings
   model: string
+  expectedOverlays?: Array<{ text: string; page: number; bbox: SolutionBBox }>
 }): Promise<PdfSolutionQualityResult> {
-  const parts: ChatPart[] = [{ type: 'text', text: qualityPrompt() }]
+  const parts: ChatPart[] = [
+    { type: 'text', text: qualityPrompt(args.expectedOverlays ?? []) },
+  ]
   if (supportsNativePdf(args.settings.provider)) {
     parts.push(
       {

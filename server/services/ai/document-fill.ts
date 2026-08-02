@@ -344,6 +344,25 @@ export function recoverTruncatedSolutionJson(text: string): Record<string, unkno
   }
 }
 
+/**
+ * Prüft streng, ob die Modellantwort ein vollständig geschlossenes JSON-Objekt
+ * enthält. Tolerante Teilrekonstruktionen zählen absichtlich nicht als vollständig.
+ */
+export function isCompleteStructuredSolutionJson(raw: string): boolean {
+  const trimmed = raw.trim()
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  const candidate = fenced?.[1]?.trim() ?? trimmed
+  const start = candidate.indexOf('{')
+  const end = candidate.lastIndexOf('}')
+  if (start < 0 || end <= start) return false
+  try {
+    const parsed = JSON.parse(candidate.slice(start, end + 1))
+    return Boolean(parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+  } catch {
+    return false
+  }
+}
+
 /** Extrahiert strukturierte Lösung aus LLM-Text (JSON oder Markdown-Fence). */
 export function parseStructuredSolution(raw: string): StructuredSolution {
   const trimmed = raw.trim()
