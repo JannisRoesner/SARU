@@ -165,22 +165,3 @@ export function classifyTask(task: TaskBlock): TaskBlock {
 export function classifyTasks(tasks: TaskBlock[]): TaskBlock[] {
   return tasks.map(classifyTask)
 }
-
-/** Legacy-Fallback: ein globaler Modus aus den klassifizierten Tasks. */
-export function legacyFillModeFromTasks(
-  tasks: TaskBlock[],
-): 'lueckentext' | 'offen' {
-  // Der Füllmodus beschreibt die Semantik des Antwortformats, nicht die
-  // Renderposition. Offene Antworten können auf Schreiblinien im Original
-  // stehen und bleiben trotzdem Freitext statt Lückentext.
-  if (
-    tasks.some(
-      (t) =>
-        (t.kind === 'cloze' || t.kind === 'matching_table') &&
-        t.targets.length > 0,
-    )
-  ) {
-    return 'lueckentext'
-  }
-  return 'offen'
-}

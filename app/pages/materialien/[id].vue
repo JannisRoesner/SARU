@@ -128,13 +128,18 @@ const neueRelation = reactive({
   note: '',
 })
 const kiAnweisung = ref('')
-type LoesungsJobStatus = 'wartend' | 'laeuft' | 'erfolgreich' | 'fehlgeschlagen'
+type LoesungsJobStatus = 'wartend' | 'laeuft' | 'pruefung_noetig' | 'erfolgreich' | 'fehlgeschlagen'
 const loesungsJob = ref<{
   id: string
   status: LoesungsJobStatus
   resultMaterialId: string | null
   errorMessage: string | null
   qualityVision?: { status: 'passed' | 'warning' | 'unavailable'; issues: string[] } | null
+  stage?: string | null
+  progress?: number
+  draftId?: string | null
+  hasDraftFile?: boolean
+  issues?: Array<{ code: string; message: string }>
 } | null>(null)
 let loesungsJobTimer: ReturnType<typeof setInterval> | null = null
 
@@ -158,6 +163,11 @@ async function loesungsJobAktualisieren() {
         resultMaterialId: string | null
         errorMessage: string | null
         qualityVision?: { status: 'passed' | 'warning' | 'unavailable'; issues: string[] } | null
+        stage?: string | null
+        progress?: number
+        draftId?: string | null
+        hasDraftFile?: boolean
+        issues?: Array<{ code: string; message: string }>
       } | null
     }>(`/api/materials/${id.value}/solution-job`)
     const job = result.job
@@ -168,6 +178,12 @@ async function loesungsJobAktualisieren() {
     loesungsJobPollingStoppen()
     if (job.status === 'fehlgeschlagen') {
       hinweise.fehler(job.errorMessage || 'Die Musterlösung konnte nicht erzeugt werden.')
+      return
+    }
+    if (job.status === 'pruefung_noetig') {
+      hinweise.warnung(
+        job.issues?.[0]?.message || 'Die Musterlösung wurde als Prüfentwurf gespeichert und muss kontrolliert werden.',
+      )
       return
     }
     await refresh()
@@ -193,6 +209,28 @@ function loesungsJobPollingStarten() {
   loesungsJobPollingStoppen()
   void loesungsJobAktualisieren()
   loesungsJobTimer = setInterval(() => void loesungsJobAktualisieren(), 2500)
+}
+
+onMounted(async () => {
+  try {
+    const result = await $fetch<{ job: typeof loesungsJob.value }>(
+      `/api/materials/${id.value}/solution-job`,
+    )
+    const job = result.job
+    if (!job) return
+    if (job.status === 'wartend' || job.status === 'laeuft' || job.status === 'pruefung_noetig') {
+      loesungsJob.value = job
+      if (job.status === 'wartend' || job.status === 'laeuft') loesungsJobPollingStarten()
+    }
+  } catch {
+    // Die Materialseite bleibt auch ohne Jobstatus vollständig nutzbar.
+  }
+})
+
+function loesungsEntwurfOeffnen() {
+  const draftId = loesungsJob.value?.draftId
+  if (!draftId) return
+  void navigateTo(`/musterloesungen/entwurf/${draftId}`)
 }
 
 onBeforeUnmount(loesungsJobPollingStoppen)
@@ -536,8 +574,27 @@ const loesungBearbeitbar = computed(() => loesungEditorModus.value !== null)
         <UiIcon name="circle-notch" dreht fest />
         <span>
           Musterlösung wird im Hintergrund {{ loesungsJob?.status === 'wartend' ? 'vorbereitet' : 'erstellt' }}.
+          <template v-if="loesungsJob?.progress"> ({{ loesungsJob.progress }} %)</template>
           Du kannst weiterarbeiten und diese Seite auch verlassen.
         </span>
+      </div>
+      <div
+        v-else-if="loesungsJob?.status === 'pruefung_noetig'"
+        class="flex flex-wrap items-center gap-3 rounded-xl border border-warning/30 bg-warning-soft px-4 py-3 text-sm text-ink"
+        role="status"
+      >
+        <UiIcon name="triangle-exclamation" fest />
+        <span class="min-w-0 flex-1">
+          {{ loesungsJob.issues?.[0]?.message || 'Der Prüfentwurf benötigt eine manuelle Kontrolle.' }}
+        </span>
+        <UiButton
+          v-if="loesungsJob.draftId && loesungsJob.hasDraftFile"
+          variante="sekundaer"
+          icon="eye"
+          @click="loesungsEntwurfOeffnen"
+        >
+          Entwurf öffnen
+        </UiButton>
       </div>
 
       <div class="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">

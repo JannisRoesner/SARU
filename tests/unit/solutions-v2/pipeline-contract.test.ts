@@ -1,0 +1,242 @@
+import { PDFDocument, StandardFonts } from 'pdf-lib'
+import { describe, expect, it } from 'vitest'
+import { buildPdfLayoutDocumentV2, buildTextOnlyLayoutDocumentV2 } from '../../../server/services/ai/solutions-v2/layout-document'
+import { solutionTaskHandlersV2 } from '../../../server/services/ai/solutions-v2/handler-registry'
+import { parseSemanticVerdict, parseTaskSolutionJson } from '../../../server/services/ai/solutions-v2/model-json'
+import { buildSolutionPlanV2 } from '../../../server/services/ai/solutions-v2/plan-builder'
+import { reconcileTasksWithPageLayoutV2 } from '../../../server/services/ai/solutions-v2/page-task-reconciler'
+import { validateSolutionPlanV2 } from '../../../server/services/ai/solutions-v2/plan-validator'
+import { projectSolutionForRenderV2 } from '../../../server/services/ai/solutions-v2/renderer-projection'
+import { validateSolvedTaskV2 } from '../../../server/services/ai/solutions-v2/solution-validator'
+import type { TaskBlock } from '../../../server/services/ai/solutions/types'
+
+function freeTextTask(id: string, page: number, y: number, instruction: string): TaskBlock {
+  return {
+    id,
+    page,
+    bbox: { x: 0.05, y: y - 0.06, w: 0.9, h: 0.04 },
+    instruction,
+    kind: 'free_text_inplace',
+    confidence: 0.95,
+    evidence: ['answer line targets'],
+    renderMode: 'overlay',
+    renderConfidence: 'high',
+    targets: [{
+      id: `${id}-line`,
+      kind: 'answer_line',
+      page,
+      bbox: { x: 0.05, y, w: 0.9, h: 0.12 },
+      source: 'native',
+    }],
+  }
+}
+
+describe('solution pipeline v2 contract', () => {
+  it('registriert für jede kanonische Aufgabenart einen vollständigen Handler', () => {
+    expect(Object.keys(solutionTaskHandlersV2).sort()).toEqual([
+      'cloze',
+      'diagram_labeling',
+      'free_text',
+      'matching',
+      'multi_choice',
+      'single_choice',
+      'table_completion',
+      'unsupported',
+    ])
+    expect(Object.values(solutionTaskHandlersV2).every((handler) => Boolean(
+      handler.promptRules && handler.semanticFocus && handler.validateValue && handler.renderKind,
+    ))).toBe(true)
+  })
+
+  it('weist offenen Schreibbereichen stabile IDs und eigenen Aufgabenbezug zu', () => {
+    const document = buildTextOnlyLayoutDocumentV2(
+      '1. Worauf ist beim Rasieren zu achten?\n2. Wie funktioniert Epilieren?',
+      'rasieren',
+    )
+    const build = buildSolutionPlanV2({
+      document,
+      sourceFormat: 'pdf',
+      tasks: [
+        freeTextTask('old-1', 1, 0.4, 'Worauf ist beim Rasieren zu achten?'),
+        freeTextTask('old-2', 1, 0.75, 'Wie funktioniert Epilieren?'),
+      ],
+    })
+
+    expect(build.plan.tasks).toHaveLength(2)
+    expect(build.plan.tasks[0]!.kind).toBe('free_text')
+    expect(build.plan.tasks[0]!.answerSlots[0]!.targetId).not.toBe(
+      build.plan.tasks[1]!.answerSlots[0]!.targetId,
+    )
+    expect(build.plan.tasks[0]!.answerSlots[0]!.promptContext).toContain('Rasieren')
+    expect(validateSolutionPlanV2(build.plan)).toEqual([])
+  })
+
+  it('gruppiert Auswahlzellen pro Aussage und rendert nur die gewählte Zelle', () => {
+    const task: TaskBlock = {
+      id: 'choice',
+      page: 1,
+      bbox: { x: 0.1, y: 0.2, w: 0.8, h: 0.4 },
+      instruction: 'Kreuze richtig oder falsch an.',
+      kind: 'matching_table',
+      confidence: 0.95,
+      evidence: [],
+      renderMode: 'overlay',
+      targets: [
+        { id: 'r1c1', kind: 'choice_cell', page: 1, cellRef: '0:1:1', choiceValue: 'richtig', bbox: { x: 0.7, y: 0.3, w: 0.05, h: 0.04 } },
+        { id: 'r1c2', kind: 'choice_cell', page: 1, cellRef: '0:1:2', choiceValue: 'falsch', bbox: { x: 0.8, y: 0.3, w: 0.05, h: 0.04 } },
+        { id: 'r2c1', kind: 'choice_cell', page: 1, cellRef: '0:2:1', choiceValue: 'richtig', bbox: { x: 0.7, y: 0.4, w: 0.05, h: 0.04 } },
+        { id: 'r2c2', kind: 'choice_cell', page: 1, cellRef: '0:2:2', choiceValue: 'falsch', bbox: { x: 0.8, y: 0.4, w: 0.05, h: 0.04 } },
+      ],
+    }
+    const build = buildSolutionPlanV2({
+      document: buildTextOnlyLayoutDocumentV2('Aussage 1 Aussage 2', 'choice'),
+      sourceFormat: 'pdf',
+      tasks: [task],
+    })
+    const spec = build.plan.tasks[0]!
+    expect(spec.kind).toBe('single_choice')
+    expect(spec.answerSlots).toHaveLength(2)
+    expect(spec.answerSlots[0]!.allowedValues).toEqual(['richtig', 'falsch'])
+
+    const projection = projectSolutionForRenderV2({
+      plan: build.plan,
+      rendererTasks: build.rendererTasks,
+      solvedTasks: [{
+        taskId: spec.taskId,
+        answers: [
+          { targetId: spec.answerSlots[0]!.targetId, value: 'richtig' },
+          { targetId: spec.answerSlots[1]!.targetId, value: 'falsch' },
+        ],
+        uncertainties: [],
+      }],
+    })
+    expect(projection.solution.answers).toHaveLength(2)
+    expect(projection.solution.answers.every((answer) => answer.answer !== 'richtig' || answer.targetId)).toBe(true)
+    expect(projection.manifest.operations.map((operation) => operation.value)).toEqual(['X', 'X'])
+    expect(new Set(projection.manifest.operations.map((operation) => operation.targetId)).size).toBe(2)
+  })
+
+  it('akzeptiert kein abgeschnittenes oder um IDs erweitertes Modell-JSON', () => {
+    expect(parseTaskSolutionJson('{"taskId":"t","answers":[')).toBeNull()
+    expect(parseTaskSolutionJson('```json\n{"taskId":"t","answers":[{"targetId":"x","value":"A"}]}\n```')).not.toBeNull()
+
+    const build = buildSolutionPlanV2({
+      document: buildTextOnlyLayoutDocumentV2('Frage', 'ids'),
+      sourceFormat: 'pdf',
+      tasks: [freeTextTask('one', 1, 0.5, 'Frage')],
+    })
+    const task = build.plan.tasks[0]!
+    const issues = validateSolvedTaskV2(task, {
+      taskId: task.taskId,
+      answers: [{ targetId: 'vom-modell-erfunden', value: 'Antwort' }],
+      uncertainties: [],
+    })
+    expect(issues.map((issue) => issue.code)).toEqual(
+      expect.arrayContaining(['MODEL_EXTRA_TARGET', 'ANSWERS_PARTIAL']),
+    )
+  })
+
+  it('verlangt einen auswertbaren getrennten Semantik-Verdict', () => {
+    expect(parseSemanticVerdict('{"taskId":"t","verdict":"pass","issues":[]}')).toEqual({
+      taskId: 't',
+      verdict: 'pass',
+      issues: [],
+    })
+    expect(parseSemanticVerdict('{"taskId":"t","verdict":"vielleicht"}')).toBeNull()
+  })
+
+  it('bewahrt Seitennummern und Textgeometrie in mehrseitigen PDFs', async () => {
+    const pdf = await PDFDocument.create()
+    const font = await pdf.embedFont(StandardFonts.Helvetica)
+    const first = pdf.addPage([300, 400])
+    first.drawText('Aufgabe auf Seite eins', { x: 30, y: 340, font, size: 12 })
+    const second = pdf.addPage([300, 400])
+    second.drawText('Aufgabe auf Seite zwei', { x: 30, y: 300, font, size: 12 })
+    const document = await buildPdfLayoutDocumentV2(Buffer.from(await pdf.save()))
+    expect(document.pages).toHaveLength(2)
+    expect(document.pages[0]!.textSpans[0]!.page).toBe(1)
+    expect(document.pages[1]!.textSpans[0]!.page).toBe(2)
+    expect(document.pages[1]!.textSpans[0]!.bbox.y).toBeGreaterThan(0)
+  })
+
+  it('segmentiert ziel­lose Aufgaben pro Seite und bewahrt native Zielseiten', () => {
+    const document = {
+      schemaVersion: 2 as const,
+      sourceHash: 'pages',
+      fullText: 'Welche Vorteile hat Methode A?\n\nErkläre Methode B ausführlich.',
+      pages: [
+        {
+          page: 1,
+          width: 300,
+          height: 400,
+          extractionQuality: 'text_layer' as const,
+          textSpans: [{
+            id: 'p1-text',
+            page: 1,
+            text: 'Welche Vorteile hat Methode A?',
+            bbox: { x: 0.1, y: 0.2, w: 0.7, h: 0.04 },
+          }],
+        },
+        {
+          page: 2,
+          width: 300,
+          height: 400,
+          extractionQuality: 'text_layer' as const,
+          textSpans: [{
+            id: 'p2-text',
+            page: 2,
+            text: 'Erkläre Methode B ausführlich.',
+            bbox: { x: 0.1, y: 0.6, w: 0.7, h: 0.04 },
+          }],
+        },
+      ],
+    }
+    const misplacedAppendix: TaskBlock = {
+      id: 'legacy-open',
+      page: 1,
+      bbox: { x: 0.05, y: 0.1, w: 0.9, h: 0.08 },
+      instruction: 'Erkläre Methode B ausführlich.',
+      kind: 'free_text_separate',
+      confidence: 0.8,
+      evidence: [],
+      targets: [],
+      renderMode: 'appendix',
+    }
+    const native = freeTextTask('native', 2, 0.8, 'Native Schreibfläche')
+    const tasks = reconcileTasksWithPageLayoutV2(document, [misplacedAppendix, native])
+
+    expect(tasks.find((task) => task.instruction.includes('Methode B'))?.page).toBe(2)
+    expect(tasks.some((task) => task.instruction.includes('Methode A') && task.page === 1)).toBe(true)
+    expect(tasks.find((task) => task.id === 'native')?.page).toBe(2)
+    expect(tasks.find((task) => task.id === 'native')?.targets).toHaveLength(1)
+  })
+
+  it('unterscheidet keine Aufgaben von einer Aufgabe ohne Ziel', () => {
+    const empty = buildSolutionPlanV2({
+      document: buildTextOnlyLayoutDocumentV2('', 'empty'),
+      sourceFormat: 'other',
+      tasks: [],
+    })
+    expect(validateSolutionPlanV2(empty.plan).map((issue) => issue.code)).toEqual(['NO_TASKS_DETECTED'])
+
+    const missingTarget = buildSolutionPlanV2({
+      document: buildTextOnlyLayoutDocumentV2('Unbekannte Aufgabe', 'missing'),
+      sourceFormat: 'other',
+      tasks: [{
+        id: 'unsupported',
+        page: 1,
+        bbox: { x: 0.1, y: 0.2, w: 0.8, h: 0.1 },
+        instruction: 'Unbekannte Aufgabe',
+        kind: 'unknown',
+        confidence: 0.2,
+        evidence: [],
+        targets: [],
+        renderMode: 'overlay',
+      }],
+    })
+    missingTarget.plan.tasks[0]!.answerSlots = []
+    expect(validateSolutionPlanV2(missingTarget.plan).map((issue) => issue.code)).toEqual(
+      expect.arrayContaining(['UNSUPPORTED_TASK', 'TASK_TARGETS_MISSING']),
+    )
+  })
+})

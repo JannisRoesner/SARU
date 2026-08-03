@@ -74,9 +74,9 @@ export function parsePdfSolutionQualityResponse(
 }
 
 /**
- * Zweite Vision-Stufe nach dem Rendern. Ein Fehler des Prüfers blockiert die
- * Musterlösung nicht; er wird als „unavailable“ dokumentiert statt still zu
- * einem fehlerhaften Pass-Ergebnis zu werden.
+ * Zweite Vision-Stufe nach dem Rendern. Alle Seiten werden geprüft; lokale
+ * Modelle erhalten kleine Seiten-Batches. Der Aufrufer behandelt unavailable
+ * und warning in V2 als blockierend.
  */
 export async function verifyPdfSolutionViaVision(args: {
   source: Buffer
@@ -87,11 +87,30 @@ export async function verifyPdfSolutionViaVision(args: {
   model: string
   expectedOverlays?: Array<{ text: string; page: number; bbox: SolutionBBox }>
 }): Promise<PdfSolutionQualityResult> {
-  const parts: ChatPart[] = [
-    { type: 'text', text: qualityPrompt(args.expectedOverlays ?? []) },
-  ]
+  const runCheck = async (parts: ChatPart[]): Promise<PdfSolutionQualityResult> => {
+    try {
+      const completion = await chatCompletion(
+        args.settings,
+        [{ role: 'user', parts }],
+        { model: args.model, temperature: 0, maxOutputTokens: 1200, jsonMode: true },
+      )
+      return parsePdfSolutionQualityResponse(completion.text, completion.model)
+    } catch (error) {
+      return {
+        status: 'unavailable',
+        issues: [
+          error instanceof Error
+            ? `Visuelle Qualitätsprüfung nicht verfügbar: ${error.message}`
+            : 'Visuelle Qualitätsprüfung nicht verfügbar.',
+        ],
+        checkedAt: new Date().toISOString(),
+      }
+    }
+  }
+
   if (supportsNativePdf(args.settings.provider)) {
-    parts.push(
+    return runCheck([
+      { type: 'text', text: qualityPrompt(args.expectedOverlays ?? []) },
       {
         type: 'file',
         mimeType: 'application/pdf',
@@ -104,54 +123,62 @@ export async function verifyPdfSolutionViaVision(args: {
         base64: args.rendered.toString('base64'),
         fileName: `musterloesung-${args.renderedFileName}`,
       },
-    )
-  } else {
-    const [sourcePages, renderedPages] = await Promise.all([
-      rasterizePdf(args.source, { maxPages: 4, scale: 1.35 }),
-      rasterizePdf(args.rendered, { maxPages: 4, scale: 1.35 }),
     ])
-    const pairCount = Math.min(sourcePages.length, renderedPages.length)
-    for (let index = 0; index < pairCount; index++) {
-      parts.push(
-        { type: 'text', text: `Original, Seite ${index + 1}:` },
-        {
-          type: 'image',
-          mimeType: sourcePages[index]!.mimeType,
-          base64: sourcePages[index]!.base64,
-        },
-        { type: 'text', text: `Musterlösung, Seite ${index + 1}:` },
-        {
-          type: 'image',
-          mimeType: renderedPages[index]!.mimeType,
-          base64: renderedPages[index]!.base64,
-        },
-      )
-    }
-    if (pairCount === 0) {
-      return {
-        status: 'unavailable',
-        issues: ['Das PDF konnte nicht für die visuelle Qualitätsprüfung gerendert werden.'],
-        checkedAt: new Date().toISOString(),
-      }
+  }
+
+  const [sourcePages, renderedPages] = await Promise.all([
+    rasterizePdf(args.source, { maxPages: 200, scale: 1.35 }),
+    rasterizePdf(args.rendered, { maxPages: 200, scale: 1.35 }),
+  ])
+  if (sourcePages.length === 0 || renderedPages.length === 0) {
+    return {
+      status: 'unavailable',
+      issues: ['Das PDF konnte nicht für die visuelle Qualitätsprüfung gerendert werden.'],
+      checkedAt: new Date().toISOString(),
     }
   }
 
-  try {
-    const completion = await chatCompletion(
-      args.settings,
-      [{ role: 'user', parts }],
-      { model: args.model, temperature: 0, maxOutputTokens: 1200, jsonMode: true },
-    )
-    return parsePdfSolutionQualityResponse(completion.text, completion.model)
-  } catch (error) {
-    return {
-      status: 'unavailable',
-      issues: [
-        error instanceof Error
-          ? `Visuelle Qualitätsprüfung nicht verfügbar: ${error.message}`
-          : 'Visuelle Qualitätsprüfung nicht verfügbar.',
-      ],
-      checkedAt: new Date().toISOString(),
+  const results: PdfSolutionQualityResult[] = []
+  const total = Math.max(sourcePages.length, renderedPages.length)
+  for (let start = 0; start < total; start += 3) {
+    const parts: ChatPart[] = [
+      {
+        type: 'text',
+        text: qualityPrompt(
+          (args.expectedOverlays ?? []).filter(
+            (entry) => entry.page >= start + 1 && entry.page <= start + 3,
+          ),
+        ),
+      },
+    ]
+    for (let index = start; index < Math.min(total, start + 3); index++) {
+      const sourcePage = sourcePages[index]
+      const renderedPage = renderedPages[index]
+      if (sourcePage) {
+        parts.push(
+          { type: 'text', text: `Original, Seite ${index + 1}:` },
+          { type: 'image', mimeType: sourcePage.mimeType, base64: sourcePage.base64 },
+        )
+      }
+      if (renderedPage) {
+        parts.push(
+          { type: 'text', text: `Musterlösung, Seite ${index + 1}:` },
+          { type: 'image', mimeType: renderedPage.mimeType, base64: renderedPage.base64 },
+        )
+      }
     }
+    results.push(await runCheck(parts))
+  }
+  const unavailable = results.find((result) => result.status === 'unavailable')
+  const warnings = results.flatMap((result) => result.issues)
+  return {
+    status: unavailable
+      ? 'unavailable'
+      : results.some((result) => result.status === 'warning')
+        ? 'warning'
+        : 'passed',
+    issues: warnings,
+    checkedAt: new Date().toISOString(),
+    model: results.find((result) => result.model)?.model,
   }
 }

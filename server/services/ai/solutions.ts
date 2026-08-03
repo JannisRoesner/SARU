@@ -3,12 +3,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { eq } from 'drizzle-orm'
 import { useDatabase } from '../../database/client'
-import { aiJobs, materialAssets, materialVariants } from '../../database/schema'
+import { aiJobs, aiSolutionRuns, materialAssets, materialVariants } from '../../database/schema'
 import { oeffentlicheFehlermeldung } from '#shared/utils/public-error'
 import { appError } from '../../utils/errors'
 import { createLogger } from '../../utils/logger'
-import { recordAudit } from '../audit.service'
-import { materialTypes, schoolForms } from '#shared/utils/labels'
 import { getMaterialDetail } from '../../repositories/material.repository'
 import {
   addFileAsset,
@@ -21,30 +19,21 @@ import { extensionOf, resolveStoragePath } from '../storage.service'
 import { convertOfficeFileToPdf } from '../office-convert.service'
 import {
   getAiSettings,
-  getHermesSettings,
   getPrivacySettings,
   type AiSettings,
 } from '../settings.service'
-import { chatCompletion, supportsNativePdf, type ChatPart } from './client'
 import { PDFDocument } from 'pdf-lib'
 import {
-  alignAnswersToBlanks,
   buildAnswerListPdf,
   buildSolutionDocx,
   detectDocxBlanks,
   detectPdfBlankRegions,
   enrichSolutionPlacements,
   fillPdfAcroForm,
-  formatBlankInventory,
-  formatTextBlankInventory,
-  isCompleteStructuredSolutionJson,
   overlayPdfAnswers,
-  parseStructuredSolution,
   solutionFileName,
   solutionToMarkdown,
-  summarizeAnswersForLog,
   summarizeBlanksForLog,
-  textBlanksAsAlignable,
   type FilledDocument,
   type PdfBlankRegion,
   type SolutionFillMode,
@@ -52,13 +41,9 @@ import {
   type TextBlankInfo,
 } from './document-fill'
 import { kiAutorAnzeige } from '#shared/utils/ki'
-import { tryHermesDocumentFill } from './hermes'
 import {
   AI_CONTENT_NOTICE,
   AI_CONTENT_NOTICE_MD,
-  SOLUTION_PROMPT_VERSION,
-  buildSolutionPrompt,
-  solutionSystemPromptForMode,
 } from './prompts'
 import { rasterizePdf } from './rasterize'
 import { ensureExtractedText } from './document-text'
@@ -67,7 +52,6 @@ import { logPipeline } from './solutions/logging'
 import { buildSolutionPlan } from './solutions/orchestrator'
 import { detectPdfLayoutTargets } from './solutions/pdf-answer-lines'
 import { fusePdfClozeTargets } from './solutions/pdf-cloze-target-fusion'
-import { buildClozeRepairPrompt } from './solutions/repair/cloze-repair'
 import { repairCandidateBankViaVision } from './solutions/repair/candidate-bank-vision'
 import { repairDocxTargetsViaVision } from './solutions/repair/docx-targets-vision'
 import {
@@ -81,53 +65,27 @@ import {
 import { mergeNativeAndVisualTargets } from './solutions/docx-target-merger'
 import { renderPdfSolution } from './solutions/renderers/pdf-renderer'
 import { renderDocxSolution } from './solutions/renderers/docx-renderer'
-import { coerceAnswersToNumbers } from './solutions/number-matching'
+import type { TaskBlock } from './solutions/types'
+import { wakeSolutionWorker } from './solutions-v2/worker'
+import { buildPdfLayoutDocumentV2, buildTextOnlyLayoutDocumentV2 } from './solutions-v2/layout-document'
+import { buildSolutionPlanV2 } from './solutions-v2/plan-builder'
+import { reconcileTasksWithPageLayoutV2 } from './solutions-v2/page-task-reconciler'
+import { runSolutionPipelineV2, type PageVisionPart } from './solutions-v2/pipeline'
 import {
-  detectWorksheetTasks,
-  formatWorksheetTasksForPrompt,
-} from './solutions/worksheet-tasks'
-import {
-  assignCandidatesGlobally,
-  countCandidateBackedBlanks,
-} from './solutions/solvers/cloze-solver'
-import {
-  applyFreeTextTaskMeta,
-  applyChoiceCellTaskMeta,
-  applyTableCellTaskMeta,
-} from './solutions/solvers/free-text-solver'
-import { legacyFillModeFromTasks } from './solutions/task-classifier'
-import type { CandidateBank, TaskBlock } from './solutions/types'
-import { validateClozeAnswers } from './solutions/validators/cloze-validator'
-import {
-  assertClozeValidationPassed,
-  hasPlaceholderAnswers,
-} from './solutions/validators/validation-gate'
-import {
-  assertAnswerCoverage,
-  inspectAnswerCoverage,
-} from './solutions/validators/answer-coverage'
+  completeSolutionRun,
+  saveSolutionDraft,
+  SolutionReviewRequiredError,
+  updateSolutionRunStage,
+} from './solutions-v2/run-service'
+import { SOLUTION_PIPELINE_VERSION, type PipelineV2Result } from './solutions-v2/types'
 
 const log = createLogger('ai:solutions')
 
 /** Obergrenze für an das Modell übergebene Dateien – schützt vor sehr großen Anhängen. */
 const MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024
-const MAX_VISION_PAGES = 8
 
 const OFFICE_EXTENSIONS = new Set(['docx', 'odt', 'doc', 'rtf'])
 const PDF_EXTENSIONS = new Set(['pdf'])
-/** Office-Formate, die LibreOffice für Vision/Vorschau nach PDF wandeln kann. */
-const OFFICE_VISION_EXTENSIONS = new Set([
-  'docx',
-  'doc',
-  'odt',
-  'rtf',
-  'pptx',
-  'ppt',
-  'odp',
-  'xlsx',
-  'xls',
-  'ods',
-])
 
 export interface GenerateSolutionOptions {
   /** Nur diese Variante berücksichtigen; sonst die Standardfassung. */
@@ -157,8 +115,8 @@ export interface QueuedSolutionJob {
 }
 
 /**
- * Stellt die aufwendige Erzeugung in die lokale Prozesswarteschlange. Die
- * Datenbank hält den Status fest; die HTTP-Anfrage kann sofort zurückkehren.
+ * Stellt die Erzeugung in die dauerhafte Datenbank-Warteschlange. Der Worker
+ * kann den Lauf nach einem Prozessneustart erneut claimen.
  */
 export async function enqueueSolutionGeneration(
   materialId: string,
@@ -169,56 +127,39 @@ export async function enqueueSolutionGeneration(
   const settings = await getAiSettings()
   const provisionalModel =
     options.model?.trim() || settings.visionModel?.trim() || settings.chatModel?.trim() || 'pending'
-  const [job] = await db
-    .insert(aiJobs)
-    .values({
-      userId,
-      materialId,
-      kind: 'musterloesung',
-      provider: settings.provider,
-      model: provisionalModel,
-      status: 'wartend',
-    })
-    .returning({ id: aiJobs.id })
-
-  const jobId = job!.id
-  setImmediate(() => {
-    void generateSolution(materialId, userId, { ...options, jobId })
-      .then((result) =>
-        recordAudit({
-          userId,
-          action: 'ki.musterloesung_erzeugt',
-          entityType: 'material',
-          entityId: materialId,
-          details: {
-            modell: result.model,
-            loesung: result.solutionMaterialId,
-            strategie: result.fillStrategy,
-            hermes: result.hermesUsed,
-          },
-        }),
-      )
-      .catch(async (error) => {
-        // Fehler vor dem regulären try/catch in generateSolution (z. B. Einstellungen)
-        // müssen den wartenden Job ebenfalls abschließen.
-        await db
-          .update(aiJobs)
-          .set({
-            status: 'fehlgeschlagen',
-            errorMessage: oeffentlicheFehlermeldung(
-              error,
-              'Die KI-Musterlösung konnte nicht erzeugt werden.',
-            ),
-            finishedAt: new Date(),
-          })
-          .where(eq(aiJobs.id, jobId))
+  const jobId = await db.transaction(async (tx) => {
+    const [job] = await tx
+      .insert(aiJobs)
+      .values({
+        userId,
+        materialId,
+        kind: 'musterloesung',
+        provider: settings.provider,
+        model: provisionalModel,
+        status: 'wartend',
       })
+      .returning({ id: aiJobs.id })
+    const id = job!.id
+    await tx.insert(aiSolutionRuns).values({
+      jobId: id,
+      pipelineVersion: '2',
+      stage: 'queued',
+      progress: 0,
+      options: {
+        variantId: options.variantId ?? null,
+        userInstructions: options.userInstructions ?? null,
+        useVision: options.useVision ?? true,
+        model: options.model ?? null,
+      },
+    })
+    return id
   })
+  wakeSolutionWorker()
 
   return { jobId, status: 'wartend' }
 }
 
-interface SourceAsset {
+export interface SourceAsset {
   id: string
   fileName: string
   mimeType: string
@@ -239,9 +180,8 @@ export async function generateSolution(
 ): Promise<GenerateSolutionResult> {
   const db = useDatabase()
   const settings = await getAiSettings()
-  const hermes = await getHermesSettings()
 
-  if (!settings.enabled && !(hermes.enabled && hermes.baseUrl.trim())) {
+  if (!settings.enabled) {
     throw appError(
       'KI_NICHT_KONFIGURIERT',
       'Die KI-Unterstützung ist nicht aktiviert. Bitte in den Einstellungen einrichten.',
@@ -257,13 +197,11 @@ export async function generateSolution(
     material.variants[0]
 
   const source = variant ? await loadPrimarySourceAsset(variant.id) : null
+  if (options.jobId) await updateSolutionRunStage(options.jobId, 'normalizing', 5)
 
   // PDF-Arbeitsblätter brauchen Seitenbilder für Lückenpositionen (bbox).
-  const forceVisionForPdf = Boolean(source && PDF_EXTENSIONS.has(source.extension))
-  const useVision = options.useVision ?? (settings.useVision || forceVisionForPdf)
-  const model = pickSolutionModel(settings, options.model, useVision, {
-    allowEmpty: hermes.enabled && Boolean(hermes.baseUrl.trim()),
-  })
+  const useVision = options.useVision ?? true
+  const model = pickSolutionModel(settings, options.model, useVision)
 
   const documentText = variant
     ? (
@@ -279,6 +217,7 @@ export async function generateSolution(
     : ''
 
   // Lücken vor dem Modellaufruf erkennen (PDF-Geometrie oder DOCX-Textebene).
+  if (options.jobId) await updateSolutionRunStage(options.jobId, 'detecting', 10)
   let detectedBlanks: PdfBlankRegion[] = []
   let docxBlanks: TextBlankInfo[] = []
   if (source && PDF_EXTENSIONS.has(source.extension)) {
@@ -452,7 +391,7 @@ export async function generateSolution(
     }
   }
 
-  let { tasks, candidateBank, fillMode, blankCount } = plan
+  let { tasks, candidateBank, blankCount } = plan
   const { document: documentModel, numberMatching } = plan
 
   let pdfLayoutVisionChecked = false
@@ -499,27 +438,55 @@ export async function generateSolution(
         const visualHasChoiceCells = visual?.tasks.some((task) =>
           task.targets.some((target) => target.kind === 'choice_cell'),
         )
+        const localHasAuthoritativeTargets = tasks.some((task) =>
+          task.targets.some((target) => target.source !== 'vision' && Boolean(target.bbox || target.nativeRef)),
+        )
         const canAdoptVisualPlan = Boolean(
           visual &&
             visual.verdict === 'repair' &&
+            !localHasAuthoritativeTargets &&
             !pdfClozeTargetsFused &&
             visual.tasks.length > 0 &&
             (!localHasChoiceCells || visualHasChoiceCells) &&
             (visualTargetCount > 0 || tasks.length === 0),
         )
         if (visual && canAdoptVisualPlan) {
-          tasks = visual.tasks
-          fillMode = legacyFillModeFromTasks(tasks)
-          blankCount = 0
+          tasks = visual.tasks.map((task) =>
+            task.kind === 'cloze' && candidateBank
+              ? {
+                  ...task,
+                  candidateBank,
+                  candidateBankStatus: 'found' as const,
+                  requiresCandidateBankRepair: false,
+                }
+              : task,
+          )
+          blankCount = tasks
+            .flatMap((task) => task.targets)
+            .filter((target) => target.kind === 'blank').length
           pdfLayoutRepairedViaVision = true
           log.info('PDF-Layoutplan per Vision repariert', {
             verdict: visual.verdict,
             rawTasks: visual.rawTaskCount,
             tasks: tasks.length,
             answerTargets: visualTargetCount,
-            fillMode,
           })
         } else {
+          if (
+            tasks.length > 0 &&
+            (!visual || visual.verdict === 'repair' || visual.verdict === 'no_targets')
+          ) {
+            const reason = !visual
+              ? 'vision layout conflict: no usable response'
+              : visual.tasks.length === 0
+                ? 'vision layout conflict: visual check returned no tasks'
+                : 'vision layout conflict: visual plan disagrees with native plan'
+            tasks = tasks.map((task) => ({
+              ...task,
+              confidence: Math.min(task.confidence, 0.55),
+              evidence: [...task.evidence, reason],
+            }))
+          }
           log.info('PDF-Layoutplan nach Vision-Check unverändert', {
             verdict: visual?.verdict ?? null,
             tasks: visual?.tasks.length ?? 0,
@@ -527,6 +494,11 @@ export async function generateSolution(
           })
         }
       } catch (error) {
+        tasks = tasks.map((task) => ({
+          ...task,
+          confidence: Math.min(task.confidence, 0.55),
+          evidence: [...task.evidence, 'vision layout conflict: check unavailable'],
+        }))
         log.warn('PDF-Layout-Vision-Check fehlgeschlagen – nativer Plan bleibt aktiv', error)
       }
     }
@@ -632,8 +604,7 @@ export async function generateSolution(
     }
   }
 
-  log.info('Musterlösungs-Füllmodus', {
-    fillMode,
+  log.info('Musterlösungs-Aufgabenplan erkannt', {
     blanks: blankCount,
     tasks: tasks.length,
     candidateBank: candidateBank
@@ -646,100 +617,17 @@ export async function generateSolution(
     source: source?.fileName ?? null,
   })
 
-  const tableCellTargets = tasks
-    .filter((task) => task.kind === 'matching_table')
-    .flatMap((task) => task.targets)
-    .filter((target) => target.kind === 'table_cell')
-  const choiceCellTargets = tasks
-    .flatMap((task) => task.targets)
-    .filter((target) => target.kind === 'choice_cell')
-  const choiceRows = new Set(
-    choiceCellTargets.map((target) => (target.cellRef ?? target.id).split(':').slice(0, 2).join(':')),
-  )
-  const choiceValues = [...new Set(choiceCellTargets.map((target) => target.choiceValue).filter(Boolean))]
-  const tableInventory = tableCellTargets
-    .map(
-      (target, index) =>
-        `${target.blankIndex ?? index}: Tabelle, Zelle ${target.cellRef ?? index + 1}`,
-    )
-    .join('\n')
-  const blankInventory =
-    fillMode === 'lueckentext'
-      ? [
-          detectedBlanks.length
-            ? formatBlankInventory(detectedBlanks)
-            : docxBlanks.length
-              ? formatTextBlankInventory(docxBlanks)
-              : '',
-          tableInventory,
-        ]
-          .filter(Boolean)
-          .join('\n') || null
-      : null
-
-  const diagramTask = tasks.find((t) => t.kind === 'diagram_completion')
-  const answerLineCount =
-    pdfLayoutTargets.clusterCount ||
-    tasks
-      .flatMap((t) => t.targets)
-      .filter((t) => t.kind === 'answer_line').length ||
-    null
-  const worksheetUnits = detectWorksheetTasks(
-    documentText || documentModel.fullText || '',
-  )
-  const hasOpenInplaceTasks = tasks.some(
-    (task) => task.kind === 'free_text_inplace' && task.targets.length > 0,
-  )
-  const taskInventory = tableCellTargets.length || choiceCellTargets.length
-    ? tasks
-        .map(
-          (t, i) =>
-            `${i + 1}. [${t.kind}] ${t.instruction}${
-              t.targets.length ? ` (${t.targets.length} Antwortbereiche)` : ''
-            }`,
-        )
-        .join('\n')
-    : worksheetUnits.length
-      ? formatWorksheetTasksForPrompt(worksheetUnits)
-      : tasks
-        .map(
-          (t, i) =>
-            `${i + 1}. [${t.kind}] ${t.instruction}${
-              t.targets.length ? ` (${t.targets.length} Antwortbereiche)` : ''
-            }`,
-        )
-        .join('\n') || null
-  const prompt = buildSolutionPrompt({
-    title: material.title,
-    description: material.description,
-    materialType: materialTypes.label(material.materialType),
-    subjects: material.subjects.map((s) => s.name),
-    gradeLevels: material.gradeLevels,
-    schoolForm: material.schoolForm ? schoolForms.label(material.schoolForm) : null,
-    topics: material.topics.map((t) => t.name),
-    competencies: material.competencies.map((c) => c.name),
-    learningObjectives: material.learningObjectives,
-    pages: material.pages,
-    documentText: documentText || null,
-    userInstructions: options.userInstructions,
+  const prompt = JSON.stringify({
+    pipelineVersion: SOLUTION_PIPELINE_VERSION,
     sourceFileName: source?.fileName ?? null,
-    sourceMimeType: source?.mimeType ?? null,
-    blankInventory,
-    detectedBlankCount:
-      fillMode === 'lueckentext'
-        ? blankCount || tableCellTargets.length || null
-        : null,
-    fillMode,
-    candidateBank,
-    diagramTargetIds: diagramTask?.targets.map((t) => t.id) ?? null,
-    answerLineCount,
-    choiceTask:
-      choiceRows.size > 0 && choiceValues.length >= 2
-        ? { rows: choiceRows.size, choices: choiceValues as string[] }
-        : null,
-    numberMatching,
-    taskInventory,
-    inplaceOpenAnswers: hasOpenInplaceTasks,
+    taskCount: tasks.length,
+    taskKinds: tasks.map((task) => task.kind),
+    promptVersions: {
+      layout: 'solution-v2-layout-1',
+      solve: 'solution-v2-solve-1',
+      semantic: 'solution-v2-semantic-1',
+      visual: 'solution-v2-visual-1',
+    },
   })
 
   if (!documentText && !source && !material.content?.trim()) {
@@ -770,7 +658,6 @@ export async function generateSolution(
         userId,
         materialId,
         kind: 'musterloesung',
-        // Enum kennt nur OpenAI-kompatible Anbieter; Hermes wird in aiMeta vermerkt.
         provider: settings.provider,
         model,
         status: 'laeuft',
@@ -785,7 +672,6 @@ export async function generateSolution(
     jobId,
     runId,
     materialId,
-    fillMode,
     blankCount,
     taskCount: tasks.length,
   })
@@ -852,337 +738,126 @@ export async function generateSolution(
 
   try {
     let filled: FilledDocument | null = null
-    let hermesUsed = false
+    const hermesUsed = false
     let attachments = 0
     let visionUsed = false
     let usedModel = model
     let structured: StructuredSolution | null = null
+    let v2Result: PipelineV2Result | null = null
 
-    // 1) Optional: Hermes document-fill (agentisch, ausgefülltes Dokument zurück).
-    if (source && hermes.enabled && hermes.baseUrl.trim()) {
-      const hermesResult = await tryHermesDocumentFill(hermes, {
-        task: 'fill_solution',
-        instructions: [
-          prompt,
-          options.userInstructions?.trim() ? `\nHinweise: ${options.userInstructions.trim()}` : '',
-        ].join(''),
-        fileName: source.fileName,
-        mimeType: source.mimeType,
-        documentBase64: source.buffer.toString('base64'),
-        meta: {
-          title: material.title,
-          materialId,
-          subjects: material.subjects.map((s) => s.name),
-          gradeLevels: material.gradeLevels,
-        },
-      })
-
-      if (hermesResult) {
-        hermesUsed = true
-        usedModel = hermesResult.model
-        filled = {
-          buffer: hermesResult.buffer,
-          fileName: hermesResult.fileName || solutionFileName(source.fileName, extensionOf(hermesResult.fileName || source.fileName)),
-          mimeType: hermesResult.mimeType,
-          strategy: 'hermes',
-          summary: hermesResult.summary,
-        }
-      }
+    await updateSolutionRunStage(jobId, 'normalizing', 12)
+    let visualPdfBuffer: Buffer | null = null
+    if (source?.extension === 'pdf') {
+      visualPdfBuffer = source.buffer
+    } else if (source?.extension === 'docx') {
+      visualPdfBuffer = await convertOfficeBufferToPdf(source.buffer, source.fileName)
     }
 
-    // 2) Lokaler Pfad: multimodales Modell → strukturierte Antworten → Dokument füllen.
-    if (!filled) {
-      if (!settings.enabled) {
-        throw appError(
-          'KI_NICHT_KONFIGURIERT',
-          hermes.enabled
-            ? 'Hermes konnte kein Dokument liefern und die lokale KI ist nicht aktiviert.'
-            : 'Die KI-Unterstützung ist nicht aktiviert. Bitte in den Einstellungen einrichten.',
+    const layoutDocument = visualPdfBuffer
+      ? await buildPdfLayoutDocumentV2(visualPdfBuffer, analysisDocumentText)
+      : buildTextOnlyLayoutDocumentV2(
+          analysisDocumentText || material.content || '',
+          source?.buffer ?? `${materialId}:${analysisDocumentText}`,
         )
-      }
+    await updateSolutionRunStage(jobId, 'planning', 30, {
+      sourceHash: layoutDocument.sourceHash,
+    })
 
-      const parts: ChatPart[] = [{ type: 'text', text: prompt }]
-      if (useVision && variant) {
-        const media = await collectVisionParts(variant.id, settings.provider)
-        parts.push(...media.parts)
-        attachments = media.parts.length
-        visionUsed = media.parts.length > 0
-        if (media.skipped.length) {
-          log.info('Einige Anhänge wurden nicht an das Modell übergeben', {
-            skipped: media.skipped,
-          })
-        }
-      }
-
-      // Textinhalt als zusätzliche Grundlage, falls keine Vision/Datei.
-      if (!documentText && !visionUsed && material.content?.trim()) {
-        parts.push({
-          type: 'text',
-          text: `\n\n## Manueller Inhalt\n\n${material.content.trim().slice(0, 40_000)}`,
-        })
-      }
-
-      if (!documentText && !visionUsed && !material.content?.trim() && !source) {
-        throw appError(
-          'KI_FEHLER',
-          'Zu diesem Material liegt weder auslesbarer Text noch eine übertragbare Datei vor.',
-        )
-      }
-
-      // Viele Lücken → verbose JSON; Token-Budget an Inventargröße anpassen.
-      const solutionMaxTokens = Math.min(
-        32_000,
-        Math.max(settings.maxOutputTokens || 4000, 1200 + blankCount * 220),
-      )
-
-      const systemPrompt = solutionSystemPromptForMode(fillMode, {
-        inplaceOpenAnswers: hasOpenInplaceTasks,
-      })
-      const compactRetryInstruction = [
-        '',
-        'WICHTIGER RETRY: Die vorige Ausgabe war unvollständig.',
-        'Antworte diesmal extrem kompakt und ausschließlich als vollständiges JSON.',
-        `Erkannte Lücken: ${blankCount}; erkannte Aufgaben: ${tasks.length}.`,
-        'Schema: {"summary":"Musterlösung","answers":[{"answer":"Text","blankIndex":0}],"formFields":[]}',
-        fillMode === 'lueckentext'
-          ? 'Für jede Lücke genau ein Objekt mit answer und blankIndex ausgeben.'
-          : 'Für offene Aufgaben darf blankIndex null sein; dann zusätzlich eine kurze label angeben.',
-        'Keine Kontexte, Begründungen, Markdown- oder sonstigen Zusatzfelder.',
-      ].join('\n')
-      let completion = await chatCompletion(
-        settings,
-        [
-          {
-            role: 'system',
-            parts: [{ type: 'text', text: systemPrompt }],
-          },
-          { role: 'user', parts },
-        ],
-        {
-          model,
-          temperature: 0,
-          maxOutputTokens: solutionMaxTokens,
-          jsonMode: true,
+    tasks = reconcileTasksWithPageLayoutV2(layoutDocument, tasks)
+    let v2Build = buildSolutionPlanV2({
+      document: layoutDocument,
+      tasks,
+      sourceFormat: source?.extension === 'pdf'
+        ? 'pdf'
+        : source?.extension === 'docx'
+          ? 'docx'
+          : 'other',
+    })
+    if (options.userInstructions?.trim()) {
+      const teacherHint = options.userInstructions.trim()
+      v2Build = {
+        ...v2Build,
+        plan: {
+          ...v2Build.plan,
+          tasks: v2Build.plan.tasks.map((task) => ({
+            ...task,
+            instruction: `${task.instruction}\nZusätzlicher Hinweis der Lehrkraft: ${teacherHint}`,
+          })),
         },
+      }
+    }
+    await updateSolutionRunStage(jobId, 'planning', 38, { plan: v2Build.plan })
+
+    const pageParts: PageVisionPart[] = []
+    if (useVision && visualPdfBuffer) {
+      for (const page of layoutDocument.pages) {
+        const [raster] = await rasterizePdf(visualPdfBuffer, { page: page.page, scale: 1.55 })
+        if (!raster) continue
+        pageParts.push({
+          page: page.page,
+          part: { type: 'image', mimeType: raster.mimeType, base64: raster.base64 },
+        })
+      }
+    }
+    attachments = pageParts.length
+    visionUsed = pageParts.length > 0
+
+    await updateSolutionRunStage(jobId, 'solving', 45)
+    v2Result = await runSolutionPipelineV2({
+      build: v2Build,
+      settings,
+      model,
+      pageParts,
+      requireVision: Boolean(visualPdfBuffer),
+    })
+    usedModel = v2Result.model
+    structured = v2Result.projection.solution
+    tasks = v2Result.projection.tasks
+    await updateSolutionRunStage(jobId, 'validating', 68, {
+      plan: v2Result.plan,
+      solution: v2Result.solvedTasks,
+      renderManifest: v2Result.projection.manifest,
+      qualityReport: v2Result.qualityReport,
+      issues: v2Result.qualityReport.issues,
+    })
+
+    const v2Blocked = v2Result.qualityReport.issues.some((issue) => issue.blocking)
+    if (structured.answers.length > 0) {
+      await updateSolutionRunStage(jobId, 'rendering', 76)
+      const rendererMode: SolutionFillMode = tasks.some(
+        (task) => task.renderMode === 'overlay' || task.renderMode === 'native',
       )
-
-      const firstResponseIncomplete =
-        completion.finishReason === 'length' ||
-        !isCompleteStructuredSolutionJson(completion.text)
-      if (firstResponseIncomplete) {
-        log.warn('Unvollständige strukturierte Modellantwort – kompakter Retry', {
-          finishReason: completion.finishReason ?? null,
-          outputTokens: completion.outputTokens ?? null,
-          chars: completion.text.length,
-          recoveredAnswers: parseStructuredSolution(completion.text).answers.length,
-        })
-        completion = await chatCompletion(
-          settings,
-          [
-            {
-              role: 'system',
-              parts: [{ type: 'text', text: systemPrompt }],
-            },
-            {
-              role: 'user',
-              parts: [
-                ...parts,
-                {
-                  type: 'text',
-                  text: compactRetryInstruction,
-                },
-              ],
-            },
-          ],
-          {
-            model,
-            temperature: 0,
-            maxOutputTokens: solutionMaxTokens,
-            jsonMode: true,
-          },
-        )
-      }
-
-      if (
-        completion.finishReason === 'length' ||
-        !isCompleteStructuredSolutionJson(completion.text)
-      ) {
-        throw appError(
-          'KI_FEHLER',
-          'Das Sprachmodell hat auch beim zweiten Versuch keine vollständige strukturierte Antwort geliefert. Es wurde keine unvollständige Musterlösung gespeichert.',
-          {
-            details: {
-              errorCode: 'INCOMPLETE_STRUCTURED_MODEL_RESPONSE',
-              finishReason: completion.finishReason ?? null,
-              outputTokens: completion.outputTokens ?? null,
-            },
-          },
-        )
-      }
-
-      usedModel = completion.model
-      structured = parseStructuredSolution(completion.text)
-      log.info('Modell-Antworten (roh)', {
-        count: structured.answers.length,
-        answers: summarizeAnswersForLog(structured.answers),
+        ? 'lueckentext'
+        : 'offen'
+      filled = await buildFilledDocument(source, structured, material.title, rendererMode, tasks)
+    }
+    if (v2Blocked) {
+      await saveSolutionDraft({
+        jobId,
+        file: filled
+          ? { buffer: filled.buffer, fileName: filled.fileName, mimeType: filled.mimeType }
+          : null,
+        plan: v2Result.plan,
+        solution: v2Result.solvedTasks,
+        renderManifest: v2Result.projection.manifest,
+        qualityReport: v2Result.qualityReport,
+        issues: v2Result.qualityReport.issues,
       })
-      // Begriffe → Nummern, falls die Aufgabe Nummern verlangt.
-      if (numberMatching) {
-        structured = coerceAnswersToNumbers(structured, numberMatching)
-        log.info('Nummern-Zuordnung: Antworten auf Ziffern normalisiert', {
-          answers: summarizeAnswersForLog(structured.answers),
-        })
-      }
-      if (fillMode === 'offen') {
-        structured = {
-          ...structured,
-          answers: structured.answers.map((a) => ({
-            ...a,
-            fieldType: 'freitext' as const,
-            blankIndex: null,
-            bbox: null,
-          })),
-        }
-      } else if (detectedBlanks.length > 0) {
-        // alignAnswersToBlanks verdichtet auf echte Lücken. Tabellenantworten
-        // liegen im gemeinsamen Indexraum dahinter und müssen erhalten bleiben.
-        const tableAnswers = structured.answers.filter(
-          (answer) =>
-            typeof answer.blankIndex === 'number' &&
-            answer.blankIndex >= detectedBlanks.length,
-        )
-        const aligned = alignAnswersToBlanks(structured, detectedBlanks)
-        structured = {
-          ...aligned,
-          answers: [
-            ...aligned.answers,
-            ...tableAnswers,
-          ],
-        }
-        log.info('Antworten an erkannte Lücken ausgerichtet', {
-          answers: structured.answers.length,
-          blanks: detectedBlanks.length,
-          mapping: structured.answers.map((a) => ({
-            blankIndex: a.blankIndex,
-            label: a.label,
-            answer: a.answer,
-            left: a.leftContext,
-            right: a.rightContext,
-          })),
-        })
-      } else if (docxBlanks.length > 0) {
-        // DOCX: dieselbe Kontext-Ausrichtung wie bei PDF (nicht nur Positions-Slice).
-        structured = alignAnswersToBlanks(structured, textBlanksAsAlignable(docxBlanks))
-        log.info('DOCX-Antworten an Lückeninventar gebunden', {
-          mapping: summarizeAnswersForLog(structured.answers),
-        })
-      }
-
-      // Wortlisten-Validierung + optional ein Repair-Pass + globale Zuordnung.
-      if (fillMode === 'lueckentext' && candidateBank && blankCount > 0) {
-        structured = await enforceCandidateBankConstraints({
-          structured,
-          candidateBank,
-          blankCount,
-          blanks: detectedBlanks.length
-            ? detectedBlanks
-            : docxBlanks,
-          settings,
-          model,
-          jobId,
-          runId,
-        })
-      }
-
-      structured = applyChoiceCellTaskMeta(structured, tasks)
-      structured = applyTableCellTaskMeta(structured, tasks)
-      structured = applyFreeTextTaskMeta(structured, tasks)
-
-      // Vision ist gut für visuelle Plausibilität, aber nicht zuverlässig beim
-      // Zählen. Deshalb muss jedes geometrisch erwartete Ziel deterministisch
-      // eine nichtleere, gebundene Antwort besitzen.
-      const coverage = inspectAnswerCoverage(structured, tasks)
-      const targetsExpected = Boolean(candidateBank?.candidates.length)
-      const coverageFailed =
-        coverage.status === 'partial' ||
-        (coverage.status === 'no_targets' && targetsExpected)
-      if (coverageFailed) {
-        logPipeline('solution.run.failed', {
-          jobId,
-          runId,
-          errorCode:
-            coverage.status === 'no_targets'
-              ? 'NO_ANSWER_TARGETS_DETECTED'
-              : 'ANSWER_TARGETS_PARTIALLY_FILLED',
-          expectedTargets: coverage.expected,
-          filledTargets: coverage.filled,
-          missingTargetIds: coverage.missingTargetIds,
-        })
-      }
-      assertAnswerCoverage(structured, tasks, {
-        targetsExpected,
-      })
-
-      // Sicherheit für Antworten außerhalb des Zielinventars.
-      if (hasPlaceholderAnswers(structured.answers)) {
-        logPipeline('solution.run.failed', {
-          jobId,
-          runId,
-          errorCode: 'CLOZE_VALIDATION_FAILED_AFTER_REPAIR',
-          reason: 'placeholder_answers',
-        })
-        throw appError(
-          'UNGUELTIGE_EINGABE',
-          'Die Musterlösung konnte nicht zuverlässig gegen die Wortliste validiert werden. Es wurde keine verwendbare Musterlösung erstellt.',
-          { details: { errorCode: 'CLOZE_VALIDATION_FAILED_AFTER_REPAIR' } },
-        )
-      }
-
-      for (const task of tasks) {
-        logPipeline('task.solved', {
-          jobId,
-          runId,
-          taskId: task.id,
-          kind: task.kind,
-          answers: structured.answers.length,
-        })
-      }
-
-      if (source && PDF_EXTENSIONS.has(source.extension)) {
-        structured = await enrichFromPdfBuffer(
-          source.buffer,
-          structured,
-          fillMode === 'lueckentext' ? detectedBlanks : [],
-        )
-      } else {
-        structured = {
-          ...structured,
-          answers: structured.answers.map((a) => ({
-            ...a,
-            fieldType:
-              a.fieldType ??
-              (fillMode === 'offen' || a.answer.length > 90 || /\n/.test(a.answer)
-                ? 'freitext'
-                : 'luecke'),
-          })),
-        }
-      }
-      filled = await buildFilledDocument(source, structured, material.title, fillMode, tasks)
+      throw new SolutionReviewRequiredError(v2Result.qualityReport.issues[0]?.message)
     }
 
     if (!filled) {
       throw appError('KI_FEHLER', 'Es konnte kein Lösungsdokument erzeugt werden.')
     }
 
+    await updateSolutionRunStage(jobId, 'verifying', 86)
     let qualityVision: PdfSolutionQualityResult | null = null
-    if (
-      source &&
-      source.extension === 'pdf' &&
-      filled.mimeType === 'application/pdf' &&
-      useVision &&
-      settings.enabled &&
-      model.trim()
-    ) {
+    const renderedPdfBuffer = filled.mimeType === 'application/pdf'
+      ? filled.buffer
+      : filled.fileName.toLowerCase().endsWith('.docx')
+        ? await convertOfficeBufferToPdf(filled.buffer, filled.fileName)
+        : null
+    if (visualPdfBuffer && renderedPdfBuffer && useVision && settings.enabled && model.trim()) {
       const choiceTargetIds = new Set(
         tasks
           .flatMap((task) => task.targets)
@@ -1190,9 +865,9 @@ export async function generateSolution(
           .map((target) => target.id),
       )
       qualityVision = await verifyPdfSolutionViaVision({
-        source: source.buffer,
-        sourceFileName: source.fileName,
-        rendered: filled.buffer,
+        source: visualPdfBuffer,
+        sourceFileName: source?.fileName ?? 'material.pdf',
+        rendered: renderedPdfBuffer,
         renderedFileName: filled.fileName,
         settings,
         model,
@@ -1219,6 +894,35 @@ export async function generateSolution(
       })
     }
 
+    if (!qualityVision) {
+      qualityVision = {
+        status: 'unavailable',
+        issues: ['Die verpflichtende visuelle Endkontrolle konnte nicht ausgeführt werden.'],
+        checkedAt: new Date().toISOString(),
+      }
+    }
+    if (v2Result) {
+      v2Result.qualityReport.render = qualityVision.status === 'passed' ? 'passed' : 'failed'
+      if (qualityVision.status !== 'passed') {
+        v2Result.qualityReport.issues.push({
+          code: qualityVision.status === 'unavailable' ? 'VISION_UNAVAILABLE' : 'RENDER_QA_FAILED',
+          message: qualityVision.issues[0] ?? 'Die visuelle Endkontrolle ist fehlgeschlagen.',
+          blocking: true,
+        })
+        await saveSolutionDraft({
+          jobId,
+          file: { buffer: filled.buffer, fileName: filled.fileName, mimeType: filled.mimeType },
+          plan: v2Result.plan,
+          solution: v2Result.solvedTasks,
+          renderManifest: v2Result.projection.manifest,
+          qualityReport: v2Result.qualityReport,
+          issues: v2Result.qualityReport.issues,
+        })
+        throw new SolutionReviewRequiredError(v2Result.qualityReport.issues.at(-1)?.message)
+      }
+    }
+
+    await updateSolutionRunStage(jobId, 'publishing', 94)
     const summaryMd = [
       AI_CONTENT_NOTICE_MD,
       '',
@@ -1232,7 +936,7 @@ export async function generateSolution(
       .slice(0, 20_000)
 
     const authorCredit =
-      kiAutorAnzeige({ model: usedModel, provider: hermesUsed ? 'hermes' : settings.provider }) ??
+      kiAutorAnzeige({ model: usedModel, provider: settings.provider }) ??
       `KI · ${usedModel}`
 
     const solutionMaterialId = await createMaterial(
@@ -1246,22 +950,28 @@ export async function generateSolution(
         author: authorCredit,
         origin: 'ki',
         aiMeta: {
-          provider: hermesUsed ? 'hermes' : settings.provider,
+          provider: settings.provider,
           model: usedModel,
           generatedAt: new Date().toISOString(),
           sourceMaterialId: materialId,
           sourceVariantId: variant?.id ?? null,
           sourceAssetId: source?.id ?? null,
-          promptVersion: SOLUTION_PROMPT_VERSION,
+          promptVersion: 'solution-v2-solve-1',
+          pipelineVersion: SOLUTION_PIPELINE_VERSION,
+          solutionSchemaVersion: 2,
           reviewed: false,
-          fillMode,
           fillStrategy: filled.strategy,
           hermesUsed,
           layoutVisionChecked: pdfLayoutVisionChecked,
           layoutVisionRepaired: pdfLayoutRepairedViaVision,
           qualityVision: qualityVision ?? undefined,
           sourceFileName: source?.fileName,
-          structuredSolution: structured,
+          structuredSolution: structured
+            ? { ...structured, schemaVersion: 2 }
+            : null,
+          solutionPlan: v2Result?.plan,
+          renderManifest: v2Result?.projection.manifest,
+          qualityReport: v2Result?.qualityReport,
         },
         subjectIds: material.subjects.map((s) => s.id),
         topicIds: material.topics.map((t) => t.id),
@@ -1297,10 +1007,13 @@ export async function generateSolution(
         status: 'erfolgreich',
         result: filled.summary.slice(0, 200_000),
         resultMaterialId: solutionMaterialId,
+        inputTokens: v2Result?.inputTokens,
+        outputTokens: v2Result?.outputTokens,
         durationMs: Date.now() - startedAt,
         finishedAt: new Date(),
       })
       .where(eq(aiJobs.id, jobId))
+    await completeSolutionRun(jobId)
 
     logPipeline('solution.run.completed', {
       jobId,
@@ -1330,6 +1043,15 @@ export async function generateSolution(
       fileName: filled.fileName,
     }
   } catch (error) {
+    if (error instanceof SolutionReviewRequiredError) {
+      logPipeline('solution.run.review_required', {
+        jobId,
+        runId,
+        materialId,
+        durationMs: Date.now() - startedAt,
+      })
+      throw error
+    }
     logPipeline('solution.run.failed', {
       jobId,
       runId,
@@ -1360,16 +1082,14 @@ function pickSolutionModel(
   settings: AiSettings,
   override: string | undefined,
   useVision: boolean,
-  options: { allowEmpty?: boolean } = {},
 ): string {
   if (override?.trim()) return override.trim()
   if (useVision && settings.visionModel?.trim()) return settings.visionModel.trim()
   if (settings.chatModel?.trim()) return settings.chatModel.trim()
-  if (options.allowEmpty) return 'hermes-agent'
   throw appError('KI_NICHT_KONFIGURIERT', 'Es ist kein Sprach-/Vision-Modell konfiguriert.')
 }
 
-async function loadPrimarySourceAsset(variantId: string): Promise<SourceAsset | null> {
+export async function loadPrimarySourceAsset(variantId: string): Promise<SourceAsset | null> {
   const db = useDatabase()
   const assets = await db
     .select()
@@ -1398,172 +1118,7 @@ async function loadPrimarySourceAsset(variantId: string): Promise<SourceAsset | 
   }
 }
 
-/**
- * Validiert gegen die Wortliste, führt max. einen Repair-Pass aus und
- * erzwingt bei reusePolicy „once“ eine globale bijektive Zuordnung.
- * Wirft bei endgültigem Validierungsfehler – kein ???-Material.
- */
-async function enforceCandidateBankConstraints(args: {
-  structured: StructuredSolution
-  candidateBank: CandidateBank
-  blankCount: number
-  blanks: Array<PdfBlankRegion | TextBlankInfo>
-  settings: AiSettings
-  model: string
-  jobId: string
-  runId: string
-}): Promise<StructuredSolution> {
-  const { candidateBank, blankCount, blanks, settings, model, jobId, runId } = args
-  let structured = args.structured
-  const clozeTaskId = 'p1-t1'
-
-  let validation = validateClozeAnswers(structured, candidateBank, blankCount)
-  if (!validation.valid) {
-    logPipeline('task.validation_failed', {
-      jobId,
-      runId,
-      taskId: clozeTaskId,
-      violations: validation.violations,
-    })
-    logPipeline('task.repair_started', {
-      jobId,
-      runId,
-      taskId: clozeTaskId,
-      reason: 'candidate_bank_constraints',
-    })
-
-    const repairPrompt = buildClozeRepairPrompt({
-      bank: candidateBank,
-      blanks,
-      validation,
-      previousAnswers: structured,
-    })
-
-    try {
-      const repairCompletion = await chatCompletion(
-        settings,
-        [
-          {
-            role: 'system',
-            parts: [{ type: 'text', text: solutionSystemPromptForMode('lueckentext') }],
-          },
-          { role: 'user', parts: [{ type: 'text', text: repairPrompt }] },
-        ],
-        {
-          model,
-          temperature: 0,
-          maxOutputTokens: settings.maxOutputTokens,
-          jsonMode: true,
-        },
-      )
-      if (
-        repairCompletion.finishReason === 'length' ||
-        !isCompleteStructuredSolutionJson(repairCompletion.text)
-      ) {
-        throw new Error(
-          `Wortlisten-Repair unvollständig (finishReason=${repairCompletion.finishReason ?? 'unbekannt'})`,
-        )
-      }
-      const repaired = parseStructuredSolution(repairCompletion.text)
-      const pdfBlanks = blanks.filter((b): b is PdfBlankRegion => 'pageIndex' in b)
-      structured =
-        pdfBlanks.length > 0
-          ? alignAnswersToBlanks(repaired, pdfBlanks)
-          : {
-              ...repaired,
-              answers: repaired.answers.slice(0, blankCount).map((a, i) => ({
-                ...a,
-                blankIndex: i,
-                leftContext: blanks[i] && 'leftText' in blanks[i]! ? blanks[i]!.leftText : a.leftContext,
-                rightContext:
-                  blanks[i] && 'rightText' in blanks[i]! ? blanks[i]!.rightText : a.rightContext,
-              })),
-            }
-      log.info('Wortlisten-Repair geparst', {
-        answers: structured.answers.length,
-        mapping: summarizeAnswersForLog(structured.answers),
-      })
-      validation = validateClozeAnswers(structured, candidateBank, blankCount)
-    } catch (error) {
-      log.warn('Wortlisten-Repair fehlgeschlagen', error)
-    }
-  }
-
-  const frames = blanks.map((b) => ({
-    blankIndex: b.blankIndex,
-    leftText: 'leftText' in b ? b.leftText : '',
-    rightText: 'rightText' in b ? b.rightText : '',
-    page: 'pageIndex' in b ? b.pageIndex + 1 : 1,
-  }))
-  const candidateBackedBlankCount = countCandidateBackedBlanks(
-    structured,
-    candidateBank,
-    frames,
-  )
-
-  // Globale Zuordnung bei once-Policy darf nur vorhandene Kandidatenantworten
-  // entwirren. Fehlende Antworten werden nicht aus Restwörtern geraten.
-  if (
-    candidateBank.reusePolicy === 'once' &&
-    candidateBackedBlankCount === blankCount
-  ) {
-    structured = assignCandidatesGlobally(structured, candidateBank, frames)
-    validation = validateClozeAnswers(structured, candidateBank, blankCount)
-    if (validation.valid) {
-      logPipeline('task.validation_passed', {
-        jobId,
-        runId,
-        taskId: clozeTaskId,
-        via: 'global_assignment',
-        answers: structured.answers.length,
-      })
-      return structured
-    }
-  }
-
-  if (validation.valid) {
-    logPipeline('task.validation_passed', {
-      jobId,
-      runId,
-      taskId: clozeTaskId,
-      answers: structured.answers.length,
-    })
-    return structured
-  }
-
-  logPipeline('task.validation_failed', {
-    jobId,
-    runId,
-    taskId: clozeTaskId,
-    violations: validation.violations,
-    afterRepair: true,
-  })
-  logPipeline('solution.run.failed', {
-    jobId,
-    runId,
-    taskId: clozeTaskId,
-    errorCode: 'CLOZE_VALIDATION_FAILED_AFTER_REPAIR',
-    violations: validation.violations,
-  })
-  if (candidateBackedBlankCount < blankCount) {
-    throw appError(
-      'UNGUELTIGE_EINGABE',
-      `Es wurden ${blankCount} Lücken erkannt, aber nur ${candidateBackedBlankCount} zuverlässig mit Begriffen aus der Wortliste ausgefüllt. Es wurde keine unvollständige Musterlösung gespeichert.`,
-      {
-        details: {
-          errorCode: 'ANSWER_TARGETS_PARTIALLY_FILLED',
-          expected: blankCount,
-          filled: candidateBackedBlankCount,
-          violations: validation.violations,
-        },
-      },
-    )
-  }
-  assertClozeValidationPassed(validation)
-  return structured
-}
-
-async function buildFilledDocument(
+export async function buildFilledDocument(
   source: SourceAsset | null,
   solution: StructuredSolution,
   materialTitle: string,
@@ -1704,100 +1259,8 @@ async function buildFilledDocument(
   }
 }
 
-/**
- * Bereitet die Dateien einer Variante für das Modell auf.
- * PDFs gehen direkt an Anbieter, die das unterstützen; andernfalls werden die
- * ersten Seiten als Bilder gerendert (typisch für multimodale Ollama-Modelle).
- */
-async function collectVisionParts(
-  variantId: string,
-  provider: 'openai' | 'ollama' | 'openrouter',
-): Promise<{ parts: ChatPart[]; skipped: string[] }> {
-  const db = useDatabase()
-  const assets = await db
-    .select()
-    .from(materialAssets)
-    .where(eq(materialAssets.variantId, variantId))
-
-  const parts: ChatPart[] = []
-  const skipped: string[] = []
-
-  for (const asset of assets) {
-    if (asset.kind !== 'datei' || !asset.storageKey || !asset.mimeType) continue
-    if ((asset.sizeBytes ?? 0) > MAX_ATTACHMENT_BYTES) {
-      skipped.push(`${asset.fileName} (zu groß)`)
-      continue
-    }
-
-    try {
-      const buffer = await readFile(resolveStoragePath(asset.storageKey))
-
-      if (asset.mimeType.startsWith('image/') && asset.mimeType !== 'image/svg+xml') {
-        parts.push({ type: 'image', mimeType: asset.mimeType, base64: buffer.toString('base64') })
-        continue
-      }
-
-      if (asset.mimeType === 'application/pdf') {
-        if (supportsNativePdf(provider)) {
-          parts.push({
-            type: 'file',
-            mimeType: 'application/pdf',
-            base64: buffer.toString('base64'),
-            fileName: asset.fileName ?? 'material.pdf',
-          })
-        } else {
-          // Multimodale lokale Modelle (z. B. gemma4): Seiten als Bilder.
-          const pages = await rasterizePdf(buffer, { maxPages: MAX_VISION_PAGES })
-          if (pages.length === 0) {
-            skipped.push(`${asset.fileName} (Bildumwandlung nicht möglich)`)
-            continue
-          }
-          for (const page of pages) {
-            parts.push({ type: 'image', mimeType: page.mimeType, base64: page.base64 })
-          }
-        }
-        continue
-      }
-
-      const ext = extensionOf(asset.fileName ?? '')
-      if (OFFICE_VISION_EXTENSIONS.has(ext)) {
-        const pdfBuffer = await convertOfficeBufferToPdf(buffer, asset.fileName ?? `datei.${ext}`)
-        if (!pdfBuffer) {
-          skipped.push(`${asset.fileName} (Office→PDF nicht möglich – Text kommt separat)`)
-          continue
-        }
-        if (supportsNativePdf(provider)) {
-          parts.push({
-            type: 'file',
-            mimeType: 'application/pdf',
-            base64: pdfBuffer.toString('base64'),
-            fileName: (asset.fileName ?? 'material').replace(/\.[^.]+$/, '') + '.pdf',
-          })
-        } else {
-          const pages = await rasterizePdf(pdfBuffer, { maxPages: MAX_VISION_PAGES })
-          if (pages.length === 0) {
-            skipped.push(`${asset.fileName} (Bildumwandlung nach Office→PDF nicht möglich)`)
-            continue
-          }
-          for (const page of pages) {
-            parts.push({ type: 'image', mimeType: page.mimeType, base64: page.base64 })
-          }
-        }
-        continue
-      }
-
-      skipped.push(`${asset.fileName} (Format wird nicht als Bild übergeben)`)
-    } catch (error) {
-      log.warn('Anhang konnte nicht gelesen werden', { assetId: asset.id, error })
-      skipped.push(asset.fileName ?? asset.id)
-    }
-  }
-
-  return { parts, skipped }
-}
-
 /** Schreibt einen Office-Puffer temporär und konvertiert ihn per LibreOffice nach PDF. */
-async function convertOfficeBufferToPdf(
+export async function convertOfficeBufferToPdf(
   buffer: Buffer,
   fileName: string,
 ): Promise<Buffer | null> {
@@ -1911,13 +1374,15 @@ export async function updateSolutionStructure(
   } else if (wantsRender && source && PDF_EXTENSIONS.has(source.extension)) {
     // Antworten mit blankIndex an Geometrie ausrichten; manuell verschobene
     // (blankIndex = null) behalten ihre bbox. Anschließend preferBBox zeichnen.
-    let blanks: PdfBlankRegion[] = []
-    try {
-      blanks = await detectPdfBlankRegions(source.buffer)
-    } catch (error) {
-      log.warn('Lückenerkennung beim Neuzeichnen fehlgeschlagen', error)
+    if (meta.solutionSchemaVersion !== 2 && structured.schemaVersion !== 2) {
+      let blanks: PdfBlankRegion[] = []
+      try {
+        blanks = await detectPdfBlankRegions(source.buffer)
+      } catch (error) {
+        log.warn('Lückenerkennung beim Neuzeichnen fehlgeschlagen', error)
+      }
+      structured = await enrichFromPdfBuffer(source.buffer, structured, blanks)
     }
-    structured = await enrichFromPdfBuffer(source.buffer, structured, blanks)
     const overlay = await overlayPdfAnswers(source.buffer, structured, { preferBBox: true })
     await replaceHauptAsset(
       material,
@@ -2034,6 +1499,7 @@ function normalizeStructuredSolution(raw: StructuredSolution): StructuredSolutio
       leftContext: row.leftContext ? String(row.leftContext) : null,
       rightContext: row.rightContext ? String(row.rightContext) : null,
       bbox: row.bbox ?? null,
+      targetId: row.targetId ? String(row.targetId) : null,
       fieldType:
         parsedType ??
         (answer.length > 90 || /\n/.test(answer) ? 'freitext' : 'luecke'),
@@ -2041,6 +1507,7 @@ function normalizeStructuredSolution(raw: StructuredSolution): StructuredSolutio
   }
 
   return {
+    schemaVersion: raw.schemaVersion === 2 ? 2 : 1,
     summary: String(raw.summary ?? 'Korrigierte Musterlösung.').trim(),
     answers,
     formFields: Array.isArray(raw.formFields)
@@ -2069,6 +1536,7 @@ export async function prepareEditableSolutionStructure(
 
   let structured = normalizeStructuredSolution(material.aiMeta.structuredSolution)
   const meta = material.aiMeta
+  if (meta.solutionSchemaVersion === 2 || structured.schemaVersion === 2) return structured
   const sourceMaterialId = meta.sourceMaterialId
   if (!sourceMaterialId) return structured
 

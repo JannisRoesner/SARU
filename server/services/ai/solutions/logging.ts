@@ -20,6 +20,7 @@ export type SolutionPipelineEvent =
   | 'render.prefilled_highlighted'
   | 'render.fallback_appendix'
   | 'solution.run.completed'
+  | 'solution.run.review_required'
   | 'solution.run.failed'
 
 export interface PipelineLogContext {

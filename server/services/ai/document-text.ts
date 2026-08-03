@@ -14,7 +14,7 @@ import { rasterizePdf } from './rasterize'
 const log = createLogger('ai:document-text')
 
 /** Max. Seiten für Vision-OCR – Kosten/Latenz begrenzen. */
-const MAX_OCR_PAGES = 8
+const MAX_OCR_PAGES = 200
 const MAX_TEXT_LENGTH = 400_000
 
 export type ExtractionMethod = 'text_layer' | 'vision' | 'none'
@@ -177,9 +177,23 @@ Wenn etwas unleserlich ist, überspringe es still.`,
       }
     }
     pageCount = pages.length
-    for (const page of pages) {
-      parts.push({ type: 'image', mimeType: page.mimeType, base64: page.base64 })
+    const chunks: string[] = []
+    for (let start = 0; start < pages.length; start += 3) {
+      const batchParts: ChatPart[] = [parts[0]!]
+      for (const page of pages.slice(start, start + 3)) {
+        batchParts.push(
+          { type: 'text', text: `Seite ${page.pageNumber}:` },
+          { type: 'image', mimeType: page.mimeType, base64: page.base64 },
+        )
+      }
+      const result = await chatCompletion(settings, [{ role: 'user', parts: batchParts }], {
+        model,
+        temperature: 0,
+        maxOutputTokens: Math.min(settings.maxOutputTokens || 4000, 8000),
+      })
+      chunks.push(result.text.trim())
     }
+    return { text: chunks.join('\n\n').trim(), pageCount }
   }
 
   const result = await chatCompletion(settings, [{ role: 'user', parts }], {

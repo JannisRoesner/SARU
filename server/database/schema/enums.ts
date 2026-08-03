@@ -148,6 +148,7 @@ export const aiJobKindEnum = pgEnum('ai_job_kind', [
 export const aiJobStatusEnum = pgEnum('ai_job_status', [
   'wartend',
   'laeuft',
+  'pruefung_noetig',
   'erfolgreich',
   'fehlgeschlagen',
 ])

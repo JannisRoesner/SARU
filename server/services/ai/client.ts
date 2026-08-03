@@ -124,6 +124,8 @@ export async function chatCompletion(
     maxOutputTokens?: number
     /** Erzwingt JSON-Ausgabe über das OpenAI-kompatible response_format. */
     jsonMode?: boolean
+    /** Striktes JSON Schema; derzeit nur für den sicher unterstützten OpenAI-Pfad. */
+    jsonSchema?: { name: string; schema: Record<string, unknown> }
   } = {},
 ): Promise<ChatResult> {
   const model = options.model || settings.chatModel
@@ -141,7 +143,16 @@ export async function chatCompletion(
     })),
   }
 
-  if (options.jsonMode) {
+  if (options.jsonSchema && settings.provider === 'openai') {
+    body.response_format = {
+      type: 'json_schema',
+      json_schema: {
+        name: options.jsonSchema.name,
+        strict: true,
+        schema: options.jsonSchema.schema,
+      },
+    }
+  } else if (options.jsonMode) {
     // Dieser Client verwendet für alle Anbieter /v1/chat/completions. Auch
     // Ollamas OpenAI-kompatible Schnittstelle erwartet hier response_format;
     // `format` gehört ausschließlich zu Ollamas nativer /api/chat-Route.

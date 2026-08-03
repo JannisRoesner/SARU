@@ -29,6 +29,13 @@
       "when": 1784937000000,
       "tag": "0003_h5p_material_type",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785715200000,
+      "tag": "0004_solution_pipeline_v2",
+      "breakpoints": true
     }
   ]
 }

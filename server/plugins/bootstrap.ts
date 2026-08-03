@@ -4,6 +4,7 @@ import { ensureThumbRoot } from '../services/thumbnail.service'
 import { createLogger } from '../utils/logger'
 import { pruneRateLimits } from '../utils/rate-limit'
 import { purgeExpiredSessions } from '../utils/auth'
+import { startSolutionWorker } from '../services/ai/solutions-v2/worker'
 
 const log = createLogger('bootstrap')
 
@@ -26,6 +27,12 @@ export default defineNitroPlugin(async () => {
     await seedInitialAdmin()
   } catch (error) {
     log.error('Initiales Administratorkonto konnte nicht angelegt werden', error)
+  }
+
+  try {
+    await startSolutionWorker()
+  } catch (error) {
+    log.error('Musterlösungs-Worker konnte nicht gestartet werden', error)
   }
 
   // Stündlich abgelaufene Sitzungen und Rate-Limit-Einträge entfernen.

@@ -6,7 +6,7 @@ import { rasterizePdf } from '../../rasterize'
 import type { AnswerTarget, AnswerTargetKind, TaskBlock, TaskKind } from '../types'
 import { detectWorksheetTasks } from '../worksheet-tasks'
 
-const MAX_VISION_PAGES = 4
+const MAX_VISION_PAGES = 200
 const MAX_VISION_TASKS = 24
 const MAX_TARGETS_PER_TASK = 20
 const MIN_ACCEPTED_CONFIDENCE = 0.6
@@ -118,7 +118,7 @@ export function buildPdfLayoutVisionPrompt(args: {
     `Bisheriger Plan: ${JSON.stringify(currentPlan)}`,
     '',
     'Antworte ausschließlich als JSON:',
-    '{"verdict":"confirm|repair|no_targets","tasks":[{"instruction":"…","kind":"open_response|short_answer|table|choice|diagram|no_response","page":1,"confidence":0.0,"answerRegions":[{"kind":"line_block|box|table_cell|choice_cell|diagram_target","bbox":{"x":0.1,"y":0.2,"w":0.8,"h":0.15}}]}]}',
+    '{"verdict":"confirm|repair|no_targets","tasks":[{"instruction":"…","kind":"cloze|open_response|short_answer|table|choice|diagram|no_response","page":1,"confidence":0.0,"answerRegions":[{"kind":"line_block|box|table_cell|choice_cell|diagram_target","rowId":"1","choiceValue":"richtig|falsch|ja|nein|null","bbox":{"x":0.1,"y":0.2,"w":0.8,"h":0.15}}]}]}',
     '',
     'Regeln:',
     '- bbox normalisiert 0–1, Ursprung oben links',
@@ -173,6 +173,8 @@ function mapTaskKind(raw: string, hasTargets: boolean): TaskKind {
       return hasTargets ? 'matching_table' : 'free_text_separate'
     case 'diagram':
       return hasTargets ? 'diagram_completion' : 'free_text_separate'
+    case 'cloze':
+      return 'cloze'
     case 'open_response':
     case 'short_answer':
       return hasTargets ? 'free_text_inplace' : 'free_text_separate'
@@ -267,14 +269,27 @@ export function parsePdfLayoutVisionResponse(
         bbox,
         blankIndex: null,
         leftText: instruction.slice(0, 120),
+        cellRef: typeof region.rowId === 'string'
+          ? `${page}:${region.rowId}:${targetIndex}`
+          : null,
+        choiceValue: typeof region.choiceValue === 'string'
+          ? region.choiceValue.toLocaleLowerCase('de-DE').trim()
+          : null,
         source: 'vision',
       })
     }
 
-    const targets = visualTargets.map((target) =>
+    let targets = visualTargets.map((target) =>
       reconcileNativeTarget(target, nativeTargets, usedNativeIds),
     )
     const kind = mapTaskKind(String(row.kind ?? 'open_response'), targets.length > 0)
+    if (kind === 'cloze') {
+      targets = targets.map((target, blankIndex) => ({
+        ...target,
+        kind: 'blank' as const,
+        blankIndex,
+      }))
+    }
     const bbox = targets[0]?.bbox ?? parseBBox(row.bbox) ?? {
       x: 0.05,
       y: Math.min(0.9, 0.12 + index * 0.12),
@@ -309,44 +324,89 @@ export async function repairPdfLayoutViaVision(args: {
   assessment: PdfLayoutAssessment
   nativeTargets?: AnswerTarget[]
 }): Promise<PdfVisionLayoutResult | null> {
-  const parts: ChatPart[] = [
-    {
-      type: 'text',
-      text: buildPdfLayoutVisionPrompt({
-        documentText: args.documentText,
-        tasks: args.tasks,
-        assessment: args.assessment,
-      }),
-    },
-  ]
-
   if (supportsNativePdf(args.settings.provider)) {
-    parts.push({
-      type: 'file',
-      mimeType: 'application/pdf',
-      base64: args.buffer.toString('base64'),
-      fileName: args.fileName,
-    })
-  } else {
-    const pages = await rasterizePdf(args.buffer, {
-      maxPages: MAX_VISION_PAGES,
-      scale: 1.6,
-    })
-    if (pages.length === 0) return null
-    for (const page of pages) {
-      parts.push({ type: 'image', mimeType: page.mimeType, base64: page.base64 })
+    const completion = await chatCompletion(
+      args.settings,
+      [{
+        role: 'user',
+        parts: [
+          {
+            type: 'text',
+            text: buildPdfLayoutVisionPrompt({
+              documentText: args.documentText,
+              tasks: args.tasks,
+              assessment: args.assessment,
+            }),
+          },
+          {
+            type: 'file',
+            mimeType: 'application/pdf',
+            base64: args.buffer.toString('base64'),
+            fileName: args.fileName,
+          },
+        ],
+      }],
+      {
+        model: args.model,
+        temperature: 0,
+        maxOutputTokens: Math.min(5000, Math.max(1600, args.settings.maxOutputTokens)),
+        jsonMode: true,
+      },
+    )
+    const result = parsePdfLayoutVisionResponse(completion.text, args.nativeTargets)
+    if (result?.verdict === 'confirm' && result.rawTaskCount === 0 && args.tasks.length > 0) {
+      return { verdict: 'repair', tasks: [], rawTaskCount: 0 }
     }
+    return result
   }
 
-  const completion = await chatCompletion(
-    args.settings,
-    [{ role: 'user', parts }],
-    {
-      model: args.model,
-      temperature: 0,
-      maxOutputTokens: Math.min(3000, Math.max(1200, args.settings.maxOutputTokens)),
-      jsonMode: true,
-    },
-  )
-  return parsePdfLayoutVisionResponse(completion.text, args.nativeTargets)
+  const pages = await rasterizePdf(args.buffer, { maxPages: MAX_VISION_PAGES, scale: 1.6 })
+  if (pages.length === 0) return null
+  const results: PdfVisionLayoutResult[] = []
+  for (let start = 0; start < pages.length; start += 3) {
+    const batch = pages.slice(start, start + 3)
+    const pageNumbers = new Set(batch.map((page) => page.pageNumber))
+    const pageTasks = args.tasks.filter((task) => pageNumbers.has(task.page))
+    const parts: ChatPart[] = [
+      {
+        type: 'text',
+        text: buildPdfLayoutVisionPrompt({
+          documentText: args.documentText,
+          tasks: pageTasks,
+          assessment: args.assessment,
+        }),
+      },
+    ]
+    for (const page of batch) {
+      parts.push(
+        { type: 'text', text: `Seite ${page.pageNumber}:` },
+        { type: 'image', mimeType: page.mimeType, base64: page.base64 },
+      )
+    }
+    const completion = await chatCompletion(
+      args.settings,
+      [{ role: 'user', parts }],
+      {
+        model: args.model,
+        temperature: 0,
+        maxOutputTokens: Math.min(4000, Math.max(1400, args.settings.maxOutputTokens)),
+        jsonMode: true,
+      },
+    )
+    const result = parsePdfLayoutVisionResponse(completion.text, args.nativeTargets)
+    if (!result || (result.verdict === 'confirm' && result.rawTaskCount === 0 && pageTasks.length > 0)) {
+      results.push({ verdict: 'repair', tasks: [], rawTaskCount: 0 })
+    } else {
+      results.push(result)
+    }
+  }
+  return {
+    verdict: results.some((result) => result.verdict === 'repair')
+      ? 'repair'
+      : results.every((result) => result.verdict === 'no_targets')
+        ? 'no_targets'
+        : 'confirm',
+    tasks: results.flatMap((result) => result.tasks),
+    rawTaskCount: results.reduce((sum, result) => sum + result.rawTaskCount, 0),
+  }
 }

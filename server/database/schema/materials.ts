@@ -43,9 +43,12 @@ export interface StoredSolutionAnswer {
   rightContext?: string | null
   bbox?: StoredSolutionBBox | null
   fieldType?: 'luecke' | 'freitext' | null
+  /** V2: stabile, vor dem Modellaufruf erzeugte Ziel-ID. */
+  targetId?: string | null
 }
 
 export interface StoredStructuredSolution {
+  schemaVersion?: 1 | 2
   summary: string
   answers: StoredSolutionAnswer[]
   formFields: Array<{ name: string; value: string }>
@@ -59,6 +62,8 @@ export interface AiMeta {
   generatedAt?: string
   sourceMaterialId?: string
   promptVersion?: string
+  pipelineVersion?: string
+  solutionSchemaVersion?: 1 | 2
   /** Von einer Lehrkraft fachlich geprüft und freigegeben. */
   reviewed?: boolean
   reviewedAt?: string
@@ -84,6 +89,10 @@ export interface AiMeta {
   extractionMethod?: string
   /** Volle strukturierte Lösung inkl. Positionen – für Korrektur und PDF-Neuzeichnung. */
   structuredSolution?: StoredStructuredSolution | null
+  /** V2: prüfbarer Aufgaben-, Render- und Qualitätsvertrag. */
+  solutionPlan?: unknown
+  renderManifest?: unknown
+  qualityReport?: unknown
   /** Varianten-ID der Quelldatei, aus der die Lösung erzeugt wurde. */
   sourceVariantId?: string | null
   /** Asset-ID der Quell-PDF (für visuelle Nachbearbeitung). */

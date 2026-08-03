@@ -1,4 +1,4 @@
-import { index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import { index, integer, jsonb, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core'
 import { users } from './auth'
 import { aiJobKindEnum, aiJobStatusEnum, aiProviderEnum } from './enums'
 import { materials } from './materials'
@@ -45,5 +45,64 @@ export const aiJobs = pgTable(
   ],
 )
 
+export type SolutionRunStage =
+  | 'queued'
+  | 'normalizing'
+  | 'detecting'
+  | 'planning'
+  | 'solving'
+  | 'validating'
+  | 'rendering'
+  | 'verifying'
+  | 'publishing'
+  | 'completed'
+
+export interface SolutionRunIssue {
+  code: string
+  message: string
+  taskId?: string | null
+  targetIds?: string[]
+  blocking: boolean
+}
+
+/**
+ * Dauerhafter Checkpoint eines Musterlösungs-Laufs. Große Binärdaten liegen im
+ * normalen Storage; hier werden nur deren Schlüssel und die prüfbaren
+ * strukturierten Zwischenstände gespeichert.
+ */
+export const aiSolutionRuns = pgTable(
+  'ai_solution_runs',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    jobId: uuid()
+      .notNull()
+      .references(() => aiJobs.id, { onDelete: 'cascade' }),
+    pipelineVersion: text().notNull().default('2'),
+    sourceHash: text(),
+    stage: text().$type<SolutionRunStage>().notNull().default('queued'),
+    progress: integer().notNull().default(0),
+    attempts: integer().notNull().default(0),
+    heartbeatAt: timestamp({ withTimezone: true }),
+    plan: jsonb().$type<unknown>(),
+    solution: jsonb().$type<unknown>(),
+    renderManifest: jsonb().$type<unknown>(),
+    qualityReport: jsonb().$type<unknown>(),
+    issues: jsonb().$type<SolutionRunIssue[]>().notNull().default([]),
+    options: jsonb().$type<Record<string, unknown>>().notNull().default({}),
+    draftStorageKey: text(),
+    draftFileName: text(),
+    draftMimeType: text(),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp({ withTimezone: true }),
+  },
+  (t) => [
+    unique('ai_solution_runs_job_unique').on(t.jobId),
+    index('ai_solution_runs_stage_idx').on(t.stage),
+    index('ai_solution_runs_heartbeat_idx').on(t.heartbeatAt),
+  ],
+)
+
 export type AppSetting = typeof appSettings.$inferSelect
 export type AiJob = typeof aiJobs.$inferSelect
+export type AiSolutionRun = typeof aiSolutionRuns.$inferSelect

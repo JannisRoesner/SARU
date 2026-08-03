@@ -52,6 +52,8 @@ export interface SolutionFormField {
 }
 
 export interface StructuredSolution {
+  /** Persistiertes Schema; Laufzeit-V1 ohne Angabe wird als 1 gelesen. */
+  schemaVersion?: 1 | 2
   summary: string
   answers: SolutionAnswer[]
   formFields: SolutionFormField[]

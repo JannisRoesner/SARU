@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { analyzeDocument } from '../../../server/services/ai/solutions/document-analyzer'
-import { classifyTasks, legacyFillModeFromTasks } from '../../../server/services/ai/solutions/task-classifier'
+import { classifyTasks } from '../../../server/services/ai/solutions/task-classifier'
 import { segmentTasks } from '../../../server/services/ai/solutions/task-segmenter'
 import { extractCandidateBank } from '../../../server/services/ai/solutions/candidate-bank'
 import type { PdfBlankRegion } from '../../../server/services/ai/document-fill'
@@ -38,7 +38,6 @@ Die ___ des Penis …
     expect(cloze.candidateBank?.candidates.length).toBe(9)
     expect(cloze.renderMode).toBe('overlay')
     expect(cloze.confidence).toBeGreaterThanOrEqual(0.9)
-    expect(legacyFillModeFromTasks(tasks)).toBe('lueckentext')
   })
 
   it('erkennt offene Aufgabe ohne Lücken als free_text_separate', () => {
@@ -47,7 +46,6 @@ Die ___ des Penis …
     const doc = analyzeDocument({ fullText: text })
     const tasks = classifyTasks(segmentTasks({ document: doc }))
     expect(tasks.some((t) => t.kind === 'free_text_separate')).toBe(true)
-    expect(legacyFillModeFromTasks(tasks)).toBe('offen')
   })
 
   it('markiert fehlende Wortliste bei Cloze als expected_but_missing', () => {

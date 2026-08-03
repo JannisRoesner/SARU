@@ -7,7 +7,7 @@ import {
   numberMatchingCandidateBank,
   type NumberMatchingTask,
 } from './number-matching'
-import { classifyTasks, legacyFillModeFromTasks } from './task-classifier'
+import { classifyTasks } from './task-classifier'
 import { segmentTasks } from './task-segmenter'
 import type {
   AnswerTarget,
@@ -85,9 +85,15 @@ export function buildSolutionPlan(input: SolutionPlanInput): SolutionPlan {
       answerTargets: input.answerTargets,
     }),
   )
-  const fillMode: SolutionFillMode =
-    tasks.length > 0
-      ? legacyFillModeFromTasks(tasks)
+  /** @deprecated Nur für noch nicht migrierte V1-Aufrufer; V2 dispatcht pro Task. */
+  const fillMode: SolutionFillMode = tasks.some(
+    (task) =>
+      (task.kind === 'cloze' || task.kind === 'matching_table') &&
+      task.targets.length > 0,
+  )
+    ? 'lueckentext'
+    : tasks.length > 0
+      ? 'offen'
       : classifySolutionFillMode(
           pdfBlanks.length ? pdfBlanks : docxBlanks,
           input.documentText,
