@@ -107,7 +107,12 @@ function serializeParts(parts: ChatPart[], provider: AiProviderId): unknown {
 
 interface ChatCompletionResponse {
   choices?: {
-    message?: { content?: string | null }
+    message?: {
+      content?: string | null
+      /** Ollama/OpenAI-Kompatibilität: Denkkanal mancher lokaler Modelle. */
+      reasoning?: string | null
+      thinking?: string | null
+    }
     finish_reason?: string | null
   }[]
   usage?: { prompt_tokens?: number; completion_tokens?: number }
@@ -157,6 +162,10 @@ export async function chatCompletion(
     // Ollamas OpenAI-kompatible Schnittstelle erwartet hier response_format;
     // `format` gehört ausschließlich zu Ollamas nativer /api/chat-Route.
     body.response_format = { type: 'json_object' }
+    // Gemma-/Reasoning-Modelle können sonst den gesamten Ausgabebudget im
+    // separaten Denkkanal verbrauchen und `content` leer lassen. Ollama
+    // ignoriert unbekannte Felder bei älteren Versionen rückwärtskompatibel.
+    if (settings.provider === 'ollama') body.think = false
   }
 
   const started = Date.now()
@@ -167,8 +176,25 @@ export async function chatCompletion(
     'Die Anfrage an das Sprachmodell',
   )
 
-  const text = payload.choices?.[0]?.message?.content?.trim() ?? ''
+  const message = payload.choices?.[0]?.message
+  const content = message?.content?.trim() ?? ''
+  // Einige OpenAI-kompatible Ollama-Versionen legen JSON trotz deaktiviertem
+  // Thinking im reasoning/thinking-Feld ab. Nur ein vollständiges JSON-Objekt
+  // wird als gleichwertiger Antwortkanal akzeptiert – niemals freier Denktext.
+  const alternateJson = [message?.reasoning, message?.thinking]
+    .map((value) => value?.trim() ?? '')
+    .find((value) => value.startsWith('{') && value.endsWith('}')) ?? ''
+  const text = content || alternateJson
   if (!text) {
+    log.warn('KI-Modell lieferte leeren Antwortkanal', {
+      provider: settings.provider,
+      model,
+      finishReason: payload.choices?.[0]?.finish_reason ?? null,
+      contentChars: message?.content?.length ?? 0,
+      reasoningChars: message?.reasoning?.length ?? 0,
+      thinkingChars: message?.thinking?.length ?? 0,
+      outputTokens: payload.usage?.completion_tokens ?? null,
+    })
     throw appError('KI_FEHLER', 'Das Sprachmodell hat keine Antwort zurückgegeben.')
   }
 
@@ -179,6 +205,7 @@ export async function chatCompletion(
     finishReason: payload.choices?.[0]?.finish_reason ?? null,
     inputTokens: payload.usage?.prompt_tokens,
     outputTokens: payload.usage?.completion_tokens,
+    responseChannel: content ? 'content' : 'json_reasoning_fallback',
   })
 
   return {

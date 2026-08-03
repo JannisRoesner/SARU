@@ -138,26 +138,39 @@ async function solveTask(
 ): Promise<{ solved: SolvedTask | null; issues: QualityIssueV2[] }> {
   let lastIssues: QualityIssueV2[] = []
   for (let attempt = 0; attempt < 2; attempt++) {
-    const completion = await chatCompletion(
-      settings,
-      [
-        { role: 'system', parts: [{ type: 'text', text: TASK_SOLVER_SYSTEM_PROMPT }] },
+    let completion
+    try {
+      completion = await chatCompletion(
+        settings,
+        [
+          { role: 'system', parts: [{ type: 'text', text: TASK_SOLVER_SYSTEM_PROMPT }] },
+          {
+            role: 'user',
+            parts: [
+              { type: 'text', text: buildTaskSolverPrompt(task, { repairIssues: attempt > 0 ? [...repairIssues, ...lastIssues.map((issue) => issue.message)] : repairIssues }) },
+              ...(pagePart ? [pagePart] : []),
+            ],
+          },
+        ],
         {
-          role: 'user',
-          parts: [
-            { type: 'text', text: buildTaskSolverPrompt(task, { repairIssues: attempt > 0 ? [...repairIssues, ...lastIssues.map((issue) => issue.message)] : repairIssues }) },
-            ...(pagePart ? [pagePart] : []),
-          ],
+          model,
+          temperature: 0,
+          maxOutputTokens: Math.min(6000, Math.max(900, 350 + task.answerSlots.length * 180)),
+          jsonMode: true,
+          jsonSchema: { name: 'solution_task_v2', schema: TASK_SOLUTION_SCHEMA },
         },
-      ],
-      {
-        model,
-        temperature: 0,
-        maxOutputTokens: Math.min(6000, Math.max(900, 350 + task.answerSlots.length * 180)),
-        jsonMode: true,
-        jsonSchema: { name: 'solution_task_v2', schema: TASK_SOLUTION_SCHEMA },
-      },
-    )
+      )
+    } catch (error) {
+      lastIssues = [{
+        code: 'MODEL_OUTPUT_INCOMPLETE',
+        message: error instanceof Error
+          ? `Das Modell lieferte keine verwertbare Antwort: ${error.message}`
+          : 'Das Modell lieferte keine verwertbare Antwort.',
+        taskId: task.taskId,
+        blocking: true,
+      }]
+      continue
+    }
     totals.model = completion.model
     totals.inputTokens += completion.inputTokens ?? 0
     totals.outputTokens += completion.outputTokens ?? 0
@@ -216,26 +229,41 @@ async function verifyTask(
       }],
     }
   }
-  const completion = await chatCompletion(
-    settings,
-    [
-      { role: 'system', parts: [{ type: 'text', text: SEMANTIC_VERIFIER_SYSTEM_PROMPT }] },
+  let completion
+  try {
+    completion = await chatCompletion(
+      settings,
+      [
+        { role: 'system', parts: [{ type: 'text', text: SEMANTIC_VERIFIER_SYSTEM_PROMPT }] },
+        {
+          role: 'user',
+          parts: [
+            { type: 'text', text: buildSemanticVerifierPrompt(task, solved) },
+            ...(pagePart ? [pagePart] : []),
+          ],
+        },
+      ],
       {
-        role: 'user',
-        parts: [
-          { type: 'text', text: buildSemanticVerifierPrompt(task, solved) },
-          ...(pagePart ? [pagePart] : []),
-        ],
+        model,
+        temperature: 0,
+        maxOutputTokens: 1200,
+        jsonMode: true,
+        jsonSchema: { name: 'solution_semantic_verdict_v2', schema: SEMANTIC_VERDICT_SCHEMA },
       },
-    ],
-    {
-      model,
-      temperature: 0,
-      maxOutputTokens: 1200,
-      jsonMode: true,
-      jsonSchema: { name: 'solution_semantic_verdict_v2', schema: SEMANTIC_VERDICT_SCHEMA },
-    },
-  )
+    )
+  } catch (error) {
+    return {
+      verdict: 'uncertain',
+      issues: [{
+        code: 'SEMANTIC_QA_UNCERTAIN',
+        message: error instanceof Error
+          ? `Die semantische Prüfung konnte nicht gelesen werden: ${error.message}`
+          : 'Die semantische Prüfung konnte nicht gelesen werden.',
+        taskId: task.taskId,
+        blocking: true,
+      }],
+    }
+  }
   totals.model = completion.model
   totals.inputTokens += completion.inputTokens ?? 0
   totals.outputTokens += completion.outputTokens ?? 0

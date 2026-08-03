@@ -28,6 +28,7 @@ describe('chatCompletion', () => {
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>
       expect(body.response_format).toEqual({ type: 'json_object' })
+      expect(body.think).toBe(false)
       expect(body).not.toHaveProperty('format')
       expect(body.max_tokens).toBe(4000)
       return new Response(
@@ -55,5 +56,38 @@ describe('chatCompletion', () => {
     expect(fetchMock).toHaveBeenCalledOnce()
     expect(result.finishReason).toBe('stop')
     expect(result.outputTokens).toBe(20)
+  })
+
+  it('akzeptiert vollständiges JSON aus Ollamas separatem Denkkanal', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({
+        choices: [{
+          message: { content: '', reasoning: '{"taskId":"t1","answers":[],"uncertainties":[]}' },
+          finish_reason: 'stop',
+        }],
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )))
+
+    const result = await chatCompletion(
+      settings,
+      [{ role: 'user', parts: [{ type: 'text', text: 'JSON bitte' }] }],
+      { jsonMode: true },
+    )
+
+    expect(result.text).toContain('"taskId":"t1"')
+  })
+
+  it('akzeptiert keinen freien Denktext als Modellantwort', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ choices: [{ message: { content: '', reasoning: 'Ich denke darüber nach.' } }] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )))
+
+    await expect(chatCompletion(
+      settings,
+      [{ role: 'user', parts: [{ type: 'text', text: 'JSON bitte' }] }],
+      { jsonMode: true },
+    )).rejects.toThrow('keine Antwort')
   })
 })
