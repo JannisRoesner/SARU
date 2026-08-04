@@ -49,15 +49,18 @@ function lineTargetToBlank(
   context?: PdfBlankRegion,
 ): PdfBlankRegion {
   const bbox = target.bbox!
-  const height = Math.max(12, (bbox.h ?? 0.025) * pageSize.height)
+  const height = Math.max(12, context?.height ?? (bbox.h ?? 0.025) * pageSize.height)
   const topPdf = (1 - bbox.y) * pageSize.height
   return {
     pageIndex: target.page - 1,
     blankIndex,
     x: bbox.x * pageSize.width,
-    // Linien-bboxen enthalten unterhalb der eigentlichen Schreiblinie einen
-    // kleinen Rand. +2 pt rekonstruiert die Baseline der PDF-Linie.
-    y: Math.max(2, topPdf - height + 2),
+    // Wenn die PDF-Textebene einen Gap erkannt hat, ist deren Baseline die
+    // einzig verlässliche Ausrichtung zum umgebenden Satz. Die Liniengeometrie
+    // liefert dann nur noch Breite und X-Position. Für die rein grafisch
+    // erkannte Restlücke liegt die Schreib-Baseline erfahrungsgemäß etwa 2 pt
+    // über der Unterkante der erkannten Linienfläche.
+    y: context?.y ?? Math.max(2, topPdf - (bbox.h ?? 0.025) * pageSize.height + 4),
     width: Math.max(12, (bbox.w ?? 0.08) * pageSize.width),
     height,
     kind: 'underscore',

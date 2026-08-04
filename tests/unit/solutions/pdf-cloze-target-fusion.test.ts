@@ -45,8 +45,9 @@ function bank(size: number): CandidateBank {
 describe('PDF cloze target fusion', () => {
   it('ergänzt fehlende Textlücken aus deckungsgleichen Linien und Wortliste', () => {
     const lines = [line('line-0', 0.2), line('line-1', 0.3), line('line-2', 0.4)]
+    const blanks = [matchingBlank(0, 0.2), matchingBlank(1, 0.3)]
     const result = fusePdfClozeTargets({
-      blanks: [matchingBlank(0, 0.2), matchingBlank(1, 0.3)],
+      blanks,
       lineTargets: lines,
       candidateBank: bank(3),
       pageSizes: [pageSize],
@@ -56,6 +57,10 @@ describe('PDF cloze target fusion', () => {
     expect(result!.matchedBlankCount).toBe(2)
     expect(result!.blanks).toHaveLength(3)
     expect(result!.blanks.map((blank) => blank.blankIndex)).toEqual([0, 1, 2])
+    // Bei vorhandener Textebene muss die Satz-Baseline erhalten bleiben;
+    // sonst wandert der V2-Overlaytext sichtbar auf oder unter die Zeile.
+    expect(result!.blanks[0]!.y).toBe(blanks[0]!.y)
+    expect(result!.blanks[1]!.y).toBe(blanks[1]!.y)
     expect(result!.blanks[2]!.leftText).toBe('')
     expect(result!.consumedLineTargetIds).toEqual(
       new Set(['line-0', 'line-1', 'line-2']),
