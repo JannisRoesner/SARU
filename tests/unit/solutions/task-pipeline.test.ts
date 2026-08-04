@@ -38,6 +38,10 @@ Die ___ des Penis …
     expect(cloze.candidateBank?.candidates.length).toBe(9)
     expect(cloze.renderMode).toBe('overlay')
     expect(cloze.confidence).toBeGreaterThanOrEqual(0.9)
+    // Die kanonische V2-Planung rendert direkt aus diesen Targets; sie dürfen
+    // nicht mehr auf dem alten Platzhalter (0, 0) liegen.
+    expect(cloze.targets[0]!.bbox?.x).toBeGreaterThan(0.08)
+    expect(cloze.targets[0]!.bbox?.y).toBeGreaterThan(0.4)
   })
 
   it('erkennt offene Aufgabe ohne Lücken als free_text_separate', () => {

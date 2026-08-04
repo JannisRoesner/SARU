@@ -1,4 +1,4 @@
-import type { PdfBlankRegion, TextBlankInfo } from '../document-fill'
+import { blankRegionToBBox, type PdfBlankRegion, type TextBlankInfo } from '../document-fill'
 import type { AnswerTarget, CandidateBank, DocumentModel, TaskBlock } from './types'
 import {
   detectWorksheetTasks,
@@ -44,12 +44,15 @@ export function segmentTasks(input: SegmentTasksInput): TaskBlock[] {
         blankIndex: b.blankIndex,
         leftText: b.leftText,
         rightText: b.rightText,
-        bbox: {
-          x: 0,
-          y: 0,
-          w: Math.max(0.02, b.width / Math.max(1, document.pages[b.pageIndex]?.width ?? 595)),
-          h: Math.max(0.012, b.height / Math.max(1, document.pages[b.pageIndex]?.height ?? 842)),
-        },
+        // V2 rendert ausschließlich anhand des kanonischen Plans. Die
+        // Geometrie muss daher bereits hier die reale PDF-Position enthalten;
+        // der frühere Platzhalter (0,0) war nur für den alten Nachbearbeitungs-
+        // pfad brauchbar und führte zu Overlays oben links auf der Seite.
+        bbox: blankRegionToBBox(
+          b,
+          document.pages[b.pageIndex]?.width ?? 595,
+          document.pages[b.pageIndex]?.height ?? 842,
+        ),
       }))
     : docxBlanks.map((b) => ({
         id: `blank-${b.blankIndex}`,
