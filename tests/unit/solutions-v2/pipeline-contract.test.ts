@@ -6,6 +6,7 @@ import { parseSemanticVerdict, parseTaskSolutionJson } from '../../../server/ser
 import { buildSolutionPlanV2 } from '../../../server/services/ai/solutions-v2/plan-builder'
 import { reconcileTasksWithPageLayoutV2 } from '../../../server/services/ai/solutions-v2/page-task-reconciler'
 import { validateSolutionPlanV2 } from '../../../server/services/ai/solutions-v2/plan-validator'
+import { buildTargetedCandidateRepairV2 } from '../../../server/services/ai/solutions-v2/pipeline'
 import { projectSolutionForRenderV2 } from '../../../server/services/ai/solutions-v2/renderer-projection'
 import { validateSolvedTaskV2 } from '../../../server/services/ai/solutions-v2/solution-validator'
 import type { TaskBlock } from '../../../server/services/ai/solutions/types'
@@ -134,6 +135,94 @@ describe('solution pipeline v2 contract', () => {
     expect(issues.map((issue) => issue.code)).toEqual(
       expect.arrayContaining(['MODEL_EXTRA_TARGET', 'ANSWERS_PARTIAL']),
     )
+  })
+
+  it('akzeptiert eine vollständige direkte Wortlistenzuordnung ohne quadratische Ranglisten', () => {
+    const build = buildSolutionPlanV2({
+      document: buildTextOnlyLayoutDocumentV2('Die ___ und der ___.', 'cloze-bank'),
+      sourceFormat: 'pdf',
+      tasks: [{
+        id: 'cloze',
+        page: 1,
+        bbox: { x: 0.1, y: 0.2, w: 0.8, h: 0.1 },
+        instruction: 'Setze die Wörter ein.',
+        kind: 'cloze',
+        confidence: 0.95,
+        evidence: [],
+        renderMode: 'overlay',
+        candidateBank: {
+          id: 'bank',
+          reusePolicy: 'once',
+          source: 'wordlist_section',
+          candidates: [
+            { id: 'c1', value: 'Sonne', normalized: 'sonne' },
+            { id: 'c2', value: 'Mond', normalized: 'mond' },
+          ],
+        },
+        targets: [
+          { id: 'blank-1', kind: 'blank', page: 1, bbox: { x: 0.2, y: 0.25, w: 0.1, h: 0.03 } },
+          { id: 'blank-2', kind: 'blank', page: 1, bbox: { x: 0.45, y: 0.25, w: 0.1, h: 0.03 } },
+        ],
+      }],
+    })
+    const task = build.plan.tasks[0]!
+    const parsed = parseTaskSolutionJson(JSON.stringify({
+      taskId: task.taskId,
+      answers: task.answerSlots.map((slot, index) => ({
+        targetId: slot.targetId,
+        value: index === 0 ? 'Sonne' : 'Mond',
+      })),
+      uncertainties: [],
+    }))
+
+    expect(parsed?.parsedAnswers.every((answer) => answer.rankings.length === 0)).toBe(true)
+    expect(validateSolvedTaskV2(task, parsed!)).toEqual([])
+  })
+
+  it('repariert bei einer Wortlisten-Kollision nur die strittigen Ziele', () => {
+    const task = {
+      taskId: 'cloze',
+      kind: 'cloze' as const,
+      page: 1,
+      instruction: 'Setze die Wörter ein.',
+      instructionBBox: null,
+      confidence: 1,
+      issues: [],
+      candidateBank: {
+        id: 'bank',
+        reusePolicy: 'once' as const,
+        source: 'wordlist_section' as const,
+        candidates: [
+          { id: 'c1', value: 'Sonne', normalized: 'sonne' },
+          { id: 'c2', value: 'Mond', normalized: 'mond' },
+          { id: 'c3', value: 'Sterne', normalized: 'sterne' },
+        ],
+      },
+      answerSlots: ['one', 'two', 'three'].map((targetId) => ({
+        targetId,
+        page: 1,
+        bbox: null,
+        promptContext: `Kontext ${targetId}`,
+        targetKind: 'blank' as const,
+        valueType: 'text' as const,
+        renderPolicy: 'pdf_text_overlay' as const,
+        capacity: { maxChars: 20, maxLines: 1 },
+        provenance: [{ source: 'pdf_text' as const, sourceRef: targetId }],
+      })),
+    }
+    const repair = buildTargetedCandidateRepairV2(task, {
+      taskId: 'cloze',
+      answers: [
+        { targetId: 'one', value: 'Sonne' },
+        { targetId: 'two', value: 'Sonne' },
+        { targetId: 'three', value: 'Mond' },
+      ],
+      uncertainties: [],
+    })
+
+    expect(repair?.fixedAnswers).toEqual([{ targetId: 'three', value: 'Mond' }])
+    expect(repair?.repairTask.answerSlots.map((slot) => slot.targetId)).toEqual(['one', 'two'])
+    expect(repair?.repairTask.candidateBank?.candidates.map((candidate) => candidate.value)).toEqual(['Sonne', 'Sterne'])
   })
 
   it('verlangt einen auswertbaren getrennten Semantik-Verdict', () => {

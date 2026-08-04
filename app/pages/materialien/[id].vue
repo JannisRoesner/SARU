@@ -568,7 +568,7 @@ const loesungBearbeitbar = computed(() => loesungEditorModus.value !== null)
 
       <div
         v-if="loesungsJobAktiv"
-        class="flex items-center gap-3 rounded-xl border border-primary/25 bg-primary-soft px-4 py-3 text-sm text-primary-strong"
+        class="mb-5 flex items-center gap-3 rounded-xl border border-primary/25 bg-primary-soft px-4 py-3 text-sm text-primary-strong"
         role="status"
       >
         <UiIcon name="circle-notch" dreht fest />
@@ -580,7 +580,7 @@ const loesungBearbeitbar = computed(() => loesungEditorModus.value !== null)
       </div>
       <div
         v-else-if="loesungsJob?.status === 'pruefung_noetig'"
-        class="flex flex-wrap items-center gap-3 rounded-xl border border-warning/30 bg-warning-soft px-4 py-3 text-sm text-ink"
+        class="mb-5 flex flex-wrap items-center gap-3 rounded-xl border border-warning/30 bg-warning-soft px-4 py-3 text-sm text-ink"
         role="status"
       >
         <UiIcon name="triangle-exclamation" fest />

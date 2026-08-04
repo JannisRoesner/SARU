@@ -1,5 +1,6 @@
 import type { AiSettings } from '../../settings.service'
 import { chatCompletion, type ChatPart } from '../client'
+import { matchAnswerToCandidate } from '../solutions/candidate-bank'
 import { maximumWeightAssignment } from '../solutions/solvers/bipartite-matching'
 import { buildTaskSolverPrompt, buildSemanticVerifierPrompt, SEMANTIC_VERIFIER_SYSTEM_PROMPT, TASK_SOLVER_SYSTEM_PROMPT } from './prompts'
 import { parseSemanticVerdict, parseTaskSolutionJson, type ParsedTaskSolution } from './model-json'
@@ -11,6 +12,7 @@ import type {
   PipelineV2Result,
   QualityIssueV2,
   QualityReportV2,
+  SolvedAnswer,
   SolvedTask,
   TaskSpec,
 } from './types'
@@ -37,7 +39,7 @@ const TASK_SOLUTION_SCHEMA: Record<string, unknown> = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['targetId', 'value', 'rankings'],
+        required: ['targetId', 'value'],
         properties: {
           targetId: { type: 'string' },
           value: { type: 'string' },
@@ -119,13 +121,79 @@ function applyCandidateRankings(task: TaskSpec, parsed: ParsedTaskSolution): Sol
   }
 }
 
-function requiresCompleteRankings(task: TaskSpec, parsed: ParsedTaskSolution): boolean {
+interface CandidateRepairV2 {
+  repairTask: TaskSpec
+  fixedAnswers: SolvedAnswer[]
+}
+
+/**
+ * Reduziert einen fehlgeschlagenen bijektiven Lückentext auf die tatsächlich
+ * strittigen Ziele. Bereits eindeutige Zuordnungen werden nicht erneut vom
+ * Modell entschieden.
+ */
+export function buildTargetedCandidateRepairV2(
+  task: TaskSpec,
+  solved: SolvedTask,
+): CandidateRepairV2 | null {
   const bank = task.candidateBank
-  if (bank?.reusePolicy !== 'once' || bank.candidates.length !== task.answerSlots.length) return false
-  return !parsed.parsedAnswers.every((answer) => {
-    const ids = new Set(answer.rankings.map((ranking) => ranking.candidateId))
-    return bank.candidates.every((candidate) => ids.has(candidate.id))
-  })
+  if (bank?.reusePolicy !== 'once' || bank.candidates.length !== task.answerSlots.length) return null
+
+  const byTarget = new Map<string, SolvedAnswer[]>()
+  for (const answer of solved.answers) {
+    byTarget.set(answer.targetId, [...(byTarget.get(answer.targetId) ?? []), answer])
+  }
+  const candidateUse = new Map<string, number>()
+  for (const answer of solved.answers) {
+    const candidate = matchAnswerToCandidate(answer.value, bank)
+    if (candidate) candidateUse.set(candidate.id, (candidateUse.get(candidate.id) ?? 0) + 1)
+  }
+
+  const fixedAnswers: SolvedAnswer[] = []
+  const affectedSlots = []
+  for (const slot of task.answerSlots) {
+    const answers = byTarget.get(slot.targetId) ?? []
+    const candidate = answers.length === 1 ? matchAnswerToCandidate(answers[0]!.value, bank) : null
+    if (candidate && candidateUse.get(candidate.id) === 1) {
+      fixedAnswers.push({ targetId: slot.targetId, value: candidate.value })
+    } else {
+      affectedSlots.push(slot)
+    }
+  }
+  if (affectedSlots.length === 0) return null
+
+  const fixedCandidateIds = new Set(
+    fixedAnswers
+      .map((answer) => matchAnswerToCandidate(answer.value, bank)?.id)
+      .filter((id): id is string => Boolean(id)),
+  )
+  const remainingCandidates = bank.candidates.filter((candidate) => !fixedCandidateIds.has(candidate.id))
+  if (remainingCandidates.length !== affectedSlots.length) return null
+
+  return {
+    fixedAnswers,
+    repairTask: {
+      ...task,
+      answerSlots: affectedSlots,
+      candidateBank: { ...bank, candidates: remainingCandidates },
+    },
+  }
+}
+
+function mergeCandidateRepair(
+  task: TaskSpec,
+  repair: CandidateRepairV2,
+  repairedAnswers: SolvedAnswer[],
+  uncertainties: string[],
+): SolvedTask {
+  const byTarget = new Map([...repair.fixedAnswers, ...repairedAnswers].map((answer) => [answer.targetId, answer]))
+  return {
+    taskId: task.taskId,
+    answers: task.answerSlots.flatMap((slot) => {
+      const answer = byTarget.get(slot.targetId)
+      return answer ? [answer] : []
+    }),
+    uncertainties,
+  }
 }
 
 async function solveTask(
@@ -137,7 +205,9 @@ async function solveTask(
   repairIssues: string[] = [],
 ): Promise<{ solved: SolvedTask | null; issues: QualityIssueV2[] }> {
   let lastIssues: QualityIssueV2[] = []
+  let candidateRepair: CandidateRepairV2 | null = null
   for (let attempt = 0; attempt < 2; attempt++) {
+    const promptTask = candidateRepair?.repairTask ?? task
     let completion
     try {
       completion = await chatCompletion(
@@ -147,7 +217,16 @@ async function solveTask(
           {
             role: 'user',
             parts: [
-              { type: 'text', text: buildTaskSolverPrompt(task, { repairIssues: attempt > 0 ? [...repairIssues, ...lastIssues.map((issue) => issue.message)] : repairIssues }) },
+              { type: 'text', text: buildTaskSolverPrompt(promptTask, {
+                repairIssues: attempt > 0
+                  ? [
+                      ...repairIssues,
+                      ...(candidateRepair
+                        ? ['Repariere nur die aufgeführten offenen Lücken mit den verbleibenden Wörtern. Bereits gelöste Lücken sind verbindlich und nicht Teil dieser Antwort.']
+                        : lastIssues.map((issue) => issue.message)),
+                    ]
+                  : repairIssues,
+              }) },
               ...(pagePart ? [pagePart] : []),
             ],
           },
@@ -155,7 +234,7 @@ async function solveTask(
         {
           model,
           temperature: 0,
-          maxOutputTokens: Math.min(6000, Math.max(900, 350 + task.answerSlots.length * 180)),
+          maxOutputTokens: Math.min(6000, Math.max(900, 350 + promptTask.answerSlots.length * 180)),
           jsonMode: true,
           jsonSchema: { name: 'solution_task_v2', schema: TASK_SOLUTION_SCHEMA },
         },
@@ -193,18 +272,13 @@ async function solveTask(
       }]
       continue
     }
-    if (requiresCompleteRankings(task, parsed)) {
-      lastIssues = [{
-        code: 'CANDIDATE_RANKINGS_INCOMPLETE',
-        message: 'Für die bijektive Lückenzuordnung fehlen vollständige Kandidatenbewertungen.',
-        taskId: task.taskId,
-        blocking: true,
-      }]
-      continue
-    }
-    const solved = applyCandidateRankings(task, parsed)
+    const parsedSolved = applyCandidateRankings(promptTask, parsed)
+    const solved = candidateRepair
+      ? mergeCandidateRepair(task, candidateRepair, parsedSolved.answers, parsedSolved.uncertainties)
+      : parsedSolved
     lastIssues = validateSolvedTaskV2(task, solved)
     if (!blocking(lastIssues)) return { solved, issues: lastIssues }
+    if (attempt === 0) candidateRepair = buildTargetedCandidateRepairV2(task, solved)
   }
   return { solved: null, issues: lastIssues }
 }

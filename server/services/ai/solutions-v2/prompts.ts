@@ -3,7 +3,7 @@ import { getSolutionTaskHandlerV2 } from './handler-registry'
 
 export const V2_PROMPT_VERSIONS = {
   layout: 'solution-v2-layout-1',
-  solve: 'solution-v2-solve-1',
+  solve: 'solution-v2-solve-2',
   semantic: 'solution-v2-semantic-1',
   visual: 'solution-v2-visual-1',
 } as const
@@ -19,9 +19,9 @@ Verbindliche Regeln:
 - Wenn Kandidaten vorgegeben sind, verwende ausschließlich diese.
 
 Schema:
-{"taskId":"vorgegebene-id","answers":[{"targetId":"vorgegebene-id","value":"Antwort","rankings":[{"candidateId":"c0","score":0.9}]}],"uncertainties":[]}
+{"taskId":"vorgegebene-id","answers":[{"targetId":"vorgegebene-id","value":"Antwort"}],"uncertainties":[]}
 
-rankings enthält bei einer Wortliste mit einmaliger Verwendung alle Kandidaten, sonst ein leeres Array. score liegt zwischen 0 und 1.`
+Eine Wortliste mit einmaliger Verwendung muss vollständig und ohne Wiederholung als value-Werte verwendet werden. rankings ist optional und wird nur für echte Unsicherheit verwendet.`
 
 export function buildTaskSolverPrompt(
   task: TaskSpec,
@@ -53,7 +53,7 @@ export function buildTaskSolverPrompt(
       `Wiederverwendung: ${task.candidateBank?.reusePolicy ?? 'unknown'}`,
     )
     if (task.candidateBank?.reusePolicy === 'once') {
-      lines.push('Gib pro Slot rankings für alle Kandidaten an; jeder Kandidat wird insgesamt genau einmal gewählt.')
+      lines.push('Wähle jeden Kandidaten insgesamt genau einmal. Gib die direkte Zuordnung als value zurück; keine vollständige Rangliste ausgeben.')
     }
   }
   if (options.repairIssues?.length) {
