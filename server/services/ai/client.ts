@@ -120,6 +120,114 @@ interface ChatCompletionResponse {
   model?: string
 }
 
+/** Antwortformat des nativen Ollama-/api/chat-Endpunkts. */
+interface OllamaChatResponse {
+  model?: string
+  message?: {
+    content?: string | null
+    thinking?: string | null
+  }
+  done_reason?: string | null
+  prompt_eval_count?: number
+  eval_count?: number
+}
+
+function ollamaNativeBaseUrl(settings: AiSettings): string {
+  // Die Anwendung speichert für die OpenAI-Kompatibilität üblicherweise
+  // http://host:11434/v1. Der native Endpunkt lebt jedoch neben /v1.
+  return baseUrl(settings).replace(/\/v1$/i, '')
+}
+
+function serializeOllamaNativeParts(parts: ChatPart[]): {
+  content: string
+  images?: string[]
+} {
+  const text: string[] = []
+  const images: string[] = []
+  for (const part of parts) {
+    if (part.type === 'text') text.push(part.text)
+    else if (part.type === 'image') images.push(part.base64)
+    else {
+      throw appError('KI_FEHLER', 'Ollamas nativer Chat-Endpunkt unterstützt hier keine PDF-Dateien.')
+    }
+  }
+  return {
+    content: text.join('\n'),
+    ...(images.length > 0 ? { images } : {}),
+  }
+}
+
+async function ollamaChatCompletion(
+  settings: AiSettings,
+  messages: ChatMessage[],
+  options: {
+    model?: string
+    temperature?: number
+    maxOutputTokens?: number
+    jsonMode?: boolean
+    jsonSchema?: { name: string; schema: Record<string, unknown> }
+  },
+  model: string,
+): Promise<ChatResult> {
+  const body: Record<string, unknown> = {
+    model,
+    stream: false,
+    // Gemma 4 E4B ignoriert think:false am OpenAI-kompatiblen Endpunkt und
+    // kann sein ganzes Budget im reasoning-Feld verbrauchen. /api/chat
+    // unterstützt die Steuerung verbindlich.
+    think: false,
+    options: {
+      temperature: options.temperature ?? settings.temperature,
+      num_predict: options.maxOutputTokens ?? settings.maxOutputTokens,
+    },
+    messages: messages.map((message) => ({
+      role: message.role,
+      ...serializeOllamaNativeParts(message.parts),
+    })),
+  }
+  if (options.jsonSchema) body.format = options.jsonSchema.schema
+  else if (options.jsonMode) body.format = 'json'
+
+  const started = Date.now()
+  const payload = await request<OllamaChatResponse>(
+    { ...settings, baseUrl: ollamaNativeBaseUrl(settings) },
+    '/api/chat',
+    body,
+    'Die Anfrage an das Sprachmodell',
+  )
+  const content = payload.message?.content?.trim() ?? ''
+  if (!content) {
+    log.warn('KI-Modell lieferte leeren Antwortkanal', {
+      provider: settings.provider,
+      model,
+      finishReason: payload.done_reason ?? null,
+      contentChars: payload.message?.content?.length ?? 0,
+      reasoningChars: 0,
+      thinkingChars: payload.message?.thinking?.length ?? 0,
+      outputTokens: payload.eval_count ?? null,
+      endpoint: 'ollama_native_chat',
+    })
+    throw appError('KI_FEHLER', 'Das Sprachmodell hat keine Antwort zurückgegeben.')
+  }
+  log.info('Chat-Anfrage abgeschlossen', {
+    provider: settings.provider,
+    model,
+    dauerMs: Date.now() - started,
+    finishReason: payload.done_reason ?? null,
+    inputTokens: payload.prompt_eval_count,
+    outputTokens: payload.eval_count,
+    responseChannel: 'content',
+    endpoint: 'ollama_native_chat',
+  })
+  return {
+    text: content,
+    model: payload.model ?? model,
+    inputTokens: payload.prompt_eval_count,
+    outputTokens: payload.eval_count,
+    finishReason: payload.done_reason ?? null,
+  }
+}
+
 export async function chatCompletion(
   settings: AiSettings,
   messages: ChatMessage[],
@@ -136,6 +244,10 @@ export async function chatCompletion(
   const model = options.model || settings.chatModel
   if (!model) {
     throw appError('KI_NICHT_KONFIGURIERT', 'Es ist kein Sprachmodell konfiguriert.')
+  }
+
+  if (settings.provider === 'ollama') {
+    return ollamaChatCompletion(settings, messages, options, model)
   }
 
   const body: Record<string, unknown> = {
@@ -158,14 +270,9 @@ export async function chatCompletion(
       },
     }
   } else if (options.jsonMode) {
-    // Dieser Client verwendet für alle Anbieter /v1/chat/completions. Auch
-    // Ollamas OpenAI-kompatible Schnittstelle erwartet hier response_format;
-    // `format` gehört ausschließlich zu Ollamas nativer /api/chat-Route.
+    // Dieser Pfad ist OpenAI-kompatibel; `format` gehört ausschließlich zu
+    // Ollamas nativem /api/chat-Route.
     body.response_format = { type: 'json_object' }
-    // Gemma-/Reasoning-Modelle können sonst den gesamten Ausgabebudget im
-    // separaten Denkkanal verbrauchen und `content` leer lassen. Ollama
-    // ignoriert unbekannte Felder bei älteren Versionen rückwärtskompatibel.
-    if (settings.provider === 'ollama') body.think = false
   }
 
   const started = Date.now()

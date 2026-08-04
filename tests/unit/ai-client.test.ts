@@ -24,23 +24,21 @@ afterEach(() => {
 })
 
 describe('chatCompletion', () => {
-  it('nutzt für Ollamas /v1-Endpunkt response_format und liefert finish_reason zurück', async () => {
-    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+  it('nutzt Ollamas nativen Chat-Endpunkt mit deaktiviertem Thinking', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>
-      expect(body.response_format).toEqual({ type: 'json_object' })
+      expect(url).toBe('http://localhost:11434/api/chat')
+      expect(body.format).toBe('json')
       expect(body.think).toBe(false)
-      expect(body).not.toHaveProperty('format')
-      expect(body.max_tokens).toBe(4000)
+      expect(body.stream).toBe(false)
+      expect(body.options).toEqual({ temperature: 0.2, num_predict: 4000 })
       return new Response(
         JSON.stringify({
           model: 'gemma4:e4b-it-qat',
-          choices: [
-            {
-              message: { content: '{"summary":"Test","answers":[],"formFields":[]}' },
-              finish_reason: 'stop',
-            },
-          ],
-          usage: { prompt_tokens: 100, completion_tokens: 20 },
+          message: { content: '{"summary":"Test","answers":[],"formFields":[]}' },
+          done_reason: 'stop',
+          prompt_eval_count: 100,
+          eval_count: 20,
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       )
@@ -58,29 +56,28 @@ describe('chatCompletion', () => {
     expect(result.outputTokens).toBe(20)
   })
 
-  it('akzeptiert vollständiges JSON aus Ollamas separatem Denkkanal', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(
-      JSON.stringify({
-        choices: [{
-          message: { content: '', reasoning: '{"taskId":"t1","answers":[],"uncertainties":[]}' },
-          finish_reason: 'stop',
-        }],
-      }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } },
-    )))
+  it('überträgt ein JSON-Schema über Ollamas natives format-Feld', async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+      expect(body.format).toEqual({ type: 'object', properties: { value: { type: 'string' } } })
+      return new Response(JSON.stringify({ message: { content: '{"value":"ok"}' } }), { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
 
     const result = await chatCompletion(
       settings,
       [{ role: 'user', parts: [{ type: 'text', text: 'JSON bitte' }] }],
-      { jsonMode: true },
+      { jsonMode: true, jsonSchema: { name: 'ignored-by-ollama', schema: { type: 'object', properties: { value: { type: 'string' } } } } },
     )
 
-    expect(result.text).toContain('"taskId":"t1"')
+    expect(result.text).toBe('{"value":"ok"}')
   })
 
-  it('akzeptiert keinen freien Denktext als Modellantwort', async () => {
+  it('akzeptiert keinen leeren nativen Antwortkanal', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(
-      JSON.stringify({ choices: [{ message: { content: '', reasoning: 'Ich denke darüber nach.' } }] }),
+      JSON.stringify({
+        message: { content: '', thinking: '{"taskId":"t1","answers":[],"uncertainties":[]}' },
+      }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     )))
 
