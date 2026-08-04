@@ -146,3 +146,33 @@ export function nearbyTextForTarget(
     .slice(0, 600)
 }
 
+/**
+ * Rekonstruiert die konkrete Textzeile um ein geometrisches Ziel und setzt an
+ * dessen Position einen sichtbaren Lückenmarker. Das ist besonders wichtig für
+ * rein grafische PDF-Linien, die selbst keinen leftText/rightText-Kontext haben.
+ */
+export function markedRowContextForTarget(
+  document: LayoutDocumentV2,
+  page: number,
+  bbox: SolutionBBox | null | undefined,
+): string {
+  if (!bbox) return ''
+  const spans = document.pages.find((candidate) => candidate.page === page)?.textSpans ?? []
+  const targetLeft = bbox.x
+  const targetRight = bbox.x + (bbox.w ?? 0.05)
+  const row = spans
+    .filter((span) => overlapsVertically(span.bbox, bbox, 0.018))
+    .sort((a, b) => a.bbox.x - b.bbox.x)
+  const left = row
+    .filter((span) => span.bbox.x + (span.bbox.w ?? 0) <= targetLeft + 0.015)
+    .map((span) => span.text.trim())
+    .filter(Boolean)
+    .join(' ')
+  const right = row
+    .filter((span) => span.bbox.x >= targetRight - 0.015)
+    .map((span) => span.text.trim())
+    .filter(Boolean)
+    .join(' ')
+  if (!left && !right) return ''
+  return `${left} ___ ${right}`.replace(/\s+/g, ' ').trim().slice(0, 600)
+}

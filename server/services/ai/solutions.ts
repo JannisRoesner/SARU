@@ -71,6 +71,7 @@ import { buildPdfLayoutDocumentV2, buildTextOnlyLayoutDocumentV2 } from './solut
 import { buildSolutionPlanV2 } from './solutions-v2/plan-builder'
 import { reconcileTasksWithPageLayoutV2 } from './solutions-v2/page-task-reconciler'
 import { runSolutionPipelineV2, type PageVisionPart } from './solutions-v2/pipeline'
+import { V2_PROMPT_VERSIONS } from './solutions-v2/prompts'
 import {
   completeSolutionRun,
   saveSolutionDraft,
@@ -622,12 +623,7 @@ export async function generateSolution(
     sourceFileName: source?.fileName ?? null,
     taskCount: tasks.length,
     taskKinds: tasks.map((task) => task.kind),
-    promptVersions: {
-      layout: 'solution-v2-layout-1',
-      solve: 'solution-v2-solve-1',
-      semantic: 'solution-v2-semantic-1',
-      visual: 'solution-v2-visual-1',
-    },
+    promptVersions: V2_PROMPT_VERSIONS,
   })
 
   if (!documentText && !source && !material.content?.trim()) {

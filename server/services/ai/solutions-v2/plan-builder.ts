@@ -1,6 +1,6 @@
 import type { SolutionBBox } from '../document-fill'
 import type { AnswerTarget, TaskBlock } from '../solutions/types'
-import { nearbyTextForTarget } from './layout-document'
+import { markedRowContextForTarget, nearbyTextForTarget } from './layout-document'
 import {
   SOLUTION_PIPELINE_VERSION,
   type AnswerSlot,
@@ -62,8 +62,9 @@ function promptContextFor(
 ): string {
   if (!target) return task.instruction.trim()
   const explicit = `${target.leftText ?? ''} ___ ${target.rightText ?? ''}`.trim()
+  const markedRow = markedRowContextForTarget(document, target.page, target.bbox)
   const nearby = nearbyTextForTarget(document, target.page, target.bbox)
-  return [explicit !== '___' ? explicit : '', nearby, target.cellRef ? `Zelle ${target.cellRef}` : '']
+  return [explicit !== '___' ? explicit : '', markedRow, nearby, target.cellRef ? `Zelle ${target.cellRef}` : '']
     .filter(Boolean)
     .join(' | ')
     .slice(0, 900)

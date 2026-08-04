@@ -61,6 +61,7 @@ describe('PDF cloze target fusion', () => {
     // sonst wandert der V2-Overlaytext sichtbar auf oder unter die Zeile.
     expect(result!.blanks[0]!.y).toBe(blanks[0]!.y)
     expect(result!.blanks[1]!.y).toBe(blanks[1]!.y)
+    expect(result!.blanks[2]!.y).toBeCloseTo((1 - 0.4) * pageSize.height - 12, 6)
     expect(result!.blanks[2]!.leftText).toBe('')
     expect(result!.consumedLineTargetIds).toEqual(
       new Set(['line-0', 'line-1', 'line-2']),

@@ -1,15 +1,16 @@
 import { PDFDocument, StandardFonts } from 'pdf-lib'
-import { describe, expect, it } from 'vitest'
-import { buildPdfLayoutDocumentV2, buildTextOnlyLayoutDocumentV2 } from '../../../server/services/ai/solutions-v2/layout-document'
+import { describe, expect, it, vi } from 'vitest'
+import { buildPdfLayoutDocumentV2, buildTextOnlyLayoutDocumentV2, markedRowContextForTarget } from '../../../server/services/ai/solutions-v2/layout-document'
 import { solutionTaskHandlersV2 } from '../../../server/services/ai/solutions-v2/handler-registry'
 import { parseSemanticVerdict, parseTaskSolutionJson } from '../../../server/services/ai/solutions-v2/model-json'
 import { buildSolutionPlanV2 } from '../../../server/services/ai/solutions-v2/plan-builder'
 import { reconcileTasksWithPageLayoutV2 } from '../../../server/services/ai/solutions-v2/page-task-reconciler'
 import { validateSolutionPlanV2 } from '../../../server/services/ai/solutions-v2/plan-validator'
-import { buildTargetedCandidateRepairV2 } from '../../../server/services/ai/solutions-v2/pipeline'
+import { buildCandidateDisagreementRepairV2, buildTargetedCandidateRepairV2, runSolutionPipelineV2 } from '../../../server/services/ai/solutions-v2/pipeline'
 import { projectSolutionForRenderV2 } from '../../../server/services/ai/solutions-v2/renderer-projection'
 import { validateSolvedTaskV2 } from '../../../server/services/ai/solutions-v2/solution-validator'
 import type { TaskBlock } from '../../../server/services/ai/solutions/types'
+import type { AiSettings } from '../../../server/services/settings.service'
 
 function freeTextTask(id: string, page: number, y: number, instruction: string): TaskBlock {
   return {
@@ -223,6 +224,185 @@ describe('solution pipeline v2 contract', () => {
     expect(repair?.fixedAnswers).toEqual([{ targetId: 'three', value: 'Mond' }])
     expect(repair?.repairTask.answerSlots.map((slot) => slot.targetId)).toEqual(['one', 'two'])
     expect(repair?.repairTask.candidateBank?.candidates.map((candidate) => candidate.value)).toEqual(['Sonne', 'Sterne'])
+  })
+
+  it('reduziert widersprüchliche Erst- und Kontrollzuordnungen auf die abweichenden Slots', () => {
+    const task = {
+      taskId: 'cloze-check',
+      kind: 'cloze' as const,
+      page: 1,
+      instruction: 'Setze ein.',
+      instructionBBox: null,
+      confidence: 1,
+      issues: [],
+      candidateBank: {
+        id: 'bank',
+        reusePolicy: 'once' as const,
+        source: 'wordlist_section' as const,
+        candidates: [
+          { id: 'c1', value: 'Sonne', normalized: 'sonne' },
+          { id: 'c2', value: 'Mond', normalized: 'mond' },
+          { id: 'c3', value: 'Sterne', normalized: 'sterne' },
+        ],
+      },
+      answerSlots: ['one', 'two', 'three'].map((targetId) => ({
+        targetId,
+        page: 1,
+        bbox: null,
+        promptContext: `Satz ___ ${targetId}`,
+        targetKind: 'blank' as const,
+        valueType: 'text' as const,
+        renderPolicy: 'pdf_text_overlay' as const,
+        capacity: { maxChars: 20, maxLines: 1 },
+        provenance: [{ source: 'pdf_text' as const, sourceRef: targetId }],
+      })),
+    }
+    const repair = buildCandidateDisagreementRepairV2(
+      task,
+      {
+        taskId: task.taskId,
+        answers: [
+          { targetId: 'one', value: 'Sonne' },
+          { targetId: 'two', value: 'Mond' },
+          { targetId: 'three', value: 'Sterne' },
+        ],
+        uncertainties: [],
+      },
+      {
+        taskId: task.taskId,
+        answers: [
+          { targetId: 'one', value: 'Sterne' },
+          { targetId: 'two', value: 'Mond' },
+          { targetId: 'three', value: 'Sonne' },
+        ],
+        uncertainties: [],
+      },
+    )
+
+    expect(repair?.fixedAnswers).toEqual([{ targetId: 'two', value: 'Mond' }])
+    expect(repair?.repairTask.answerSlots.map((slot) => slot.targetId)).toEqual(['one', 'three'])
+    expect(repair?.repairTask.candidateBank?.candidates.map((candidate) => candidate.value)).toEqual(['Sonne', 'Sterne'])
+  })
+
+  it('rekonstruiert für eine rein grafische Lücke den Satz mit Marker', () => {
+    const document = {
+      schemaVersion: 2 as const,
+      sourceHash: 'marked-row',
+      fullText: 'Links und rechts',
+      pages: [{
+        page: 1,
+        width: 600,
+        height: 800,
+        extractionQuality: 'text_layer' as const,
+        textSpans: [
+          { id: 'left', page: 1, text: 'Das ist links', bbox: { x: 0.1, y: 0.4, w: 0.25, h: 0.02 } },
+          { id: 'right', page: 1, text: 'und hier rechts.', bbox: { x: 0.62, y: 0.4, w: 0.25, h: 0.02 } },
+        ],
+      }],
+    }
+
+    expect(markedRowContextForTarget(
+      document,
+      1,
+      { x: 0.36, y: 0.395, w: 0.24, h: 0.025 },
+    )).toBe('Das ist links ___ und hier rechts.')
+  })
+
+  it('erkennt eine falsche Erstzuordnung und repariert nur widersprüchliche Slots', async () => {
+    const build = buildSolutionPlanV2({
+      document: buildTextOnlyLayoutDocumentV2('Drei eindeutige Lückensätze', 'independent-check'),
+      sourceFormat: 'pdf',
+      tasks: [{
+        id: 'checked-cloze',
+        page: 1,
+        bbox: { x: 0.1, y: 0.2, w: 0.8, h: 0.2 },
+        instruction: 'Setze die Wörter ein.',
+        kind: 'cloze',
+        confidence: 1,
+        evidence: [],
+        renderMode: 'overlay',
+        candidateBank: {
+          id: 'bank',
+          reusePolicy: 'once',
+          source: 'wordlist_section',
+          candidates: [
+            { id: 'c1', value: 'Sonne', normalized: 'sonne' },
+            { id: 'c2', value: 'Mond', normalized: 'mond' },
+            { id: 'c3', value: 'Sterne', normalized: 'sterne' },
+          ],
+        },
+        targets: [
+          { id: 'b1', kind: 'blank', page: 1, blankIndex: 0, leftText: 'Die', rightText: 'scheint.', bbox: { x: 0.2, y: 0.3, w: 0.1, h: 0.02 } },
+          { id: 'b2', kind: 'blank', page: 1, blankIndex: 1, leftText: 'Der', rightText: 'leuchtet.', bbox: { x: 0.2, y: 0.4, w: 0.1, h: 0.02 } },
+          { id: 'b3', kind: 'blank', page: 1, blankIndex: 2, leftText: 'Die', rightText: 'funkeln.', bbox: { x: 0.2, y: 0.5, w: 0.1, h: 0.02 } },
+        ],
+      }],
+    })
+    const task = build.plan.tasks[0]!
+    const ids = task.answerSlots.map((slot) => slot.targetId)
+    const solution = (values: string[], selectedIds = ids) => ({
+      taskId: task.taskId,
+      answers: selectedIds.map((targetId, index) => ({ targetId, value: values[index]! })),
+      uncertainties: [],
+    })
+    const responses = [
+      solution(['Sterne', 'Mond', 'Sonne']),
+      solution(['Sonne', 'Mond', 'Sterne']),
+      solution(['Sonne', 'Sterne'], [ids[0]!, ids[2]!]),
+      solution(['Sonne', 'Mond', 'Sterne']),
+      { taskId: task.taskId, verdict: 'pass', issues: [] },
+    ]
+    const requestBodies: Array<Record<string, unknown>> = []
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      requestBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>)
+      const response = responses.shift()
+      return new Response(JSON.stringify({
+        model: 'gemma4:e4b-it-qat',
+        message: { content: JSON.stringify(response) },
+        done_reason: 'stop',
+        prompt_eval_count: 100,
+        eval_count: 50,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const settings: AiSettings = {
+      enabled: true,
+      provider: 'ollama',
+      baseUrl: 'http://localhost:11434/v1',
+      apiKey: '',
+      chatModel: 'gemma4:e4b-it-qat',
+      visionModel: 'gemma4:e4b-it-qat',
+      useVision: true,
+      embeddingsEnabled: false,
+      embeddingModel: '',
+      temperature: 0,
+      maxOutputTokens: 4000,
+      timeoutMs: 10_000,
+      refererUrl: '',
+      appTitle: 'SARU Test',
+    }
+
+    try {
+      const result = await runSolutionPipelineV2({
+        build,
+        settings,
+        model: settings.chatModel,
+        pageParts: [],
+      })
+      expect(result.qualityReport.semantic).toBe('passed')
+      expect(result.solvedTasks[0]?.answers.map((answer) => answer.value)).toEqual([
+        'Sonne',
+        'Mond',
+        'Sterne',
+      ])
+      expect(fetchMock).toHaveBeenCalledTimes(5)
+      const repairPrompt = JSON.stringify(requestBodies[2])
+      expect(repairPrompt).toContain(ids[0]!)
+      expect(repairPrompt).not.toContain(ids[1]!)
+      expect(repairPrompt).toContain(ids[2]!)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('verlangt einen auswertbaren getrennten Semantik-Verdict', () => {

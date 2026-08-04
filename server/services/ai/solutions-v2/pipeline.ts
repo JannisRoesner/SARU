@@ -2,7 +2,14 @@ import type { AiSettings } from '../../settings.service'
 import { chatCompletion, type ChatPart } from '../client'
 import { matchAnswerToCandidate } from '../solutions/candidate-bank'
 import { maximumWeightAssignment } from '../solutions/solvers/bipartite-matching'
-import { buildTaskSolverPrompt, buildSemanticVerifierPrompt, SEMANTIC_VERIFIER_SYSTEM_PROMPT, TASK_SOLVER_SYSTEM_PROMPT } from './prompts'
+import {
+  buildCandidateAssignmentVerifierPrompt,
+  buildTaskSolverPrompt,
+  buildSemanticVerifierPrompt,
+  CANDIDATE_ASSIGNMENT_VERIFIER_SYSTEM_PROMPT,
+  SEMANTIC_VERIFIER_SYSTEM_PROMPT,
+  TASK_SOLVER_SYSTEM_PROMPT,
+} from './prompts'
 import { parseSemanticVerdict, parseTaskSolutionJson, type ParsedTaskSolution } from './model-json'
 import { validateSolutionPlanV2 } from './plan-validator'
 import { projectSolutionForRenderV2, validateRenderManifestV2 } from './renderer-projection'
@@ -179,6 +186,48 @@ export function buildTargetedCandidateRepairV2(
   }
 }
 
+/** Erstlösung und unabhängige Kontrolllösung: Nur übereinstimmende Slots bleiben fest. */
+export function buildCandidateDisagreementRepairV2(
+  task: TaskSpec,
+  primary: SolvedTask,
+  independent: SolvedTask,
+): CandidateRepairV2 | null {
+  const bank = task.candidateBank
+  if (bank?.reusePolicy !== 'once' || bank.candidates.length !== task.answerSlots.length) return null
+  const primaryByTarget = new Map(primary.answers.map((answer) => [answer.targetId, answer]))
+  const independentByTarget = new Map(independent.answers.map((answer) => [answer.targetId, answer]))
+  const fixedAnswers: SolvedAnswer[] = []
+  const affectedSlots = []
+
+  for (const slot of task.answerSlots) {
+    const first = primaryByTarget.get(slot.targetId)
+    const second = independentByTarget.get(slot.targetId)
+    const firstCandidate = first ? matchAnswerToCandidate(first.value, bank) : null
+    const secondCandidate = second ? matchAnswerToCandidate(second.value, bank) : null
+    if (firstCandidate && secondCandidate && firstCandidate.id === secondCandidate.id) {
+      fixedAnswers.push({ targetId: slot.targetId, value: firstCandidate.value })
+    } else {
+      affectedSlots.push(slot)
+    }
+  }
+  if (affectedSlots.length === 0) return null
+  const fixedIds = new Set(
+    fixedAnswers
+      .map((answer) => matchAnswerToCandidate(answer.value, bank)?.id)
+      .filter((id): id is string => Boolean(id)),
+  )
+  const remainingCandidates = bank.candidates.filter((candidate) => !fixedIds.has(candidate.id))
+  if (remainingCandidates.length !== affectedSlots.length) return null
+  return {
+    fixedAnswers,
+    repairTask: {
+      ...task,
+      answerSlots: affectedSlots,
+      candidateBank: { ...bank, candidates: remainingCandidates },
+    },
+  }
+}
+
 function mergeCandidateRepair(
   task: TaskSpec,
   repair: CandidateRepairV2,
@@ -203,9 +252,10 @@ async function solveTask(
   pagePart: ChatPart | undefined,
   totals: CompletionTotals,
   repairIssues: string[] = [],
+  initialCandidateRepair: CandidateRepairV2 | null = null,
 ): Promise<{ solved: SolvedTask | null; issues: QualityIssueV2[] }> {
   let lastIssues: QualityIssueV2[] = []
-  let candidateRepair: CandidateRepairV2 | null = null
+  let candidateRepair: CandidateRepairV2 | null = initialCandidateRepair
   for (let attempt = 0; attempt < 2; attempt++) {
     const promptTask = candidateRepair?.repairTask ?? task
     let completion
@@ -218,14 +268,14 @@ async function solveTask(
             role: 'user',
             parts: [
               { type: 'text', text: buildTaskSolverPrompt(promptTask, {
-                repairIssues: attempt > 0
-                  ? [
-                      ...repairIssues,
-                      ...(candidateRepair
-                        ? ['Repariere nur die aufgeführten offenen Lücken mit den verbleibenden Wörtern. Bereits gelöste Lücken sind verbindlich und nicht Teil dieser Antwort.']
-                        : lastIssues.map((issue) => issue.message)),
-                    ]
-                  : repairIssues,
+                repairIssues: [
+                  ...repairIssues,
+                  ...(candidateRepair
+                    ? ['Repariere nur die aufgeführten offenen Lücken mit den verbleibenden Wörtern. Bereits gelöste Lücken sind verbindlich und nicht Teil dieser Antwort.']
+                    : attempt > 0
+                      ? lastIssues.map((issue) => issue.message)
+                      : []),
+                ],
               }) },
               ...(pagePart ? [pagePart] : []),
             ],
@@ -281,6 +331,141 @@ async function solveTask(
     if (attempt === 0) candidateRepair = buildTargetedCandidateRepairV2(task, solved)
   }
   return { solved: null, issues: lastIssues }
+}
+
+interface CandidateAssignmentVerificationV2 {
+  verdict: 'pass' | 'repair' | 'uncertain'
+  issues: QualityIssueV2[]
+  independent: SolvedTask | null
+}
+
+function requiresIndependentCandidateAssignment(task: TaskSpec): boolean {
+  return Boolean(
+    task.kind === 'cloze' &&
+    task.candidateBank?.reusePolicy === 'once' &&
+    task.candidateBank.candidates.length === task.answerSlots.length,
+  )
+}
+
+async function verifyCandidateAssignment(
+  task: TaskSpec,
+  solved: SolvedTask,
+  settings: AiSettings,
+  model: string,
+  pagePart: ChatPart | undefined,
+  totals: CompletionTotals,
+): Promise<CandidateAssignmentVerificationV2 | null> {
+  if (!requiresIndependentCandidateAssignment(task)) return null
+
+  const missingContext = task.answerSlots.filter((slot) => {
+    const context = slot.promptContext.trim()
+    return !context.includes('___') || !/\p{L}/u.test(context.replace('___', ''))
+  })
+  if (missingContext.length > 0) {
+    return {
+      verdict: 'uncertain',
+      independent: null,
+      issues: [{
+        code: 'TASK_CONTEXT_MISSING',
+        message: `Für ${missingContext.length} Lücke(n) fehlt ein eindeutig rekonstruierter Satzkontext.`,
+        taskId: task.taskId,
+        targetIds: missingContext.map((slot) => slot.targetId),
+        blocking: true,
+      }],
+    }
+  }
+
+  let completion
+  try {
+    completion = await chatCompletion(
+      settings,
+      [
+        { role: 'system', parts: [{ type: 'text', text: CANDIDATE_ASSIGNMENT_VERIFIER_SYSTEM_PROMPT }] },
+        {
+          role: 'user',
+          parts: [
+            { type: 'text', text: buildCandidateAssignmentVerifierPrompt(task) },
+            ...(pagePart ? [pagePart] : []),
+          ],
+        },
+      ],
+      {
+        model,
+        temperature: 0,
+        maxOutputTokens: Math.min(5000, Math.max(900, 350 + task.answerSlots.length * 140)),
+        jsonMode: true,
+        jsonSchema: { name: 'solution_candidate_assignment_v2', schema: TASK_SOLUTION_SCHEMA },
+      },
+    )
+  } catch (error) {
+    return {
+      verdict: 'uncertain',
+      independent: null,
+      issues: [{
+        code: 'SEMANTIC_QA_UNCERTAIN',
+        message: error instanceof Error
+          ? `Die unabhängige Kandidatenzuordnung konnte nicht gelesen werden: ${error.message}`
+          : 'Die unabhängige Kandidatenzuordnung konnte nicht gelesen werden.',
+        taskId: task.taskId,
+        blocking: true,
+      }],
+    }
+  }
+  totals.model = completion.model
+  totals.inputTokens += completion.inputTokens ?? 0
+  totals.outputTokens += completion.outputTokens ?? 0
+  const parsed = completion.finishReason === 'length'
+    ? null
+    : parseTaskSolutionJson(completion.text)
+  if (!parsed) {
+    return {
+      verdict: 'uncertain',
+      independent: null,
+      issues: [{
+        code: 'SEMANTIC_QA_UNCERTAIN',
+        message: 'Die unabhängige Kandidatenzuordnung lieferte kein vollständiges Ergebnis.',
+        taskId: task.taskId,
+        blocking: true,
+      }],
+    }
+  }
+  const independent = applyCandidateRankings(task, parsed)
+  const validationIssues = validateSolvedTaskV2(task, independent)
+  if (blocking(validationIssues)) {
+    return {
+      verdict: 'uncertain',
+      independent,
+      issues: [{
+        code: 'SEMANTIC_QA_UNCERTAIN',
+        message: `Die unabhängige Kandidatenzuordnung war strukturell ungültig: ${validationIssues.map((issue) => issue.message).join(' ')}`,
+        taskId: task.taskId,
+        targetIds: validationIssues.flatMap((issue) => issue.targetIds ?? []),
+        blocking: true,
+      }],
+    }
+  }
+
+  const primaryByTarget = new Map(solved.answers.map((answer) => [answer.targetId, answer.value]))
+  const mismatches = task.answerSlots.filter((slot) => {
+    const primary = matchAnswerToCandidate(primaryByTarget.get(slot.targetId) ?? '', task.candidateBank!)
+    const checked = matchAnswerToCandidate(
+      independent.answers.find((answer) => answer.targetId === slot.targetId)?.value ?? '',
+      task.candidateBank!,
+    )
+    return !primary || !checked || primary.id !== checked.id
+  })
+  if (mismatches.length === 0) return { verdict: 'pass', issues: [], independent }
+  return {
+    verdict: 'repair',
+    independent,
+    issues: [{
+      code: 'CANDIDATE_ASSIGNMENT_DISAGREEMENT',
+      message: `Erstlösung und unabhängige Kontrolle widersprechen sich bei ${mismatches.length} Lücke(n).`,
+      taskId: task.taskId,
+      targetIds: mismatches.map((slot) => slot.targetId),
+      blocking: true,
+    }],
+  }
 }
 
 async function verifyTask(
@@ -412,6 +597,69 @@ export async function runSolutionPipelineV2(args: {
       structuralIssues.push(...result.issues)
       continue
     }
+
+    // Cloze-Wortlisten werden unabhängig ein zweites Mal gelöst. Der zweite
+    // Aufruf sieht die Erstlösung nicht; Unterschiede gehen ausschließlich in
+    // einen gezielten Repair der strittigen Slots.
+    let candidateCheck = await verifyCandidateAssignment(
+      task,
+      result.solved,
+      args.settings,
+      args.model,
+      pagePart,
+      totals,
+    )
+    let repairUsed = false
+    if (candidateCheck?.verdict === 'repair' && candidateCheck.independent) {
+      const disagreementRepair = buildCandidateDisagreementRepairV2(
+        task,
+        result.solved,
+        candidateCheck.independent,
+      )
+      if (disagreementRepair) {
+        result = await solveTask(
+          task,
+          args.settings,
+          args.model,
+          pagePart,
+          totals,
+          candidateCheck.issues.map((issue) => issue.message),
+          disagreementRepair,
+        )
+        repairUsed = true
+        if (result.solved) {
+          candidateCheck = await verifyCandidateAssignment(
+            task,
+            result.solved,
+            args.settings,
+            args.model,
+            pagePart,
+            totals,
+          )
+        }
+      } else {
+        candidateCheck = {
+          verdict: 'uncertain',
+          independent: candidateCheck.independent,
+          issues: [{
+            code: 'SEMANTIC_QA_UNCERTAIN',
+            message: 'Die widersprüchliche Kandidatenzuordnung konnte nicht gezielt repariert werden.',
+            taskId: task.taskId,
+            blocking: true,
+          }],
+        }
+      }
+    }
+    if (!result.solved) {
+      structuralIssues.push(...result.issues)
+      continue
+    }
+    if (candidateCheck && candidateCheck.verdict !== 'pass') {
+      solvedTasks.push(result.solved)
+      semanticIssues.push(...candidateCheck.issues)
+      continue
+    }
+
     let verification = await verifyTask(
       task,
       result.solved,
@@ -421,7 +669,7 @@ export async function runSolutionPipelineV2(args: {
       totals,
       args.requireVision ?? false,
     )
-    if (verification.verdict === 'repair') {
+    if (verification.verdict === 'repair' && !repairUsed) {
       result = await solveTask(
         task,
         args.settings,
@@ -431,15 +679,30 @@ export async function runSolutionPipelineV2(args: {
         verification.issues.map((issue) => issue.message),
       )
       if (result.solved) {
-        verification = await verifyTask(
+        candidateCheck = await verifyCandidateAssignment(
           task,
           result.solved,
           args.settings,
           args.model,
           pagePart,
           totals,
-          args.requireVision ?? false,
         )
+        if (!candidateCheck || candidateCheck.verdict === 'pass') {
+          verification = await verifyTask(
+            task,
+            result.solved,
+            args.settings,
+            args.model,
+            pagePart,
+            totals,
+            args.requireVision ?? false,
+          )
+        } else {
+          verification = {
+            verdict: candidateCheck.verdict,
+            issues: candidateCheck.issues,
+          }
+        }
       }
     }
     if (!result.solved) {

@@ -10,6 +10,9 @@ interface PageSize {
   height: number
 }
 
+/** Oberer Schreibraum, den clusterPdfAnswerLines über einer Einzellinie öffnet. */
+const SINGLE_LINE_TOP_PADDING_PT = 12
+
 export interface PdfClozeTargetFusion {
   blanks: PdfBlankRegion[]
   consumedLineTargetIds: Set<string>
@@ -58,9 +61,10 @@ function lineTargetToBlank(
     // Wenn die PDF-Textebene einen Gap erkannt hat, ist deren Baseline die
     // einzig verlässliche Ausrichtung zum umgebenden Satz. Die Liniengeometrie
     // liefert dann nur noch Breite und X-Position. Für die rein grafisch
-    // erkannte Restlücke liegt die Schreib-Baseline erfahrungsgemäß etwa 2 pt
-    // über der Unterkante der erkannten Linienfläche.
-    y: context?.y ?? Math.max(2, topPdf - (bbox.h ?? 0.025) * pageSize.height + 4),
+    // erkannte Restlücke wird die Baseline aus dem bekannten oberen Padding
+    // der Einzellinien-Erkennung rekonstruiert. bbox.h ist dafür ungeeignet,
+    // weil die Zielbox absichtlich eine Mindesthöhe für Schreibflächen hat.
+    y: context?.y ?? Math.max(2, topPdf - SINGLE_LINE_TOP_PADDING_PT),
     width: Math.max(12, (bbox.w ?? 0.08) * pageSize.width),
     height,
     kind: 'underscore',

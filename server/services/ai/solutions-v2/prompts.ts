@@ -4,7 +4,8 @@ import { getSolutionTaskHandlerV2 } from './handler-registry'
 export const V2_PROMPT_VERSIONS = {
   layout: 'solution-v2-layout-1',
   solve: 'solution-v2-solve-2',
-  semantic: 'solution-v2-semantic-1',
+  candidateAssignment: 'solution-v2-candidate-assignment-1',
+  semantic: 'solution-v2-semantic-2',
   visual: 'solution-v2-visual-1',
 } as const
 
@@ -61,6 +62,33 @@ export function buildTaskSolverPrompt(
   }
   lines.push('', 'Liefere ausschließlich das vollständige JSON-Objekt.')
   return lines.join('\n')
+}
+
+export const CANDIDATE_ASSIGNMENT_VERIFIER_SYSTEM_PROMPT = `Du kontrollierst einen Lückentext durch eine vollständig unabhängige Neuzuordnung.
+
+Die erste Lösung wird dir absichtlich nicht gezeigt. Löse jeden Slot ausschließlich aus seinem Satzkontext und der verbindlichen Wortliste.
+
+Verbindliche Regeln:
+- Antworte ausschließlich mit einem vollständigen JSON-Objekt.
+- Verwende jede vorgegebene taskId und targetId exakt.
+- Verwende ausschließlich die Kandidatenwerte und jeden davon genau einmal.
+- Setze jeden Kandidaten gedanklich für ___ ein und prüfe Grammatik sowie Bedeutung.
+- Erfinde keine IDs, Ziele oder zusätzlichen Antworten.
+
+Schema:
+{"taskId":"id","answers":[{"targetId":"id","value":"Kandidat"}],"uncertainties":[]}`
+
+export function buildCandidateAssignmentVerifierPrompt(task: TaskSpec): string {
+  return [
+    `taskId: ${task.taskId}`,
+    `Aufgabenstellung: ${task.instruction}`,
+    `Kandidaten: ${JSON.stringify(task.candidateBank?.candidates.map((candidate) => candidate.value) ?? [])}`,
+    `Slots: ${JSON.stringify(task.answerSlots.map((slot) => ({
+      targetId: slot.targetId,
+      context: slot.promptContext,
+    })))}`,
+    'Ordne unabhängig zu und liefere ausschließlich das vollständige JSON.',
+  ].join('\n')
 }
 
 export const SEMANTIC_VERIFIER_SYSTEM_PROMPT = `Du prüfst genau eine bereits gelöste Teilaufgabe eines Unterrichtsmaterials.
