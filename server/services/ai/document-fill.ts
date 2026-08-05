@@ -1403,6 +1403,30 @@ function fontSizeForField(boxHeight: number, fieldType: SolutionFieldType): numb
   return fontSizeFromBoxHeight(boxHeight)
 }
 
+/** Median statt Boxhöhe: einzelne grafisch erkannte Linien haben oft eine
+ * großzügige Schreibfläche, obwohl der umgebende Satz dieselbe Schriftgröße hat. */
+function referenceLueckeFontSizes(blanks: PdfBlankRegion[]): Map<number, number> {
+  const heightsByPage = new Map<number, number[]>()
+  for (const blank of blanks) {
+    // Mehrzeilige Schreibfelder dürfen die Satzschrift nicht beeinflussen.
+    if (!Number.isFinite(blank.height) || blank.height >= 28) continue
+    const values = heightsByPage.get(blank.pageIndex) ?? []
+    values.push(fontSizeFromBoxHeight(blank.height))
+    heightsByPage.set(blank.pageIndex, values)
+  }
+  return new Map(
+    [...heightsByPage.entries()].map(([pageIndex, values]) => {
+      values.sort((a, b) => a - b)
+      const middle = Math.floor(values.length / 2)
+      const median =
+        values.length % 2 === 0
+          ? (values[middle - 1]! + values[middle]!) / 2
+          : values[middle]!
+      return [pageIndex, median]
+    }),
+  )
+}
+
 /** Heuristik, wenn das Modell keinen fieldType liefert. */
 export function inferAnswerFieldType(
   answer: SolutionAnswer,
@@ -2275,6 +2299,7 @@ function placementFromBBox(
   bbox: SolutionBBox,
   text: string,
   fieldType: SolutionFieldType,
+  referenceLueckeFontSize?: number,
 ): ResolvedPlacement {
   const xNorm = clamp01(bbox.x)
   const yNorm = clamp01(bbox.y)
@@ -2284,7 +2309,10 @@ function placementFromBBox(
   const hNorm = bbox.h && bbox.h > 0.01 ? clamp01(bbox.h) : defaultH
   const boxWidth = Math.max(24, wNorm * pageWidth)
   const boxHeight = Math.max(fieldType === 'freitext' ? 28 : 10, hNorm * pageHeight)
-  const fontSize = fontSizeForField(boxHeight, fieldType)
+  const fontSize =
+    fieldType === 'luecke' && referenceLueckeFontSize != null
+      ? referenceLueckeFontSize
+      : fontSizeForField(boxHeight, fieldType)
   const x = Math.min(Math.max(8, xNorm * pageWidth), pageWidth - 16)
   const baselineY = topLeftNormToPdfBaseline(yNorm, pageHeight, fontSize, boxHeight)
   return {
@@ -2347,6 +2375,7 @@ function resolvePlacements(
   const placements: ResolvedPlacement[] = []
   let sequentialBlank = 0
   const preferBBox = Boolean(options.preferBBox)
+  const lueckeFontSizes = referenceLueckeFontSizes(blanks)
 
   for (const answer of sorted) {
     const text = sanitizePdfText(answer.answer)
@@ -2370,7 +2399,15 @@ function resolvePlacements(
     // Nachbearbeitung: explizite bbox der Autoren hat Vorrang.
     if (preferBBox && answer.bbox) {
       placements.push(
-        placementFromBBox(pageIndex, size.width, size.height, answer.bbox, text, fieldType),
+        placementFromBBox(
+          pageIndex,
+          size.width,
+          size.height,
+          answer.bbox,
+          text,
+          fieldType,
+          lueckeFontSizes.get(pageIndex),
+        ),
       )
       if (blank) usedBlankIndexes.add(blank.blankIndex)
       continue
@@ -2402,7 +2439,15 @@ function resolvePlacements(
     // 2) Vision-bbox (normiert, Ursprung oben links → PDF-Y spiegeln).
     if (answer.bbox) {
       placements.push(
-        placementFromBBox(pageIndex, size.width, size.height, answer.bbox, text, fieldType),
+        placementFromBBox(
+          pageIndex,
+          size.width,
+          size.height,
+          answer.bbox,
+          text,
+          fieldType,
+          lueckeFontSizes.get(pageIndex),
+        ),
       )
       continue
     }
@@ -2427,7 +2472,7 @@ function drawPlacement(
 ): void {
   const { width, height } = page.getSize()
   const boxWidth = Math.max(24, placement.boxWidth)
-  const minimumFontSize = placement.fieldType === 'freitext' ? 6 : placement.fontSize
+  const minimumFontSize = placement.fieldType === 'freitext' ? 6 : Math.min(8, placement.fontSize)
   let fontSize = placement.fontSize
   let lines = wrapTextToWidth(placement.text, font, fontSize, boxWidth)
   let lineHeight = fontSize + (placement.fieldType === 'freitext' ? 3 : 2)
@@ -2441,14 +2486,10 @@ function drawPlacement(
     )
   let fitted = fittedLineCount()
 
-  while (
-    placement.fieldType === 'freitext' &&
-    lines.length > fitted &&
-    fontSize > minimumFontSize
-  ) {
+  while (lines.length > fitted && fontSize > minimumFontSize) {
     fontSize = Math.max(minimumFontSize, fontSize - 0.5)
     lines = wrapTextToWidth(placement.text, font, fontSize, boxWidth)
-    lineHeight = fontSize + 3
+    lineHeight = fontSize + (placement.fieldType === 'freitext' ? 3 : 2)
     fitted = fittedLineCount()
   }
 

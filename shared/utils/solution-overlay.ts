@@ -22,12 +22,18 @@ export function overlayFieldType(input: {
 
 /**
  * Schriftgröße analog zu server/services/ai/document-fill.ts (fontSizeForField).
- * `boxHeight` in CSS-Pixeln der angezeigten Box (Anteil der Seitenvorschau).
+ * Einzeilige Lücken verwenden bewusst eine gemeinsame Referenzgröße: Die Höhe
+ * einer Zielbox ist beim Verschieben/Vergrößern kein verlässliches Maß für die
+ * Schriftgröße. Freitext bleibt dagegen flächenabhängig.
  */
 export function overlayFontSizePx(
   boxHeightPx: number,
   fieldType: OverlayFieldType = 'luecke',
+  referenceLueckeFontSizePx?: number,
 ): number {
+  if (fieldType === 'luecke' && Number.isFinite(referenceLueckeFontSizePx)) {
+    return Math.min(14, Math.max(8, referenceLueckeFontSizePx!))
+  }
   if (!Number.isFinite(boxHeightPx) || boxHeightPx <= 0) {
     return fieldType === 'freitext' ? 9 : 11
   }

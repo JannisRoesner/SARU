@@ -12,6 +12,7 @@ interface PageSize {
 
 /** Oberer Schreibraum, den clusterPdfAnswerLines über einer Einzellinie öffnet. */
 const SINGLE_LINE_TOP_PADDING_PT = 12
+const DEFAULT_SINGLE_LINE_TEXT_HEIGHT_PT = 14
 
 export interface PdfClozeTargetFusion {
   blanks: PdfBlankRegion[]
@@ -50,9 +51,13 @@ function lineTargetToBlank(
   blankIndex: number,
   pageSize: PageSize,
   context?: PdfBlankRegion,
+  referenceHeight = DEFAULT_SINGLE_LINE_TEXT_HEIGHT_PT,
 ): PdfBlankRegion {
   const bbox = target.bbox!
-  const height = Math.max(12, context?.height ?? (bbox.h ?? 0.025) * pageSize.height)
+  // bbox.h enthält die bearbeitbare Zielbox, nicht die Satzschrift. Bei einer
+  // rein grafisch erkannten Linie übernehmen wir daher die typische Höhe der
+  // Textlücken auf derselben Seite.
+  const height = Math.max(12, context?.height ?? referenceHeight)
   const topPdf = (1 - bbox.y) * pageSize.height
   return {
     pageIndex: target.page - 1,
@@ -127,11 +132,31 @@ export function fusePdfClozeTargets(args: {
   const matchedBlankCount = contextByLineId.size
   if (matchedBlankCount / blanks.length < 0.7) return null
 
+  const referenceHeightByPage = new Map<number, number>()
+  for (const blank of blanks) {
+    const values = blanks
+      .filter((candidate) => candidate.pageIndex === blank.pageIndex && candidate.height < 28)
+      .map((candidate) => candidate.height)
+      .sort((a, b) => a - b)
+    if (!values.length || referenceHeightByPage.has(blank.pageIndex)) continue
+    const middle = Math.floor(values.length / 2)
+    referenceHeightByPage.set(
+      blank.pageIndex,
+      values.length % 2 === 0 ? (values[middle - 1]! + values[middle]!) / 2 : values[middle]!,
+    )
+  }
+
   const fused = lines
     .map((line, blankIndex) => {
       const pageSize = pageSizes[line.page - 1]
       return pageSize
-        ? lineTargetToBlank(line, blankIndex, pageSize, contextByLineId.get(line.id))
+        ? lineTargetToBlank(
+            line,
+            blankIndex,
+            pageSize,
+            contextByLineId.get(line.id),
+            referenceHeightByPage.get(line.page - 1),
+          )
         : null
     })
     .filter((blank): blank is PdfBlankRegion => blank !== null)

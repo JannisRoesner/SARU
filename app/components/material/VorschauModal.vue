@@ -297,6 +297,34 @@ function bboxVon(antwort: StoredSolutionAnswer) {
   return overlayBboxVon(antwort)
 }
 
+/**
+ * Bei Lückentexten soll eine versehentlich hohe Zielbox nicht zu einer viel
+ * größeren Antwort führen. Die mittlere Größe der übrigen einzeiligen Felder
+ * auf derselben Seite ist stabil, auch nachdem einzelne Boxen bearbeitet wurden.
+ */
+function lueckenReferenzGroessePx(seitenNummer: number): number | undefined {
+  const hoehen = (lokalStruktur.value?.answers ?? [])
+    .filter((andere) => andere.page === seitenNummer)
+    .map((andere) => {
+      const box = bboxVon(andere)
+      if (!box) return null
+      const fieldType = overlayFieldType({
+        fieldType: andere.fieldType,
+        bboxH: box.h,
+        answer: andere.answer,
+      })
+      if (fieldType !== 'luecke') return null
+      return Math.max(8, box.h * (seitenHoehePx.value || 800))
+    })
+    .filter((hoehe): hoehe is number => hoehe !== null)
+    .sort((a, b) => a - b)
+  if (!hoehen.length) return undefined
+  const mitte = Math.floor(hoehen.length / 2)
+  const medianeHoehe =
+    hoehen.length % 2 === 0 ? (hoehen[mitte - 1]! + hoehen[mitte]!) / 2 : hoehen[mitte]!
+  return Math.min(14, Math.max(8, medianeHoehe * 0.85))
+}
+
 function antwortTextStyle(antwort: StoredSolutionAnswer) {
   const box = bboxVon(antwort)
   if (!box) return {}
@@ -306,7 +334,11 @@ function antwortTextStyle(antwort: StoredSolutionAnswer) {
     answer: antwort.answer,
   })
   const boxHeightPx = Math.max(8, box.h * (seitenHoehePx.value || 800))
-  const fontSize = overlayFontSizePx(boxHeightPx, fieldType)
+  const fontSize = overlayFontSizePx(
+    boxHeightPx,
+    fieldType,
+    fieldType === 'luecke' ? lueckenReferenzGroessePx(antwort.page ?? seite.value) : undefined,
+  )
   return {
     '--pdf-font-size': `${fontSize}px`,
     '--pdf-line-gap': fieldType === 'freitext' ? '3px' : '2px',

@@ -316,6 +316,13 @@ describe('overlayFontSizePx', () => {
     expect(overlayFontSizePx(20, 'luecke')).toBe(Math.min(14, Math.max(8, 20 * 0.85)))
     expect(overlayFontSizePx(80, 'freitext')).toBe(Math.min(11, Math.max(7, 80 * 0.2)))
   })
+
+  it('hält einzeilige Lücken trotz hoher Zielbox bei der Referenzgröße', () => {
+    expect(overlayFontSizePx(48, 'luecke', 10.5)).toBe(10.5)
+    expect(overlayFontSizePx(48, 'freitext', 10.5)).toBe(
+      Math.min(11, Math.max(7, 48 * 0.2)),
+    )
+  })
 })
 
 describe('overlayFieldType', () => {
