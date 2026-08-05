@@ -3,6 +3,7 @@ import { PDFDocument, StandardFonts } from 'pdf-lib'
 import {
   assessPdfLayoutPlan,
   buildPdfLayoutVisionPrompt,
+  mergeDiagramTargetsFromVision,
   parsePdfLayoutVisionResponse,
 } from '../../../server/services/ai/solutions/repair/pdf-layout-vision'
 import type { AnswerTarget, TaskBlock } from '../../../server/services/ai/solutions/types'
@@ -266,5 +267,66 @@ describe('buildPdfLayoutVisionPrompt', () => {
     expect(prompt).toContain('nicht seine Lösungen')
     expect(prompt).toContain('als EINEN line_block zusammenfassen')
     expect(prompt).toContain('Keine Antworttexte erzeugen')
+  })
+
+  it('fordert bei Bildbeschriftungen exakt lokalisierte Diagrammziele', () => {
+    const assessment = assessPdfLayoutPlan({ documentText: 'Beschrifte das Bild.', tasks: [] })
+    const prompt = buildPdfLayoutVisionPrompt({
+      documentText: 'Beschrifte das Bild.',
+      tasks: [],
+      assessment,
+      focus: 'diagram_targets',
+      expectedDiagramTargetCount: 5,
+    })
+
+    expect(prompt).toContain('SPEZIALAUFTRAG BILDBESCHRIFTUNG')
+    expect(prompt).toContain('genau 5 Beschriftungsziele')
+  })
+
+  it('begrenzt eine manuelle Neuerkennung auf die ausgewählte Aufgabe', () => {
+    const assessment = assessPdfLayoutPlan({ documentText: 'Fülle die Tabelle.', tasks: [] })
+    const prompt = buildPdfLayoutVisionPrompt({
+      documentText: 'Fülle die Tabelle.',
+      tasks: [],
+      assessment,
+      focus: 'task_targets',
+    })
+
+    expect(prompt).toContain('SPEZIALAUFTRAG AUFGABENZIELE')
+    expect(prompt).toContain('andere Aufgaben und deren Bereiche dürfen nicht ausgegeben werden')
+  })
+})
+
+describe('mergeDiagramTargetsFromVision', () => {
+  it('ergänzt nur eine zielose Bildbeschriftung und lässt andere Ziele unverändert', () => {
+    const existingLine: AnswerTarget = {
+      id: 'line', kind: 'answer_line', page: 1,
+      bbox: { x: 0.1, y: 0.7, w: 0.8, h: 0.1 }, source: 'native',
+    }
+    const labelTask = task({
+      id: 'label', kind: 'matching_inline', page: 1,
+      instruction: 'Beschrifte das Bild.',
+      candidateBank: {
+        id: 'terms', reusePolicy: 'once', source: 'instruction',
+        candidates: ['Hoden', 'Harnröhre'].map((value, index) => ({
+          id: `term-${index}`, value, normalized: value.toLowerCase(),
+        })),
+      },
+    })
+    const linesTask = task({
+      id: 'lines', kind: 'free_text_inplace', renderMode: 'overlay', targets: [existingLine],
+    })
+    const visual = task({
+      id: 'vision-diagram', kind: 'diagram_completion', page: 1, renderMode: 'overlay',
+      targets: [
+        { id: 'vision-1', kind: 'shape_box', page: 1, bbox: { x: 0.2, y: 0.2, w: 0.1, h: 0.04 }, source: 'vision' },
+        { id: 'vision-2', kind: 'shape_box', page: 1, bbox: { x: 0.5, y: 0.3, w: 0.1, h: 0.04 }, source: 'vision' },
+      ],
+    })
+
+    const merged = mergeDiagramTargetsFromVision([linesTask, labelTask], [visual])
+    expect(merged[0]!.targets).toEqual([existingLine])
+    expect(merged[1]).toMatchObject({ kind: 'diagram_completion', renderMode: 'overlay' })
+    expect(merged[1]!.targets.map((target) => target.id)).toEqual(['vision-1', 'vision-2'])
   })
 })

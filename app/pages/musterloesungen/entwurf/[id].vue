@@ -15,12 +15,16 @@ interface PlanTask {
   kind: string
   page: number
   instruction: string
+  candidateBank?: {
+    candidates: Array<{ value: string }>
+  } | null
   answerSlots: Array<{
     targetId: string
     page: number
     bbox: { x: number; y: number; w?: number; h?: number } | null
     promptContext: string
     capacity: { maxChars: number }
+    targetKind?: string
     choiceTargets?: Array<{
       value: string
       targetId: string
@@ -48,20 +52,42 @@ const { data, error, status, refresh } = await useAsyncData(
 )
 
 const solvedTasks = ref<DraftTask[]>([])
+const planTasks = ref<PlanTask[]>([])
+const kandidatentexte = ref<Record<string, string>>({})
 const laeuft = ref(false)
+const aktiveAufgabe = ref<string | null>(null)
+const markierAufgabe = ref<string | null>(null)
 const meldung = ref<string | null>(null)
 const fehler = ref<string | null>(null)
 
 watch(
-  () => data.value?.draft.solution,
-  (solution) => {
-    if (solution) solvedTasks.value = structuredClone(solution)
+  () => data.value?.draft,
+  (draft) => {
+    if (!draft) return
+    solvedTasks.value = structuredClone(draft.solution)
+    planTasks.value = structuredClone(draft.plan.tasks)
+    kandidatentexte.value = Object.fromEntries(
+      draft.plan.tasks.map((task) => [
+        task.taskId,
+        task.candidateBank?.candidates.map((candidate) => candidate.value).join('\n') ?? '',
+      ]),
+    )
   },
   { immediate: true },
 )
 
+const aufgabenTypen = [
+  { value: 'cloze', label: 'Lückentext' },
+  { value: 'free_text', label: 'Freitext' },
+  { value: 'single_choice', label: 'Einfachauswahl' },
+  { value: 'multi_choice', label: 'Mehrfachauswahl' },
+  { value: 'matching', label: 'Zuordnung' },
+  { value: 'table_completion', label: 'Tabelle ausfüllen' },
+  { value: 'diagram_labeling', label: 'Bild beschriften' },
+]
+
 function taskPlan(taskId: string): PlanTask | undefined {
-  return data.value?.draft.plan.tasks.find((task) => task.taskId === taskId)
+  return planTasks.value.find((task) => task.taskId === taskId)
 }
 
 function slotContext(taskId: string, targetId: string): string {
@@ -75,7 +101,7 @@ function answerValue(taskId: string, targetId: string): string {
 }
 
 function pageTargets(page: number) {
-  return (data.value?.draft.plan.tasks ?? []).flatMap((task, taskIndex) =>
+  return planTasks.value.flatMap((task, taskIndex) =>
     task.answerSlots.flatMap((slot, slotIndex) => {
       if (slot.page !== page) return []
       const value = answerValue(task.taskId, slot.targetId)
@@ -85,6 +111,7 @@ function pageTargets(page: number) {
       const bbox = choice?.bbox ?? slot.bbox
       if (!bbox) return []
       return [{
+        taskId: task.taskId,
         targetId: choice?.targetId ?? slot.targetId,
         label: `A${taskIndex + 1}.${slotIndex + 1}`,
         bbox,
@@ -92,6 +119,115 @@ function pageTargets(page: number) {
       }]
     }),
   )
+}
+
+function solvedTask(taskId: string): DraftTask | undefined {
+  return solvedTasks.value.find((task) => task.taskId === taskId)
+}
+
+function kandidaten(taskId: string): string[] {
+  return (kandidatentexte.value[taskId] ?? '')
+    .split(/[\n,;/]+/)
+    .map((value) => value.trim())
+    .filter(Boolean)
+}
+
+function zielHinzufuegen(task: PlanTask, page = task.page, x = 0.1, y = 0.4) {
+  task.answerSlots.push({
+    targetId: `${task.taskId}-manual-${Date.now()}-${task.answerSlots.length + 1}`,
+    page,
+    bbox: { x, y, w: 0.2, h: 0.04 },
+    promptContext: task.instruction,
+    capacity: { maxChars: 80 },
+  })
+}
+
+function neueAufgabe() {
+  const taskId = `manual-task-${Date.now()}`
+  const task: PlanTask = {
+    taskId,
+    kind: 'free_text',
+    page: 1,
+    instruction: 'Neue Aufgabe',
+    candidateBank: null,
+    answerSlots: [],
+  }
+  planTasks.value.push(task)
+  kandidatentexte.value[taskId] = ''
+  markierAufgabe.value = taskId
+}
+
+function zielEntfernen(task: PlanTask, targetId: string) {
+  task.answerSlots = task.answerSlots.filter((slot) => slot.targetId !== targetId)
+}
+
+function koordinateSetzen(
+  slot: PlanTask['answerSlots'][number],
+  key: 'x' | 'y' | 'w' | 'h',
+  value: unknown,
+) {
+  if (!slot.bbox) slot.bbox = { x: 0.1, y: 0.4, w: 0.2, h: 0.04 }
+  const number = Number(value)
+  if (!Number.isFinite(number)) return
+  slot.bbox[key] = Math.max(0.001, Math.min(1, number))
+}
+
+function seiteMarkiert(event: MouseEvent, page: number) {
+  if (!markierAufgabe.value) return
+  const task = taskPlan(markierAufgabe.value)
+  if (!task) return
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  const x = Math.max(0, Math.min(0.8, (event.clientX - rect.left) / rect.width))
+  const y = Math.max(0, Math.min(0.96, (event.clientY - rect.top) / rect.height))
+  zielHinzufuegen(task, page, x, y)
+  markierAufgabe.value = null
+}
+
+async function aufgabeNeuLoesen(task: PlanTask, redetectTargets: boolean) {
+  if (!redetectTargets && task.answerSlots.length === 0) {
+    fehler.value = 'Füge mindestens einen Zielbereich hinzu oder starte die visuelle Zielerkennung.'
+    return
+  }
+  laeuft.value = true
+  aktiveAufgabe.value = task.taskId
+  fehler.value = null
+  meldung.value = null
+  try {
+    await $fetch(
+      `/api/solution-drafts/${id.value}/tasks/${encodeURIComponent(task.taskId)}/retry`,
+      {
+        method: 'POST',
+        body: {
+          kind: task.kind,
+          instruction: task.instruction,
+          candidateValues: kandidaten(task.taskId),
+          redetectTargets,
+          answerSlots: task.answerSlots.map((slot) => ({
+            targetId: slot.targetId,
+            page: slot.page,
+            bbox: slot.bbox
+              ? {
+                  x: slot.bbox.x,
+                  y: slot.bbox.y,
+                  w: slot.bbox.w ?? 0.2,
+                  h: slot.bbox.h ?? 0.04,
+                }
+              : null,
+            promptContext: slot.promptContext,
+          })),
+        },
+      },
+    )
+    await refresh()
+    meldung.value = redetectTargets
+      ? 'Zielbereiche erkannt, Aufgabe neu gelöst und Entwurf gerendert.'
+      : 'Aufgabe mit den manuellen Angaben neu gelöst und gerendert.'
+  } catch (cause: unknown) {
+    fehler.value = toApiFehler(cause).nachricht
+  } finally {
+    laeuft.value = false
+    aktiveAufgabe.value = null
+  }
 }
 
 function targetStyle(target: ReturnType<typeof pageTargets>[number]) {
@@ -184,7 +320,7 @@ async function verwerfen() {
 
       <div class="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(22rem,0.8fr)]">
         <UiCard titel="Gerenderter Entwurf mit Zielboxen" icon="file-pdf">
-          <div v-if="data.draft.hasFile" class="max-h-[75vh] space-y-4 overflow-auto rounded-lg bg-surface-muted p-2">
+          <div class="max-h-[75vh] space-y-4 overflow-auto rounded-lg bg-surface-muted p-2">
             <div
               v-for="page in data.draft.plan.document.pages"
               :key="page.page"
@@ -192,6 +328,11 @@ async function verwerfen() {
             >
               <p class="text-xs font-medium text-ink-muted">Seite {{ page.page }}</p>
               <div class="relative overflow-hidden rounded border border-line bg-white shadow-sm">
+              <div
+                class="relative"
+                :class="markierAufgabe ? 'cursor-crosshair ring-2 ring-primary' : ''"
+                @click="seiteMarkiert($event, page.page)"
+              >
                 <img
                   :src="`/api/solution-drafts/${id}/pages/${page.page}`"
                   :alt="`Entwurfsseite ${page.page}`"
@@ -204,37 +345,139 @@ async function verwerfen() {
                   :class="target.hasAnswer ? 'border-primary' : 'border-danger'"
                   :style="targetStyle(target)"
                   :title="target.targetId"
+                  @click.stop
                 >
                   <span class="absolute -top-5 left-0 rounded bg-ink px-1 text-[10px] leading-4 text-white">
                     {{ target.label }}
                   </span>
                 </div>
               </div>
+              </div>
             </div>
             <a
+              v-if="data.draft.hasFile"
               :href="`/api/solution-drafts/${id}/download`"
               class="inline-flex text-sm text-primary hover:underline"
               target="_blank"
             >Vollständigen Entwurf öffnen</a>
           </div>
-          <p v-else class="text-sm text-ink-muted">Wegen eines frühen Strukturfehlers existiert noch keine Vorschau.</p>
         </UiCard>
 
         <div class="space-y-4">
+          <div class="flex justify-end">
+            <UiButton
+              variante="sekundaer"
+              icon="plus"
+              :disabled="laeuft"
+              @click="neueAufgabe"
+            >Nicht erkannte Aufgabe hinzufügen</UiButton>
+          </div>
           <UiCard
-            v-for="task in solvedTasks"
+            v-for="task in planTasks"
             :key="task.taskId"
-            :titel="taskPlan(task.taskId)?.instruction || task.taskId"
+            :titel="task.instruction || task.taskId"
             icon="list-check"
           >
             <div class="space-y-4">
+              <div class="grid gap-3 sm:grid-cols-2">
+                <UiField label="Aufgabentyp">
+                  <UiSelect v-model="task.kind" :optionen="aufgabenTypen" :disabled="laeuft" />
+                </UiField>
+                <UiField label="Seite">
+                  <UiInput v-model="task.page" type="number" min="1" :disabled="laeuft" />
+                </UiField>
+              </div>
+              <UiField label="Aufgabenstellung">
+                <UiTextarea v-model="task.instruction" :rows="3" :disabled="laeuft" />
+              </UiField>
+              <UiField label="Wortliste / erlaubte Werte (optional, je Zeile ein Eintrag)">
+                <UiTextarea v-model="kandidatentexte[task.taskId]" :rows="3" :disabled="laeuft" />
+              </UiField>
+
+              <div class="space-y-2 rounded-lg border border-line p-3">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <p class="text-sm font-semibold text-ink">Zielbereiche</p>
+                  <div class="flex flex-wrap gap-2">
+                    <UiButton
+                      variante="sekundaer"
+                      groesse="sm"
+                      icon="crosshairs"
+                      :disabled="laeuft"
+                      @click="markierAufgabe = task.taskId"
+                    >Auf Seite markieren</UiButton>
+                    <UiButton
+                      variante="sekundaer"
+                      groesse="sm"
+                      icon="plus"
+                      :disabled="laeuft"
+                      @click="zielHinzufuegen(task)"
+                    >Ziel hinzufügen</UiButton>
+                  </div>
+                </div>
+                <p v-if="markierAufgabe === task.taskId" class="text-xs text-primary">
+                  Klicke links auf die gewünschte Position im Dokument.
+                </p>
+                <p v-if="task.answerSlots.length === 0" class="text-xs text-danger">
+                  Noch kein Zielbereich vorhanden.
+                </p>
+                <div
+                  v-for="(slot, slotIndex) in task.answerSlots"
+                  :key="slot.targetId"
+                  class="space-y-2 rounded border border-line bg-surface-muted p-2"
+                >
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="text-xs font-medium text-ink">Ziel {{ slotIndex + 1 }} · Seite {{ slot.page }}</span>
+                    <UiButton
+                      variante="still"
+                      groesse="sm"
+                      icon="trash"
+                      :disabled="laeuft"
+                      @click="zielEntfernen(task, slot.targetId)"
+                    >Entfernen</UiButton>
+                  </div>
+                  <div class="grid grid-cols-5 gap-2">
+                    <UiField label="Seite">
+                      <UiInput v-model="slot.page" type="number" min="1" :disabled="laeuft" />
+                    </UiField>
+                    <UiField v-for="key in (['x', 'y', 'w', 'h'] as const)" :key="key" :label="key">
+                      <UiInput
+                        type="number"
+                        step="0.001"
+                        :model-value="slot.bbox?.[key] ?? ''"
+                        :disabled="laeuft"
+                        @update:model-value="koordinateSetzen(slot, key, $event)"
+                      />
+                    </UiField>
+                  </div>
+                  <UiField label="Kontext">
+                    <UiInput v-model="slot.promptContext" :disabled="laeuft" />
+                  </UiField>
+                </div>
+              </div>
+
               <UiField
-                v-for="answer in task.answers"
+                v-for="answer in solvedTask(task.taskId)?.answers ?? []"
                 :key="answer.targetId"
                 :label="slotContext(task.taskId, answer.targetId)"
               >
                 <UiTextarea v-model="answer.value" :rows="4" />
               </UiField>
+              <div class="flex flex-wrap justify-end gap-2">
+                <UiButton
+                  variante="sekundaer"
+                  icon="eye"
+                  :laedt="laeuft && aktiveAufgabe === task.taskId"
+                  :disabled="laeuft && aktiveAufgabe !== task.taskId"
+                  @click="aufgabeNeuLoesen(task, true)"
+                >Ziele erkennen & neu lösen</UiButton>
+                <UiButton
+                  variante="primaer"
+                  icon="wand-magic-sparkles"
+                  :laedt="laeuft && aktiveAufgabe === task.taskId"
+                  :disabled="laeuft && aktiveAufgabe !== task.taskId"
+                  @click="aufgabeNeuLoesen(task, false)"
+                >Aufgabe neu lösen</UiButton>
+              </div>
             </div>
           </UiCard>
         </div>

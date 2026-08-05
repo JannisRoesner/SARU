@@ -9,6 +9,7 @@ export type ObservationSource =
   | 'docx_xml'
   | 'ocr'
   | 'vision'
+  | 'manual'
 
 export interface LayoutTextSpan {
   id: string

@@ -73,6 +73,43 @@ describe('solution pipeline v2 contract', () => {
     expect(validateSolutionPlanV2(build.plan)).toEqual([])
   })
 
+  it('trennt zielose Anhang-Aufgaben mit identischer Instruktionsgeometrie', () => {
+    const document = buildTextOnlyLayoutDocumentV2('Mehrere offene Aufgaben', 'shared-appendix')
+    const sharedBox = { x: 0.05, y: 0.2, w: 0.9, h: 0.1 }
+    const build = buildSolutionPlanV2({
+      document,
+      sourceFormat: 'pdf',
+      tasks: [
+        {
+          id: 'label-task',
+          page: 1,
+          bbox: sharedBox,
+          instruction: 'Ordne die Begriffe zu.',
+          kind: 'matching_inline',
+          confidence: 0.9,
+          evidence: [],
+          targets: [],
+          renderMode: 'appendix',
+        },
+        {
+          id: 'open-task',
+          page: 1,
+          bbox: sharedBox,
+          instruction: 'Erkläre den Zusammenhang.',
+          kind: 'free_text_separate',
+          confidence: 0.9,
+          evidence: [],
+          targets: [],
+          renderMode: 'appendix',
+        },
+      ],
+    })
+
+    const targetIds = build.plan.tasks.map((task) => task.answerSlots[0]!.targetId)
+    expect(new Set(targetIds).size).toBe(2)
+    expect(validateSolutionPlanV2(build.plan)).toEqual([])
+  })
+
   it('gruppiert Auswahlzellen pro Aussage und rendert nur die gewählte Zelle', () => {
     const task: TaskBlock = {
       id: 'choice',

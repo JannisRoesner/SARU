@@ -26,6 +26,8 @@ export interface PdfVisionLayoutResult {
   rawTaskCount: number
 }
 
+export type PdfLayoutVisionFocus = 'general' | 'task_targets' | 'diagram_targets'
+
 export function assessPdfLayoutPlan(args: {
   documentText: string
   tasks: TaskBlock[]
@@ -90,6 +92,8 @@ export function buildPdfLayoutVisionPrompt(args: {
   documentText: string
   tasks: TaskBlock[]
   assessment: PdfLayoutAssessment
+  focus?: PdfLayoutVisionFocus
+  expectedDiagramTargetCount?: number
 }): string {
   const currentPlan = args.tasks.map((task) => ({
     id: task.id,
@@ -107,6 +111,8 @@ export function buildPdfLayoutVisionPrompt(args: {
     })),
   }))
 
+  const diagramFocus = args.focus === 'diagram_targets'
+  const taskFocus = args.focus === 'task_targets'
   return [
     'Du prüfst ausschließlich das Layout eines Arbeitsblatts, nicht seine Lösungen.',
     'Erkenne sichtbare Aufgaben und die jeweils dazugehörigen beschreibbaren Antwortbereiche.',
@@ -128,7 +134,73 @@ export function buildPdfLayoutVisionPrompt(args: {
     '- Keine Antworttexte erzeugen und keine unsichtbaren Bereiche erfinden',
     '- no_response nur für Aufgaben ohne vorgesehenen Eintrag im Original',
     '- Wenn wirklich keine nutzbaren Antwortbereiche sichtbar sind: verdict=no_targets',
+    ...(diagramFocus
+      ? [
+          '',
+          'SPEZIALAUFTRAG BILDBESCHRIFTUNG:',
+          'Prüfe ausschließlich die sichtbare Beschriftungsaufgabe am Diagramm.',
+          'Erkenne die freien Enden von Beschriftungslinien, leere Beschriftungsfelder oder bewusst freigelassene Zielbereiche direkt am Bild.',
+          'Gib genau eine Aufgabe mit kind="diagram" und für jedes sichtbare Beschriftungsziel eine answerRegion mit kind="diagram_target" aus.',
+          'Beschrifte weder das Bild noch erfinde Bereiche innerhalb einer Illustration ohne sichtbaren Anker.',
+          ...(args.expectedDiagramTargetCount != null
+            ? [`Es werden genau ${args.expectedDiagramTargetCount} Beschriftungsziele erwartet. Liefere nur dann repair, wenn diese Anzahl sichtbar und sicher lokalisierbar ist; sonst no_targets.`]
+            : []),
+        ]
+      : []),
+    ...(taskFocus
+      ? [
+          '',
+          'SPEZIALAUFTRAG AUFGABENZIELE:',
+          'Prüfe ausschließlich die eine im bisherigen Plan genannte Aufgabe.',
+          'Erkenne alle und nur die sichtbar dafür vorgesehenen Antwortbereiche und ordne sie dieser Aufgabe zu.',
+          'Nutze den vorgegebenen Aufgabentyp; andere Aufgaben und deren Bereiche dürfen nicht ausgegeben werden.',
+          'Wenn die Zielbereiche nicht sicher abgrenzbar sind, antworte mit no_targets statt Bereiche zu erfinden.',
+        ]
+      : []),
   ].join('\n')
+}
+
+/**
+ * Ergänzt ausschließlich eine bisher zielose Bildbeschriftungsaufgabe.
+ * Bestehende Linien-, Tabellen- und Lückenziele werden nie verändert.
+ */
+export function mergeDiagramTargetsFromVision(
+  tasks: TaskBlock[],
+  visualTasks: TaskBlock[],
+): TaskBlock[] {
+  const available = visualTasks.filter((task) =>
+    task.kind === 'diagram_completion' && task.targets.length > 0,
+  )
+  const used = new Set<string>()
+  return tasks.map((task) => {
+    const expected = task.candidateBank?.candidates.length ?? 0
+    if (
+      task.kind !== 'matching_inline' ||
+      task.targets.length > 0 ||
+      expected < 2 ||
+      expected > MAX_TARGETS_PER_TASK
+    ) {
+      return task
+    }
+    const visual = available.find((candidate) =>
+      !used.has(candidate.id) &&
+      candidate.page === task.page &&
+      candidate.targets.length === expected &&
+      candidate.targets.every((target) => target.bbox && target.source === 'vision'),
+    )
+    if (!visual) return task
+    used.add(visual.id)
+    return {
+      ...task,
+      kind: 'diagram_completion',
+      targets: visual.targets,
+      confidence: Math.min(1, Math.max(task.confidence, visual.confidence)),
+      evidence: [...task.evidence, `vision added ${visual.targets.length} diagram label targets`],
+      renderMode: 'overlay',
+      renderConfidence: visual.renderConfidence,
+      requiresVisionTargetRepair: false,
+    }
+  })
 }
 
 function parseBBox(raw: unknown): SolutionBBox | null {
@@ -323,6 +395,8 @@ export async function repairPdfLayoutViaVision(args: {
   tasks: TaskBlock[]
   assessment: PdfLayoutAssessment
   nativeTargets?: AnswerTarget[]
+  focus?: PdfLayoutVisionFocus
+  expectedDiagramTargetCount?: number
 }): Promise<PdfVisionLayoutResult | null> {
   if (supportsNativePdf(args.settings.provider)) {
     const completion = await chatCompletion(
@@ -336,6 +410,8 @@ export async function repairPdfLayoutViaVision(args: {
               documentText: args.documentText,
               tasks: args.tasks,
               assessment: args.assessment,
+              focus: args.focus,
+              expectedDiagramTargetCount: args.expectedDiagramTargetCount,
             }),
           },
           {
@@ -374,6 +450,8 @@ export async function repairPdfLayoutViaVision(args: {
           documentText: args.documentText,
           tasks: pageTasks,
           assessment: args.assessment,
+          focus: args.focus,
+          expectedDiagramTargetCount: args.expectedDiagramTargetCount,
         }),
       },
     ]

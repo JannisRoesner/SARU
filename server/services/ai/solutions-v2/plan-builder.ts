@@ -136,7 +136,11 @@ function slotsForTask(
   const slots = rawTargets.map((target, index) => {
     const base = target
       ? geometryKey(target.page, target.kind, target.bbox)
-      : `${geometryKey(task.page, 'appendix', task.bbox)}-${index}`
+      // Zielose Anhang-Aufgaben können (insbesondere nach der seitenweisen
+      // Reconciliation) dieselbe Instruktionsbox teilen. Die Geometrie allein
+      // ist dann keine eindeutige Zielidentität. Der stabile Aufgabenbezug
+      // gehört deshalb zwingend in die targetId.
+      : `${geometryKey(task.page, 'appendix', task.bbox)}-${task.id}-${index}`
     const duplicate = seen.get(base) ?? 0
     seen.set(base, duplicate + 1)
     const targetId = duplicate === 0 ? base : `${base}-${duplicate}`

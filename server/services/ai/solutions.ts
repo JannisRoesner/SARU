@@ -56,6 +56,7 @@ import { repairCandidateBankViaVision } from './solutions/repair/candidate-bank-
 import { repairDocxTargetsViaVision } from './solutions/repair/docx-targets-vision'
 import {
   assessPdfLayoutPlan,
+  mergeDiagramTargetsFromVision,
   repairPdfLayoutViaVision,
 } from './solutions/repair/pdf-layout-vision'
 import {
@@ -501,6 +502,62 @@ export async function generateSolution(
           evidence: [...task.evidence, 'vision layout conflict: check unavailable'],
         }))
         log.warn('PDF-Layout-Vision-Check fehlgeschlagen – nativer Plan bleibt aktiv', error)
+      }
+    }
+  }
+
+  // Bildbeschriftungen ohne erkannte Zielkoordinaten benötigen eine andere
+  // visuelle Aufgabe als der allgemeine Layout-Check. Der gezielte Aufruf darf
+  // nur neue Diagrammziele ergänzen; alle vorhandenen Ziele bleiben unverändert.
+  const unplacedDiagramTasks = tasks.filter((task) => {
+    const candidateCount = task.candidateBank?.candidates.length ?? 0
+    return task.kind === 'matching_inline' && task.targets.length === 0 && candidateCount >= 2
+  })
+  if (
+    source &&
+    PDF_EXTENSIONS.has(source.extension) &&
+    useVision &&
+    model.trim() &&
+    unplacedDiagramTasks.length > 0
+  ) {
+    pdfLayoutVisionChecked = true
+    for (const diagramTask of unplacedDiagramTasks) {
+      try {
+        const visual = await repairPdfLayoutViaVision({
+          buffer: source.buffer,
+          fileName: source.fileName,
+          settings,
+          model,
+          documentText: analysisDocumentText,
+          tasks: [diagramTask],
+          assessment: assessPdfLayoutPlan({
+            documentText: analysisDocumentText,
+            tasks: [diagramTask],
+            requireVision: true,
+          }),
+          focus: 'diagram_targets',
+          expectedDiagramTargetCount: diagramTask.candidateBank!.candidates.length,
+        })
+        const merged = mergeDiagramTargetsFromVision(tasks, visual?.tasks ?? [])
+        const targetCountBefore = tasks.flatMap((task) => task.targets).length
+        const targetCountAfter = merged.flatMap((task) => task.targets).length
+        if (targetCountAfter > targetCountBefore) {
+          tasks = merged
+          pdfLayoutRepairedViaVision = true
+          log.info('PDF-Diagrammziele per Vision ergänzt', {
+            taskId: diagramTask.id,
+            expectedTargets: diagramTask.candidateBank!.candidates.length,
+            addedTargets: targetCountAfter - targetCountBefore,
+          })
+        } else {
+          log.info('PDF-Diagrammziele per Vision nicht sicher lokalisierbar', {
+            taskId: diagramTask.id,
+            expectedTargets: diagramTask.candidateBank!.candidates.length,
+            receivedTargets: visual?.tasks.flatMap((task) => task.targets).length ?? 0,
+          })
+        }
+      } catch (error) {
+        log.warn('PDF-Diagrammziel-Erkennung per Vision fehlgeschlagen', error)
       }
     }
   }
