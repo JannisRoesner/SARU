@@ -218,8 +218,8 @@ onMounted(async () => {
     )
     const job = result.job
     if (!job) return
+    loesungsJob.value = job
     if (job.status === 'wartend' || job.status === 'laeuft' || job.status === 'pruefung_noetig') {
-      loesungsJob.value = job
       if (job.status === 'wartend' || job.status === 'laeuft') loesungsJobPollingStarten()
     }
   } catch {
@@ -454,6 +454,15 @@ const loesungEditorModus = computed<SolutionEditorMode | null>(() => {
 
 const loesungBearbeitbar = computed(() => loesungEditorModus.value !== null)
 
+function loesungKorrigieren() {
+  const draftId = loesungsJob.value?.draftId
+  if (data.value?.aiMeta?.pipelineVersion === '2' && draftId) {
+    void navigateTo(`/musterloesungen/entwurf/${draftId}`)
+    return
+  }
+  if (hauptVorschau.value) assetOeffnen(hauptVorschau.value)
+}
+
 </script>
 
 <template>
@@ -534,7 +543,7 @@ const loesungBearbeitbar = computed(() => loesungEditorModus.value !== null)
             variante="sekundaer"
             icon="pen-to-square"
             title="Antworten korrigieren"
-            @click="assetOeffnen(hauptVorschau)"
+            @click="loesungKorrigieren"
           >
             <span class="sm:hidden">Korrigieren</span>
             <span class="hidden sm:inline">Antworten korrigieren</span>

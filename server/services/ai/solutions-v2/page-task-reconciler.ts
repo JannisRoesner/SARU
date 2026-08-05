@@ -65,7 +65,7 @@ function taskFromUnit(page: LayoutPageV2, unit: WorksheetTaskUnit, index: number
     confidence: unit.confidence,
     evidence: [...unit.evidence, 'page-aware V2 text segmentation'],
     targets: [],
-    candidateBank: unit.terms && unit.terms.length >= 2
+    candidateBank: unit.kind === 'image_labeling' && unit.terms && unit.terms.length >= 2
       ? candidateBankFromWords(unit.terms, unit.terms.length, 'instruction') ?? undefined
       : undefined,
     renderMode: 'appendix',
@@ -81,18 +81,41 @@ export function reconcileTasksWithPageLayoutV2(
   document: LayoutDocumentV2,
   inputTasks: TaskBlock[],
 ): TaskBlock[] {
-  const authoritative = inputTasks.map((task) => task.targets.length > 0
+  const normalized = inputTasks.map((task) => task.targets.length > 0
     ? {
         ...task,
         page: task.targets[0]!.page,
         bbox: task.targets[0]!.bbox ?? task.bbox,
       }
     : task)
-  const targetless = authoritative.filter((task) => task.targets.length === 0)
   const detected = document.pages.flatMap((page) => {
     const pageText = page.textSpans.map((span) => span.text).join(' ').replace(/\s+/g, ' ').trim()
     return detectWorksheetTasks(pageText).map((unit, index) => taskFromUnit(page, unit, index))
   })
+
+  // Ein Linien-Detektor kennt die fachlichen Aufgabengrenzen nicht. Bei
+  // mehreren offenen Aufgaben fasst der Legacy-Plan deshalb häufig sämtliche
+  // Schreib- und Tabellenlinien mehrerer Seiten in genau einen `p1-lines`-
+  // Task zusammen. Dieser Block ist keine autoritative Aufgabe: Ein Modell
+  // würde sonst jede physische Linie als eigene Antwort lösen und zusätzlich
+  // die tatsächlich erkannten Fragen beantworten. Solange keine eindeutige
+  // 1:1-Zuordnung existiert, bleiben die echten Aufgaben sicher im Anhang und
+  // Positionen können in der Prüfung bewusst ergänzt werden.
+  const ambiguousLineCarriers = new Set(
+    normalized.flatMap((task) => {
+      const lines = task.targets.filter((target) => target.kind === 'answer_line')
+      if (lines.length <= 1) return []
+      const pages = new Set(lines.map((target) => target.page))
+      const responseTasks = detected.filter((candidate) =>
+        pages.has(candidate.page) && candidate.kind === 'free_text_separate',
+      )
+      return responseTasks.length >= 2 && responseTasks.length !== lines.length
+        ? [task.id]
+        : []
+    }),
+  )
+  const authoritative = normalized.filter((task) => !ambiguousLineCarriers.has(task.id))
+  const targetless = authoritative.filter((task) => task.targets.length === 0)
 
   if (detected.length === 0) {
     return authoritative.map((task) => {

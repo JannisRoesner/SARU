@@ -56,8 +56,13 @@ const HANDLERS: Record<TaskKindV2, SolutionTaskHandlerV2> = {
   }),
   free_text: handler('free_text', {
     answerSchema: 'targeted_text',
-    promptRules: () => ['Formuliere einen knappen Erwartungshorizont, der in den vorgesehenen Bereich passt.'],
-    semanticFocus: 'Prüfe Relevanz, Widerspruchsfreiheit und Materialbezug; offene Antworten sind nicht eindeutig.',
+    promptRules: () => [
+      'Formuliere einen knappen Erwartungshorizont, der in den vorgesehenen Bereich passt.',
+      'Beantworte die gestellte Warum-/Wie-/Welche-Frage direkt und bilde eine nachvollziehbare fachliche Kausalkette.',
+      'Übernimm Mindestanzahlen und Umfangsvorgaben aus der Aufgabenstellung vollständig.',
+      'Vermeide spekulative Nebenfolgen und Aussagen, die für die Antwort nicht erforderlich oder fachlich nicht abgesichert sind.',
+    ],
+    semanticFocus: 'Prüfe Relevanz, verlangten Umfang, kausale Schlüssigkeit, Widerspruchsfreiheit und Materialbezug. Frei erfundene Folgen oder am Kern der Frage vorbeigehende Antworten müssen repariert werden.',
     validateValue: () => [],
   }),
   single_choice: handler('single_choice', {

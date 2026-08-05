@@ -130,6 +130,20 @@ function slotsForTask(
     return { slots, targets: canonicalTargets }
   }
 
+  // Eine Bild-/Diagrammzuordnung ohne lokalisierte Ziele ist nicht durch einen
+  // künstlichen Appendix-Slot lösbar: Bei fünf Begriffen würde das Modell sonst
+  // zusätzliche IDs erfinden oder lediglich eine wertlose Begriffsliste
+  // wiederholen. Der leere Vertrag löst gezielt TASK_TARGETS_MISSING aus und
+  // kann im V2-Review per visueller Erkennung oder manueller Markierung repariert
+  // werden.
+  if (
+    task.targets.length === 0
+    && (task.kind === 'matching_inline' || task.kind === 'diagram_completion')
+    && (task.candidateBank?.candidates.length ?? 0) >= 2
+  ) {
+    return { slots: [], targets: [] }
+  }
+
   const rawTargets = task.targets.length > 0 ? task.targets : [null]
   const seen = new Map<string, number>()
   const targets: AnswerTarget[] = []

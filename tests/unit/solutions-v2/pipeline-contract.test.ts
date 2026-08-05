@@ -6,7 +6,7 @@ import { parseSemanticVerdict, parseTaskSolutionJson } from '../../../server/ser
 import { buildSolutionPlanV2 } from '../../../server/services/ai/solutions-v2/plan-builder'
 import { reconcileTasksWithPageLayoutV2 } from '../../../server/services/ai/solutions-v2/page-task-reconciler'
 import { validateSolutionPlanV2 } from '../../../server/services/ai/solutions-v2/plan-validator'
-import { buildCandidateDisagreementRepairV2, buildTargetedCandidateRepairV2, runSolutionPipelineV2 } from '../../../server/services/ai/solutions-v2/pipeline'
+import { buildCandidateDisagreementRepairV2, buildTargetedCandidateRepairV2, runSolutionPipelineV2, taskSolutionSchema } from '../../../server/services/ai/solutions-v2/pipeline'
 import { projectSolutionForRenderV2 } from '../../../server/services/ai/solutions-v2/renderer-projection'
 import { validateSolvedTaskV2 } from '../../../server/services/ai/solutions-v2/solution-validator'
 import type { TaskBlock } from '../../../server/services/ai/solutions/types'
@@ -81,11 +81,11 @@ describe('solution pipeline v2 contract', () => {
       sourceFormat: 'pdf',
       tasks: [
         {
-          id: 'label-task',
+          id: 'first-open-task',
           page: 1,
           bbox: sharedBox,
-          instruction: 'Ordne die Begriffe zu.',
-          kind: 'matching_inline',
+          instruction: 'Erkläre den ersten Zusammenhang.',
+          kind: 'free_text_separate',
           confidence: 0.9,
           evidence: [],
           targets: [],
@@ -108,6 +108,33 @@ describe('solution pipeline v2 contract', () => {
     const targetIds = build.plan.tasks.map((task) => task.answerSlots[0]!.targetId)
     expect(new Set(targetIds).size).toBe(2)
     expect(validateSolutionPlanV2(build.plan)).toEqual([])
+  })
+
+  it('erfindet für eine Bildbeschriftung ohne Zielkoordinaten keinen Appendix-Slot', () => {
+    const build = buildSolutionPlanV2({
+      document: buildTextOnlyLayoutDocumentV2('Ordne A, B und C dem Bild zu.', 'missing-diagram-targets'),
+      sourceFormat: 'pdf',
+      tasks: [{
+        id: 'labels',
+        page: 1,
+        bbox: { x: 0.1, y: 0.2, w: 0.8, h: 0.1 },
+        instruction: 'Ordne A, B und C dem Bild zu.',
+        kind: 'matching_inline',
+        confidence: 0.9,
+        evidence: [],
+        targets: [],
+        candidateBank: {
+          id: 'labels-bank',
+          reusePolicy: 'once',
+          source: 'instruction',
+          candidates: ['A', 'B', 'C'].map((value) => ({ id: value, value, normalized: value.toLowerCase() })),
+        },
+        renderMode: 'appendix',
+      }],
+    })
+
+    expect(build.plan.tasks[0]!.answerSlots).toEqual([])
+    expect(validateSolutionPlanV2(build.plan).map((issue) => issue.code)).toContain('TASK_TARGETS_MISSING')
   })
 
   it('gruppiert Auswahlzellen pro Aussage und rendert nur die gewählte Zelle', () => {
@@ -172,6 +199,28 @@ describe('solution pipeline v2 contract', () => {
     })
     expect(issues.map((issue) => issue.code)).toEqual(
       expect.arrayContaining(['MODEL_EXTRA_TARGET', 'ANSWERS_PARTIAL']),
+    )
+  })
+
+  it('begrenzt bereits das Modell-Schema auf die IDs der aktuellen Aufgabe', () => {
+    const build = buildSolutionPlanV2({
+      document: buildTextOnlyLayoutDocumentV2('Frage', 'schema-ids'),
+      sourceFormat: 'pdf',
+      tasks: [freeTextTask('schema', 1, 0.5, 'Frage')],
+    })
+    const task = build.plan.tasks[0]!
+    const schema = taskSolutionSchema(task) as {
+      properties: {
+        taskId: { enum: string[] }
+        answers: { minItems: number; maxItems: number; items: { properties: { targetId: { enum: string[] } } } }
+      }
+    }
+
+    expect(schema.properties.taskId.enum).toEqual([task.taskId])
+    expect(schema.properties.answers.minItems).toBe(task.answerSlots.length)
+    expect(schema.properties.answers.maxItems).toBe(task.answerSlots.length)
+    expect(schema.properties.answers.items.properties.targetId.enum).toEqual(
+      task.answerSlots.map((slot) => slot.targetId),
     )
   })
 
@@ -519,6 +568,61 @@ describe('solution pipeline v2 contract', () => {
     expect(tasks.some((task) => task.instruction.includes('Methode A') && task.page === 1)).toBe(true)
     expect(tasks.find((task) => task.id === 'native')?.page).toBe(2)
     expect(tasks.find((task) => task.id === 'native')?.targets).toHaveLength(1)
+  })
+
+  it('verwirft einen seitenübergreifenden Linien-Sammelblock bei mehreren echten Aufgaben', () => {
+    const document = {
+      schemaVersion: 2 as const,
+      sourceHash: 'ambiguous-lines',
+      fullText: 'Erkläre Ursache A.\nNenne drei Beispiele.\nVervollständige das Glossar. Begriff Bedeutung Hoden',
+      pages: [
+        {
+          page: 1,
+          width: 300,
+          height: 400,
+          extractionQuality: 'text_layer' as const,
+          textSpans: [{
+            id: 'p1-text',
+            page: 1,
+            text: 'Erkläre Ursache A. Nenne drei Beispiele.',
+            bbox: { x: 0.1, y: 0.2, w: 0.8, h: 0.08 },
+          }],
+        },
+        {
+          page: 2,
+          width: 300,
+          height: 400,
+          extractionQuality: 'text_layer' as const,
+          textSpans: [{
+            id: 'p2-text',
+            page: 2,
+            text: 'Vervollständige das Glossar. Begriff Bedeutung Hoden',
+            bbox: { x: 0.1, y: 0.2, w: 0.8, h: 0.08 },
+          }],
+        },
+      ],
+    }
+    const carrier: TaskBlock = {
+      id: 'p1-lines',
+      page: 1,
+      bbox: { x: 0.1, y: 0.4, w: 0.8, h: 0.03 },
+      instruction: 'Erkläre Ursache A.',
+      kind: 'free_text_inplace',
+      confidence: 0.7,
+      evidence: ['6 answer line blocks detected'],
+      renderMode: 'overlay',
+      targets: Array.from({ length: 6 }, (_, index) => ({
+        id: `line-${index}`,
+        kind: 'answer_line' as const,
+        page: index < 4 ? 1 : 2,
+        bbox: { x: 0.1, y: 0.4 + (index % 4) * 0.05, w: 0.8, h: 0.02 },
+      })),
+    }
+
+    const tasks = reconcileTasksWithPageLayoutV2(document, [carrier])
+    expect(tasks.some((task) => task.id === 'p1-lines')).toBe(false)
+    expect(tasks.filter((task) => task.kind === 'free_text_separate').length).toBeGreaterThanOrEqual(2)
+    expect(tasks.every((task) => task.targets.length === 0)).toBe(true)
   })
 
   it('unterscheidet keine Aufgaben von einer Aufgabe ohne Ziel', () => {

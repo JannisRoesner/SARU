@@ -3,9 +3,9 @@ import { getSolutionTaskHandlerV2 } from './handler-registry'
 
 export const V2_PROMPT_VERSIONS = {
   layout: 'solution-v2-layout-1',
-  solve: 'solution-v2-solve-2',
+  solve: 'solution-v2-solve-3',
   candidateAssignment: 'solution-v2-candidate-assignment-1',
-  semantic: 'solution-v2-semantic-2',
+  semantic: 'solution-v2-semantic-3',
   visual: 'solution-v2-visual-1',
 } as const
 
@@ -14,10 +14,13 @@ export const TASK_SOLVER_SYSTEM_PROMPT = `Du löst genau eine Teilaufgabe eines 
 Verbindliche Regeln:
 - Antworte ausschließlich mit einem vollständigen JSON-Objekt.
 - Verwende ausschließlich die vorgegebenen taskId und targetId-Werte.
+- Kopiere taskId und targetId bytegenau; kürze, übersetze oder nummeriere sie nicht um.
 - Erfinde keine IDs, Koordinaten, Seiten, Felder oder zusätzlichen Ziele.
 - Gib für jeden Answer-Slot genau eine fachlich passende Antwort zurück.
 - Halte die angegebene Maximallänge ein.
 - Wenn Kandidaten vorgegeben sind, verwende ausschließlich diese.
+- Beantworte nur die konkrete Aufgabenstellung. Erfinde keine Ursachen, Folgen oder Fakten, die weder aus dem Material noch aus gesichertem Fachwissen folgen.
+- Erfülle ausdrücklich verlangte Anzahlen und Formate (z. B. drei Begriffe oder drei Sätze).
 
 Schema:
 {"taskId":"vorgegebene-id","answers":[{"targetId":"vorgegebene-id","value":"Antwort"}],"uncertainties":[]}
@@ -60,7 +63,10 @@ export function buildTaskSolverPrompt(
   if (options.repairIssues?.length) {
     lines.push('', 'Der vorige Versuch wurde abgelehnt. Korrigiere ausschließlich diese Punkte:', ...options.repairIssues)
   }
-  lines.push('', 'Liefere ausschließlich das vollständige JSON-Objekt.')
+  lines.push(
+    '',
+    'Liefere ausschließlich das vollständige JSON-Objekt. Die Antworten müssen in derselben Reihenfolge wie die Answer-Slots stehen und deren IDs bytegenau übernehmen.',
+  )
   return lines.join('\n')
 }
 
@@ -104,6 +110,7 @@ export function buildCandidateAssignmentVerifierPrompt(
 export const SEMANTIC_VERIFIER_SYSTEM_PROMPT = `Du prüfst genau eine bereits gelöste Teilaufgabe eines Unterrichtsmaterials.
 
 Du änderst keine Antworten. Du bewertest nur, ob jede Antwort zur konkreten Aufgabenstellung und zu ihrem Slot-Kontext passt.
+Prüfe ausdrücklich, ob die Antwort die verlangte Anzahl, den verlangten Umfang und die kausale Fragestellung erfüllt. Markiere frei erfundene oder fachlich nicht ableitbare Aussagen als repair.
 Antworte ausschließlich als vollständiges JSON:
 {"taskId":"id","verdict":"pass|repair|uncertain","issues":[{"targetId":"id-oder-null","code":"SEMANTIC_MISMATCH","message":"kurze Begründung"}]}
 

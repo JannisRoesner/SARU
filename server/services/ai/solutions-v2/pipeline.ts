@@ -35,61 +35,68 @@ interface CompletionTotals {
   outputTokens: number
 }
 
-const TASK_SOLUTION_SCHEMA: Record<string, unknown> = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['taskId', 'answers', 'uncertainties'],
-  properties: {
-    taskId: { type: 'string' },
-    answers: {
-      type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['targetId', 'value'],
-        properties: {
-          targetId: { type: 'string' },
-          value: { type: 'string' },
-          rankings: {
-            type: 'array',
-            items: {
-              type: 'object',
-              additionalProperties: false,
-              required: ['candidateId', 'score'],
-              properties: {
-                candidateId: { type: 'string' },
-                score: { type: 'number', minimum: 0, maximum: 1 },
+export function taskSolutionSchema(task: TaskSpec): Record<string, unknown> {
+  const targetIds = task.answerSlots.map((slot) => slot.targetId)
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['taskId', 'answers', 'uncertainties'],
+    properties: {
+      taskId: { type: 'string', enum: [task.taskId] },
+      answers: {
+        type: 'array',
+        minItems: targetIds.length,
+        maxItems: targetIds.length,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['targetId', 'value'],
+          properties: {
+            targetId: { type: 'string', enum: targetIds },
+            value: { type: 'string' },
+            rankings: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['candidateId', 'score'],
+                properties: {
+                  candidateId: { type: 'string' },
+                  score: { type: 'number', minimum: 0, maximum: 1 },
+                },
               },
             },
           },
         },
       },
+      uncertainties: { type: 'array', items: { type: 'string' } },
     },
-    uncertainties: { type: 'array', items: { type: 'string' } },
-  },
+  }
 }
 
-const SEMANTIC_VERDICT_SCHEMA: Record<string, unknown> = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['taskId', 'verdict', 'issues'],
-  properties: {
-    taskId: { type: 'string' },
-    verdict: { type: 'string', enum: ['pass', 'repair', 'uncertain'] },
-    issues: {
-      type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['targetId', 'code', 'message'],
-        properties: {
-          targetId: { type: ['string', 'null'] },
-          code: { type: 'string' },
-          message: { type: 'string' },
+function semanticVerdictSchema(task: TaskSpec): Record<string, unknown> {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['taskId', 'verdict', 'issues'],
+    properties: {
+      taskId: { type: 'string', enum: [task.taskId] },
+      verdict: { type: 'string', enum: ['pass', 'repair', 'uncertain'] },
+      issues: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['targetId', 'code', 'message'],
+          properties: {
+            targetId: { type: ['string', 'null'], enum: [null, ...task.answerSlots.map((slot) => slot.targetId)] },
+            code: { type: 'string' },
+            message: { type: 'string' },
+          },
         },
       },
     },
-  },
+  }
 }
 
 function blocking(issues: QualityIssueV2[]): boolean {
@@ -286,7 +293,7 @@ async function solveTask(
           temperature: 0,
           maxOutputTokens: Math.min(6000, Math.max(900, 350 + promptTask.answerSlots.length * 180)),
           jsonMode: true,
-          jsonSchema: { name: 'solution_task_v2', schema: TASK_SOLUTION_SCHEMA },
+          jsonSchema: { name: 'solution_task_v2', schema: taskSolutionSchema(promptTask) },
         },
       )
     } catch (error) {
@@ -403,7 +410,7 @@ async function verifyCandidateAssignment(
           temperature: 0,
           maxOutputTokens: Math.min(5000, Math.max(900, 350 + task.answerSlots.length * 140)),
           jsonMode: true,
-          jsonSchema: { name: 'solution_candidate_assignment_v2', schema: TASK_SOLUTION_SCHEMA },
+          jsonSchema: { name: 'solution_candidate_assignment_v2', schema: taskSolutionSchema(task) },
         },
       )
     } catch (error) {
@@ -509,7 +516,7 @@ async function verifyTask(
         temperature: 0,
         maxOutputTokens: 1200,
         jsonMode: true,
-        jsonSchema: { name: 'solution_semantic_verdict_v2', schema: SEMANTIC_VERDICT_SCHEMA },
+        jsonSchema: { name: 'solution_semantic_verdict_v2', schema: semanticVerdictSchema(task) },
       },
     )
   } catch (error) {
@@ -572,7 +579,10 @@ export async function runSolutionPipelineV2(args: {
 }): Promise<PipelineV2Result> {
   const planIssues = validateSolutionPlanV2(args.build.plan)
   const totals: CompletionTotals = { model: args.model, inputTokens: 0, outputTokens: 0 }
-  if (blocking(planIssues)) {
+  // Globale Planfehler verhindern den gesamten Lauf. Aufgabenbezogene Fehler
+  // (z. B. fünf nicht lokalisierte Diagrammziele) sperren nur diese Aufgabe;
+  // alle übrigen Teilaufgaben bleiben lösbar und im Prüfentwurf editierbar.
+  if (planIssues.some((issue) => issue.blocking && !issue.taskId)) {
     const projection = projectSolutionForRenderV2({
       plan: args.build.plan,
       rendererTasks: args.build.rendererTasks,
@@ -593,6 +603,7 @@ export async function runSolutionPipelineV2(args: {
   const structuralIssues: QualityIssueV2[] = []
   const semanticIssues: QualityIssueV2[] = []
   for (const task of args.build.plan.tasks) {
+    if (planIssues.some((issue) => issue.blocking && issue.taskId === task.taskId)) continue
     const pagePart = args.pageParts.find((candidate) => candidate.page === task.page)?.part
     let result = await solveTask(task, args.settings, args.model, pagePart, totals)
     if (!result.solved) {
@@ -725,7 +736,7 @@ export async function runSolutionPipelineV2(args: {
     blocking: true,
   }))
   const qualityReport: QualityReportV2 = {
-    plan: 'passed',
+    plan: blocking(planIssues) ? 'failed' : 'passed',
     structure: structuralIssues.length > 0 ? 'failed' : 'passed',
     semantic: semanticIssues.length > 0 ? 'failed' : 'passed',
     render: renderIssues.length > 0 ? 'failed' : 'passed',

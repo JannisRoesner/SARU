@@ -12,6 +12,7 @@ export default defineEventHandler(async (event) => {
     .select({
       id: aiSolutionRuns.id,
       jobId: aiSolutionRuns.jobId,
+      publishedMaterialId: aiJobs.resultMaterialId,
       stage: aiSolutionRuns.stage,
       plan: aiSolutionRuns.plan,
       solution: aiSolutionRuns.solution,
@@ -28,4 +29,3 @@ export default defineEventHandler(async (event) => {
   if (!draft) throw notFound('Der Prüfentwurf')
   return { draft: { ...draft, hasFile: Boolean(draft.hasFile) } }
 })
-

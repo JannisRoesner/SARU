@@ -4,7 +4,7 @@ import { aiJobs, aiSolutionRuns, materialVariants } from '../../../database/sche
 import { useDatabase } from '../../../database/client'
 import { getMaterialDetail } from '../../../repositories/material.repository'
 import { appError } from '../../../utils/errors'
-import { addFileAsset, addRelation, createMaterial } from '../../material.service'
+import { addFileAsset, addRelation, createMaterial, deleteAsset, updateMaterial } from '../../material.service'
 import { deleteFile, resolveStoragePath, storeFile } from '../../storage.service'
 import { getAiSettings } from '../../settings.service'
 import { candidateBankFromWords } from '../solutions/candidate-bank'
@@ -521,23 +521,26 @@ export async function publishSolutionDraft(
     .join('\n')
     .slice(0, 18_000)
   const now = new Date()
-  const solutionMaterialId = await createMaterial({
-    title: `Musterlösung – ${material.title}`,
-    description: `Manuell geprüfter KI-Entwurf zum Material „${material.title}“.`,
-    content: `> **Von künstlicher Intelligenz erstellt und manuell freigegeben.**\n\n${content}`,
-    materialType: 'musterloesung',
-    schoolForm: material.schoolForm,
-    pages: material.pages,
-    author: `KI · ${row.job.model}`,
-    origin: 'ki',
-    aiMeta: {
+  const rendered = projectSolutionForRenderV2({
+    plan,
+    rendererTasks: rendererTasksFromPlanV2(plan),
+    solvedTasks,
+  }).solution
+  const existingSolution = row.job.resultMaterialId
+    ? await getMaterialDetail(row.job.resultMaterialId)
+    : null
+  if (row.job.resultMaterialId && !existingSolution) {
+    throw appError('NICHT_GEFUNDEN', 'Die veröffentlichte Musterlösung wurde nicht gefunden.')
+  }
+  const aiMeta = {
+      ...existingSolution?.aiMeta,
       provider: row.job.provider,
       model: row.job.model,
-      generatedAt: now.toISOString(),
+      generatedAt: existingSolution?.aiMeta?.generatedAt ?? now.toISOString(),
       sourceMaterialId: material.id,
-      promptVersion: 'solution-v2-solve-1',
+      promptVersion: 'solution-v2-solve-3',
       pipelineVersion: '2',
-      solutionSchemaVersion: 2,
+      solutionSchemaVersion: 2 as const,
       reviewed: true,
       reviewedAt: now.toISOString(),
       reviewedBy: userId,
@@ -545,35 +548,64 @@ export async function publishSolutionDraft(
       sourceVariantId: sourceVariant?.id ?? null,
       sourceAssetId: sourceAsset?.id ?? null,
       fillStrategy,
-      structuredSolution: projectSolutionForRenderV2({
-        plan,
-        rendererTasks: rendererTasksFromPlanV2(plan),
-        solvedTasks,
-      }).solution,
+      structuredSolution: { ...rendered, schemaVersion: 2 as const },
       solutionPlan: plan,
       renderManifest: row.run.renderManifest,
       qualityReport: quality,
-    },
-    subjectIds: material.subjects.map((subject) => subject.id),
-    topicIds: material.topics.map((topic) => topic.id),
-    competencyIds: material.competencies.map((competency) => competency.id),
-    learningGroupIds: material.learningGroups.map((group) => group.id),
-    gradeLevels: material.gradeLevels,
-    tagNames: [...material.tags.map((tag) => tag.name), 'KI-Musterlösung'],
-  }, userId)
-  const [variant] = await useDatabase()
-    .select({ id: materialVariants.id })
-    .from(materialVariants)
-    .where(eq(materialVariants.materialId, solutionMaterialId))
-    .limit(1)
+      editedAt: existingSolution ? now.toISOString() : undefined,
+      editedBy: existingSolution ? userId : undefined,
+    }
+  const materialContent = `> **Von künstlicher Intelligenz erstellt und manuell freigegeben.**\n\n${content}`
+  const solutionMaterialId = existingSolution?.id ?? await createMaterial({
+      title: `Musterlösung – ${material.title}`,
+      description: `Manuell geprüfter KI-Entwurf zum Material „${material.title}“.`,
+      content: materialContent,
+      materialType: 'musterloesung',
+      schoolForm: material.schoolForm,
+      pages: material.pages,
+      author: `KI · ${row.job.model}`,
+      origin: 'ki',
+      aiMeta,
+      subjectIds: material.subjects.map((subject) => subject.id),
+      topicIds: material.topics.map((topic) => topic.id),
+      competencyIds: material.competencies.map((competency) => competency.id),
+      learningGroupIds: material.learningGroups.map((group) => group.id),
+      gradeLevels: material.gradeLevels,
+      tagNames: [...material.tags.map((tag) => tag.name), 'KI-Musterlösung'],
+    }, userId)
+  if (existingSolution) {
+    await updateMaterial(solutionMaterialId, {
+      description: `Manuell geprüfter KI-Entwurf zum Material „${material.title}“.`,
+      content: materialContent,
+      author: `KI · ${row.job.model}`,
+      aiMeta,
+    })
+  }
+  const targetMaterial = existingSolution ?? await getMaterialDetail(solutionMaterialId)
+  const targetVariant = targetMaterial?.variants.find((candidate) => candidate.isDefault)
+    ?? targetMaterial?.variants[0]
+  const variant = targetVariant
+    ? { id: targetVariant.id }
+    : (await useDatabase()
+        .select({ id: materialVariants.id })
+        .from(materialVariants)
+        .where(eq(materialVariants.materialId, solutionMaterialId))
+        .limit(1))[0]
   if (!variant) throw appError('KI_FEHLER', 'Die Lösungsvariante konnte nicht angelegt werden.')
   const buffer = await readFile(resolveStoragePath(row.run.draftStorageKey))
-  await addFileAsset(
+  const newAssetId = await addFileAsset(
     variant.id,
     { buffer, fileName: row.run.draftFileName },
     { role: 'haupt', title: 'Musterlösung (manuell freigegeben)' },
   )
-  await addRelation(material.id, solutionMaterialId, 'musterloesung', 'KI-Entwurf manuell freigegeben')
+  if (existingSolution) {
+    const oldMain = targetVariant?.assets.find((asset) =>
+      asset.id !== newAssetId && asset.kind === 'datei' && asset.role === 'haupt',
+    ) ?? targetVariant?.assets.find((asset) => asset.id !== newAssetId && asset.kind === 'datei')
+    if (oldMain) await deleteAsset(oldMain.id)
+  } else {
+    await addRelation(material.id, solutionMaterialId, 'musterloesung', 'KI-Entwurf manuell freigegeben')
+  }
   await useDatabase().transaction(async (tx) => {
     await tx
       .update(aiJobs)
@@ -603,6 +635,9 @@ export async function publishSolutionDraft(
 
 export async function discardSolutionDraft(runId: string, userId: string): Promise<void> {
   const row = await ownedRun(runId, userId)
+  if (row.job.resultMaterialId) {
+    throw appError('UNGUELTIGE_EINGABE', 'Eine bereits veröffentlichte Musterlösung kann hier nicht verworfen werden.')
+  }
   if (row.run.draftStorageKey) await deleteFile(row.run.draftStorageKey)
   await useDatabase().transaction(async (tx) => {
     await tx

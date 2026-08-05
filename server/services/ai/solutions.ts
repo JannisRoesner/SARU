@@ -1009,7 +1009,7 @@ export async function generateSolution(
           sourceMaterialId: materialId,
           sourceVariantId: variant?.id ?? null,
           sourceAssetId: source?.id ?? null,
-          promptVersion: 'solution-v2-solve-1',
+          promptVersion: V2_PROMPT_VERSIONS.solve,
           pipelineVersion: SOLUTION_PIPELINE_VERSION,
           solutionSchemaVersion: 2,
           reviewed: false,

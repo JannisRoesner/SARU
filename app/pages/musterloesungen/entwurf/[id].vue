@@ -36,6 +36,7 @@ interface PlanTask {
 interface DraftResponse {
   draft: {
     id: string
+    publishedMaterialId: string | null
     plan: { document: { pages: Array<{ page: number }> }; tasks: PlanTask[] }
     solution: DraftTask[]
     issues: Array<{ code: string; message: string; taskId?: string; targetIds?: string[] }>
@@ -59,6 +60,7 @@ const aktiveAufgabe = ref<string | null>(null)
 const markierAufgabe = ref<string | null>(null)
 const meldung = ref<string | null>(null)
 const fehler = ref<string | null>(null)
+const istVeroeffentlicht = computed(() => Boolean(data.value?.draft.publishedMaterialId))
 
 watch(
   () => data.value?.draft,
@@ -258,10 +260,19 @@ async function speichern() {
 }
 
 async function veroeffentlichen() {
-  if (!window.confirm('Diesen Entwurf trotz der angezeigten KI-Warnungen fachlich freigeben?')) return
+  const frage = istVeroeffentlicht.value
+    ? 'Die korrigierte Fassung neu rendern und in die bestehende Musterlösung übernehmen?'
+    : 'Diesen Entwurf trotz der angezeigten KI-Warnungen fachlich freigeben?'
+  if (!window.confirm(frage)) return
   laeuft.value = true
   fehler.value = null
   try {
+    // Freigeben ist eine speichernde Aktion: Korrekturen dürfen nicht davon
+    // abhängen, ob zuvor zusätzlich „Neu rendern“ geklickt wurde.
+    await $fetch(`/api/solution-drafts/${id.value}`, {
+      method: 'PATCH',
+      body: { solvedTasks: solvedTasks.value },
+    })
     const result = await $fetch<{ solutionMaterialId: string }>(
       `/api/solution-drafts/${id.value}/publish`,
       { method: 'POST' },
@@ -295,9 +306,13 @@ async function verwerfen() {
 
     <header>
       <p class="seitenkopf-kicker">KI-Musterlösung V2</p>
-      <h1 class="text-3xl tracking-tight text-ink">Prüfentwurf kontrollieren</h1>
+      <h1 class="text-3xl tracking-tight text-ink">
+        {{ istVeroeffentlicht ? 'Musterlösung korrigieren' : 'Prüfentwurf kontrollieren' }}
+      </h1>
       <p class="mt-2 max-w-3xl text-sm text-ink-muted">
-        Dieser Lauf wurde nicht automatisch veröffentlicht. Korrigiere die Antworten und gib ihn anschließend bewusst frei.
+        {{ istVeroeffentlicht
+          ? 'Korrigiere Antworten oder erzeuge einzelne Aufgaben neu. Beim Übernehmen wird dieselbe Musterlösung aktualisiert.'
+          : 'Dieser Lauf wurde nicht automatisch veröffentlicht. Korrigiere die Antworten und gib ihn anschließend bewusst frei.' }}
       </p>
     </header>
 
@@ -394,10 +409,16 @@ async function verwerfen() {
                 <UiTextarea v-model="kandidatentexte[task.taskId]" :rows="3" :disabled="laeuft" />
               </UiField>
 
-              <div class="space-y-2 rounded-lg border border-line p-3">
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                  <p class="text-sm font-semibold text-ink">Zielbereiche</p>
-                  <div class="flex flex-wrap gap-2">
+              <details
+                class="group rounded-lg border border-line"
+                data-testid="target-areas"
+              >
+                <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm font-semibold text-ink">
+                  <span>Zielbereiche <span class="font-normal text-ink-muted">({{ task.answerSlots.length }})</span></span>
+                  <UiIcon name="chevron-down" class="transition-transform group-open:rotate-180" fest />
+                </summary>
+                <div class="space-y-2 border-t border-line p-3">
+                  <div class="flex flex-wrap justify-end gap-2">
                     <UiButton
                       variante="sekundaer"
                       groesse="sm"
@@ -413,47 +434,47 @@ async function verwerfen() {
                       @click="zielHinzufuegen(task)"
                     >Ziel hinzufügen</UiButton>
                   </div>
-                </div>
-                <p v-if="markierAufgabe === task.taskId" class="text-xs text-primary">
-                  Klicke links auf die gewünschte Position im Dokument.
-                </p>
-                <p v-if="task.answerSlots.length === 0" class="text-xs text-danger">
-                  Noch kein Zielbereich vorhanden.
-                </p>
-                <div
-                  v-for="(slot, slotIndex) in task.answerSlots"
-                  :key="slot.targetId"
-                  class="space-y-2 rounded border border-line bg-surface-muted p-2"
-                >
-                  <div class="flex items-center justify-between gap-2">
-                    <span class="text-xs font-medium text-ink">Ziel {{ slotIndex + 1 }} · Seite {{ slot.page }}</span>
-                    <UiButton
-                      variante="still"
-                      groesse="sm"
-                      icon="trash"
-                      :disabled="laeuft"
-                      @click="zielEntfernen(task, slot.targetId)"
-                    >Entfernen</UiButton>
-                  </div>
-                  <div class="grid grid-cols-5 gap-2">
-                    <UiField label="Seite">
-                      <UiInput v-model="slot.page" type="number" min="1" :disabled="laeuft" />
-                    </UiField>
-                    <UiField v-for="key in (['x', 'y', 'w', 'h'] as const)" :key="key" :label="key">
-                      <UiInput
-                        type="number"
-                        step="0.001"
-                        :model-value="slot.bbox?.[key] ?? ''"
+                  <p v-if="markierAufgabe === task.taskId" class="text-xs text-primary">
+                    Klicke links auf die gewünschte Position im Dokument.
+                  </p>
+                  <p v-if="task.answerSlots.length === 0" class="text-xs text-danger">
+                    Noch kein Zielbereich vorhanden.
+                  </p>
+                  <div
+                    v-for="(slot, slotIndex) in task.answerSlots"
+                    :key="slot.targetId"
+                    class="space-y-2 rounded border border-line bg-surface-muted p-2"
+                  >
+                    <div class="flex items-center justify-between gap-2">
+                      <span class="text-xs font-medium text-ink">Ziel {{ slotIndex + 1 }} · Seite {{ slot.page }}</span>
+                      <UiButton
+                        variante="still"
+                        groesse="sm"
+                        icon="trash"
                         :disabled="laeuft"
-                        @update:model-value="koordinateSetzen(slot, key, $event)"
-                      />
+                        @click="zielEntfernen(task, slot.targetId)"
+                      >Entfernen</UiButton>
+                    </div>
+                    <div class="grid grid-cols-5 gap-2">
+                      <UiField label="Seite">
+                        <UiInput v-model="slot.page" type="number" min="1" :disabled="laeuft" />
+                      </UiField>
+                      <UiField v-for="key in (['x', 'y', 'w', 'h'] as const)" :key="key" :label="key">
+                        <UiInput
+                          type="number"
+                          step="0.001"
+                          :model-value="slot.bbox?.[key] ?? ''"
+                          :disabled="laeuft"
+                          @update:model-value="koordinateSetzen(slot, key, $event)"
+                        />
+                      </UiField>
+                    </div>
+                    <UiField label="Kontext">
+                      <UiInput v-model="slot.promptContext" :disabled="laeuft" />
                     </UiField>
                   </div>
-                  <UiField label="Kontext">
-                    <UiInput v-model="slot.promptContext" :disabled="laeuft" />
-                  </UiField>
                 </div>
-              </div>
+              </details>
 
               <UiField
                 v-for="answer in solvedTask(task.taskId)?.answers ?? []"
@@ -484,10 +505,10 @@ async function verwerfen() {
       </div>
 
       <div class="sticky bottom-4 flex flex-wrap justify-end gap-2 rounded-xl border border-line bg-surface/95 p-3 shadow-lg backdrop-blur">
-        <UiButton variante="gefahr" icon="trash" :disabled="laeuft" @click="verwerfen">Verwerfen</UiButton>
+        <UiButton v-if="!istVeroeffentlicht" variante="gefahr" icon="trash" :disabled="laeuft" @click="verwerfen">Verwerfen</UiButton>
         <UiButton variante="sekundaer" icon="floppy-disk" :laedt="laeuft" @click="speichern">Neu rendern</UiButton>
         <UiButton variante="primaer" icon="circle-check" :disabled="laeuft" @click="veroeffentlichen">
-          Fachlich freigeben
+          {{ istVeroeffentlicht ? 'Änderungen übernehmen' : 'Fachlich freigeben' }}
         </UiButton>
       </div>
     </template>
