@@ -78,8 +78,11 @@ Verbindliche Regeln:
 Schema:
 {"taskId":"id","answers":[{"targetId":"id","value":"Kandidat"}],"uncertainties":[]}`
 
-export function buildCandidateAssignmentVerifierPrompt(task: TaskSpec): string {
-  return [
+export function buildCandidateAssignmentVerifierPrompt(
+  task: TaskSpec,
+  options: { repairIssues?: string[] } = {},
+): string {
+  const lines = [
     `taskId: ${task.taskId}`,
     `Aufgabenstellung: ${task.instruction}`,
     `Kandidaten: ${JSON.stringify(task.candidateBank?.candidates.map((candidate) => candidate.value) ?? [])}`,
@@ -87,8 +90,15 @@ export function buildCandidateAssignmentVerifierPrompt(task: TaskSpec): string {
       targetId: slot.targetId,
       context: slot.promptContext,
     })))}`,
-    'Ordne unabhängig zu und liefere ausschließlich das vollständige JSON.',
-  ].join('\n')
+  ]
+  if (options.repairIssues?.length) {
+    lines.push(
+      'Der vorige Kontrollversuch war strukturell ungültig. Korrigiere diese Punkte:',
+      ...options.repairIssues,
+    )
+  }
+  lines.push('Ordne unabhängig zu und liefere ausschließlich das vollständige JSON.')
+  return lines.join('\n')
 }
 
 export const SEMANTIC_VERIFIER_SYSTEM_PROMPT = `Du prüfst genau eine bereits gelöste Teilaufgabe eines Unterrichtsmaterials.

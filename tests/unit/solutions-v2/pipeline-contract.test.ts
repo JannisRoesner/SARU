@@ -340,6 +340,7 @@ describe('solution pipeline v2 contract', () => {
     })
     const task = build.plan.tasks[0]!
     const ids = task.answerSlots.map((slot) => slot.targetId)
+    expect(task.answerSlots[0]!.promptContext).toBe('Die ___ scheint.')
     const solution = (values: string[], selectedIds = ids) => ({
       taskId: task.taskId,
       answers: selectedIds.map((targetId, index) => ({ targetId, value: values[index]! })),
@@ -347,6 +348,7 @@ describe('solution pipeline v2 contract', () => {
     })
     const responses = [
       solution(['Sterne', 'Mond', 'Sonne']),
+      solution(['Sonne', 'Sonne', 'Sterne']),
       solution(['Sonne', 'Mond', 'Sterne']),
       solution(['Sonne', 'Sterne'], [ids[0]!, ids[2]!]),
       solution(['Sonne', 'Mond', 'Sterne']),
@@ -395,8 +397,10 @@ describe('solution pipeline v2 contract', () => {
         'Mond',
         'Sterne',
       ])
-      expect(fetchMock).toHaveBeenCalledTimes(5)
-      const repairPrompt = JSON.stringify(requestBodies[2])
+      expect(fetchMock).toHaveBeenCalledTimes(6)
+      const verifierRetryPrompt = JSON.stringify(requestBodies[2])
+      expect(verifierRetryPrompt).toContain('mehrfach verwendet')
+      const repairPrompt = JSON.stringify(requestBodies[3])
       expect(repairPrompt).toContain(ids[0]!)
       expect(repairPrompt).not.toContain(ids[1]!)
       expect(repairPrompt).toContain(ids[2]!)

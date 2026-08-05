@@ -375,71 +375,73 @@ async function verifyCandidateAssignment(
     }
   }
 
-  let completion
-  try {
-    completion = await chatCompletion(
-      settings,
-      [
-        { role: 'system', parts: [{ type: 'text', text: CANDIDATE_ASSIGNMENT_VERIFIER_SYSTEM_PROMPT }] },
+  let independent: SolvedTask | null = null
+  let lastFailure = 'Die unabhängige Kandidatenzuordnung lieferte kein vollständiges Ergebnis.'
+  const retryIssues: string[] = []
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let completion
+    try {
+      completion = await chatCompletion(
+        settings,
+        [
+          { role: 'system', parts: [{ type: 'text', text: CANDIDATE_ASSIGNMENT_VERIFIER_SYSTEM_PROMPT }] },
+          {
+            role: 'user',
+            parts: [
+              {
+                type: 'text',
+                text: buildCandidateAssignmentVerifierPrompt(task, {
+                  repairIssues: attempt > 0 ? retryIssues : [],
+                }),
+              },
+              ...(pagePart ? [pagePart] : []),
+            ],
+          },
+        ],
         {
-          role: 'user',
-          parts: [
-            { type: 'text', text: buildCandidateAssignmentVerifierPrompt(task) },
-            ...(pagePart ? [pagePart] : []),
-          ],
+          model,
+          temperature: 0,
+          maxOutputTokens: Math.min(5000, Math.max(900, 350 + task.answerSlots.length * 140)),
+          jsonMode: true,
+          jsonSchema: { name: 'solution_candidate_assignment_v2', schema: TASK_SOLUTION_SCHEMA },
         },
-      ],
-      {
-        model,
-        temperature: 0,
-        maxOutputTokens: Math.min(5000, Math.max(900, 350 + task.answerSlots.length * 140)),
-        jsonMode: true,
-        jsonSchema: { name: 'solution_candidate_assignment_v2', schema: TASK_SOLUTION_SCHEMA },
-      },
-    )
-  } catch (error) {
+      )
+    } catch (error) {
+      lastFailure = error instanceof Error
+        ? `Die unabhängige Kandidatenzuordnung konnte nicht gelesen werden: ${error.message}`
+        : 'Die unabhängige Kandidatenzuordnung konnte nicht gelesen werden.'
+      retryIssues.splice(0, retryIssues.length, lastFailure)
+      continue
+    }
+    totals.model = completion.model
+    totals.inputTokens += completion.inputTokens ?? 0
+    totals.outputTokens += completion.outputTokens ?? 0
+    const parsed = completion.finishReason === 'length'
+      ? null
+      : parseTaskSolutionJson(completion.text)
+    if (!parsed) {
+      lastFailure = 'Die unabhängige Kandidatenzuordnung lieferte kein vollständiges Ergebnis.'
+      retryIssues.splice(0, retryIssues.length, lastFailure)
+      continue
+    }
+    const candidate = applyCandidateRankings(task, parsed)
+    const validationIssues = validateSolvedTaskV2(task, candidate)
+    if (blocking(validationIssues)) {
+      lastFailure = `Die unabhängige Kandidatenzuordnung war strukturell ungültig: ${validationIssues.map((issue) => issue.message).join(' ')}`
+      retryIssues.splice(0, retryIssues.length, ...validationIssues.map((issue) => issue.message))
+      continue
+    }
+    independent = candidate
+    break
+  }
+  if (!independent) {
     return {
       verdict: 'uncertain',
       independent: null,
       issues: [{
         code: 'SEMANTIC_QA_UNCERTAIN',
-        message: error instanceof Error
-          ? `Die unabhängige Kandidatenzuordnung konnte nicht gelesen werden: ${error.message}`
-          : 'Die unabhängige Kandidatenzuordnung konnte nicht gelesen werden.',
+        message: lastFailure,
         taskId: task.taskId,
-        blocking: true,
-      }],
-    }
-  }
-  totals.model = completion.model
-  totals.inputTokens += completion.inputTokens ?? 0
-  totals.outputTokens += completion.outputTokens ?? 0
-  const parsed = completion.finishReason === 'length'
-    ? null
-    : parseTaskSolutionJson(completion.text)
-  if (!parsed) {
-    return {
-      verdict: 'uncertain',
-      independent: null,
-      issues: [{
-        code: 'SEMANTIC_QA_UNCERTAIN',
-        message: 'Die unabhängige Kandidatenzuordnung lieferte kein vollständiges Ergebnis.',
-        taskId: task.taskId,
-        blocking: true,
-      }],
-    }
-  }
-  const independent = applyCandidateRankings(task, parsed)
-  const validationIssues = validateSolvedTaskV2(task, independent)
-  if (blocking(validationIssues)) {
-    return {
-      verdict: 'uncertain',
-      independent,
-      issues: [{
-        code: 'SEMANTIC_QA_UNCERTAIN',
-        message: `Die unabhängige Kandidatenzuordnung war strukturell ungültig: ${validationIssues.map((issue) => issue.message).join(' ')}`,
-        taskId: task.taskId,
-        targetIds: validationIssues.flatMap((issue) => issue.targetIds ?? []),
         blocking: true,
       }],
     }

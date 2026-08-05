@@ -64,7 +64,13 @@ function promptContextFor(
   const explicit = `${target.leftText ?? ''} ___ ${target.rightText ?? ''}`.trim()
   const markedRow = markedRowContextForTarget(document, target.page, target.bbox)
   const nearby = nearbyTextForTarget(document, target.page, target.bbox)
-  return [explicit !== '___' ? explicit : '', markedRow, nearby, target.cellRef ? `Zelle ${target.cellRef}` : '']
+  // Genau eine Kontextquelle verwenden. Das frühere Aneinanderhängen von
+  // explicit + markedRow + nearby vervielfachte Satzteile und verwirrte den
+  // unabhängigen Prüfer trotz korrekter Erstlösung.
+  const primary = explicit !== '___'
+    ? explicit
+    : markedRow || nearby || task.instruction.trim()
+  return [primary, target.cellRef ? `Zelle ${target.cellRef}` : '']
     .filter(Boolean)
     .join(' | ')
     .slice(0, 900)
