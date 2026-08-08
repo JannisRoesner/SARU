@@ -50,7 +50,10 @@ import { ensureExtractedText } from './document-text'
 import { analyzeDocxTargets } from './solutions/docx-analyzer'
 import { logPipeline } from './solutions/logging'
 import { buildSolutionPlan } from './solutions/orchestrator'
-import { detectPdfLayoutTargets } from './solutions/pdf-answer-lines'
+import {
+  detectPdfDiagramLabelTargets,
+  detectPdfLayoutTargets,
+} from './solutions/pdf-answer-lines'
 import { fusePdfClozeTargets } from './solutions/pdf-cloze-target-fusion'
 import { repairCandidateBankViaVision } from './solutions/repair/candidate-bank-vision'
 import { repairDocxTargetsViaVision } from './solutions/repair/docx-targets-vision'
@@ -396,6 +399,45 @@ export async function generateSolution(
   let { tasks, candidateBank, blankCount } = plan
   const { document: documentModel, numberMatching } = plan
 
+  // Einfache Diagramm-Führungslinien sind im PDF bereits präzise als
+  // Vektoren vorhanden. Nutze diese Geometrie vor Vision, aber ausschließlich
+  // bei einer eindeutigen 1:1-Anzahl mit der Wortliste.
+  if (source && PDF_EXTENSIONS.has(source.extension)) {
+    for (const task of tasks) {
+      const expected = task.candidateBank?.candidates.length ?? 0
+      if (task.kind !== 'matching_inline' || task.targets.length > 0 || expected < 2) continue
+      try {
+        const targets = await detectPdfDiagramLabelTargets(source.buffer, {
+          page: task.page,
+          expectedCount: expected,
+        })
+        if (targets.length !== expected) continue
+        tasks = tasks.map((candidate) => candidate.id === task.id
+          ? {
+              ...candidate,
+              kind: 'diagram_completion' as const,
+              targets,
+              confidence: Math.max(candidate.confidence, 0.94),
+              evidence: [
+                ...candidate.evidence,
+                `${targets.length} native PDF diagram leader targets`,
+              ],
+              renderMode: 'overlay' as const,
+              renderConfidence: 'high' as const,
+              requiresVisionTargetRepair: false,
+            }
+          : candidate)
+        log.info('PDF-Diagrammziele aus Vektorlinien erkannt', {
+          taskId: task.id,
+          page: task.page,
+          targets: targets.length,
+        })
+      } catch (error) {
+        log.warn('Native PDF-Diagrammziel-Erkennung fehlgeschlagen', error)
+      }
+    }
+  }
+
   let pdfLayoutVisionChecked = false
   let pdfLayoutRepairedViaVision = false
   if (
@@ -483,11 +525,18 @@ export async function generateSolution(
               : visual.tasks.length === 0
                 ? 'vision layout conflict: visual check returned no tasks'
                 : 'vision layout conflict: visual plan disagrees with native plan'
-            tasks = tasks.map((task) => ({
-              ...task,
-              confidence: Math.min(task.confidence, 0.55),
-              evidence: [...task.evidence, reason],
-            }))
+            tasks = tasks.map((task) => {
+              const hasAuthoritativeTargets = task.targets.some((target) =>
+                target.source !== 'vision' && Boolean(target.bbox || target.nativeRef),
+              )
+              return {
+                ...task,
+                confidence: hasAuthoritativeTargets
+                  ? task.confidence
+                  : Math.min(task.confidence, 0.55),
+                evidence: [...task.evidence, reason],
+              }
+            })
           }
           log.info('PDF-Layoutplan nach Vision-Check unverändert', {
             verdict: visual?.verdict ?? null,
@@ -496,11 +545,18 @@ export async function generateSolution(
           })
         }
       } catch (error) {
-        tasks = tasks.map((task) => ({
-          ...task,
-          confidence: Math.min(task.confidence, 0.55),
-          evidence: [...task.evidence, 'vision layout conflict: check unavailable'],
-        }))
+        tasks = tasks.map((task) => {
+          const hasAuthoritativeTargets = task.targets.some((target) =>
+            target.source !== 'vision' && Boolean(target.bbox || target.nativeRef),
+          )
+          return {
+            ...task,
+            confidence: hasAuthoritativeTargets
+              ? task.confidence
+              : Math.min(task.confidence, 0.55),
+            evidence: [...task.evidence, 'vision layout conflict: check unavailable'],
+          }
+        })
         log.warn('PDF-Layout-Vision-Check fehlgeschlagen – nativer Plan bleibt aktiv', error)
       }
     }

@@ -31,15 +31,23 @@ function unionBBox(boxes: SolutionBBox[]): SolutionBBox {
 
 function instructionBBox(page: LayoutPageV2, instruction: string, fallbackY: number): SolutionBBox {
   const instructionTokens = tokens(instruction)
-  const hits = page.textSpans.filter((span) => {
+  const scored = page.textSpans.map((span) => {
     const spanTokens = tokens(span.text)
-    for (const token of spanTokens) if (instructionTokens.has(token)) return true
-    return false
-  })
-  if (hits.length === 0) return { x: 0.05, y: fallbackY, w: 0.9, h: 0.08 }
-  const firstY = Math.min(...hits.map((span) => span.bbox.y))
-  const local = hits.filter((span) => span.bbox.y <= firstY + 0.1).map((span) => span.bbox)
-  const bbox = unionBBox(local.length > 0 ? local : [hits[0]!.bbox])
+    let overlap = 0
+    for (const token of spanTokens) if (instructionTokens.has(token)) overlap += 1
+    return {
+      span,
+      overlap,
+      score: spanTokens.size > 0 ? overlap / spanTokens.size : 0,
+    }
+  }).filter((hit) => hit.overlap >= 2 || hit.score >= 0.6)
+  if (scored.length === 0) return { x: 0.05, y: fallbackY, w: 0.9, h: 0.08 }
+
+  const seed = [...scored].sort((a, b) => b.overlap - a.overlap || b.score - a.score)[0]!
+  const local = scored
+    .filter((hit) => Math.abs(hit.span.bbox.y - seed.span.bbox.y) <= 0.085)
+    .map((hit) => hit.span.bbox)
+  const bbox = unionBBox(local.length > 0 ? local : [seed.span.bbox])
   return {
     x: Math.max(0.02, bbox.x - 0.01),
     y: Math.max(0, bbox.y - 0.01),
@@ -89,7 +97,14 @@ export function reconcileTasksWithPageLayoutV2(
       }
     : task)
   const detected = document.pages.flatMap((page) => {
-    const pageText = page.textSpans.map((span) => span.text).join(' ').replace(/\s+/g, ' ').trim()
+    // PDF-Textobjekte sind nicht zwingend in Lesereihenfolge gespeichert.
+    // Für die Aufgabensegmentierung ist die sichtbare Reihenfolge verbindlich.
+    const pageText = [...page.textSpans]
+      .sort((a, b) => a.bbox.y - b.bbox.y || a.bbox.x - b.bbox.x)
+      .map((span) => span.text)
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim()
     return detectWorksheetTasks(pageText).map((unit, index) => taskFromUnit(page, unit, index))
   })
 

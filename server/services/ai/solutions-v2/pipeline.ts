@@ -348,7 +348,7 @@ interface CandidateAssignmentVerificationV2 {
 
 function requiresIndependentCandidateAssignment(task: TaskSpec): boolean {
   return Boolean(
-    task.kind === 'cloze' &&
+    ['cloze', 'matching', 'table_completion', 'diagram_labeling'].includes(task.kind) &&
     task.candidateBank?.reusePolicy === 'once' &&
     task.candidateBank.candidates.length === task.answerSlots.length,
   )
@@ -364,10 +364,10 @@ async function verifyCandidateAssignment(
 ): Promise<CandidateAssignmentVerificationV2 | null> {
   if (!requiresIndependentCandidateAssignment(task)) return null
 
-  const missingContext = task.answerSlots.filter((slot) => {
+  const missingContext = task.kind === 'cloze' ? task.answerSlots.filter((slot) => {
     const context = slot.promptContext.trim()
     return !context.includes('___') || !/\p{L}/u.test(context.replace('___', ''))
-  })
+  }) : []
   if (missingContext.length > 0) {
     return {
       verdict: 'uncertain',
@@ -469,7 +469,7 @@ async function verifyCandidateAssignment(
     independent,
     issues: [{
       code: 'CANDIDATE_ASSIGNMENT_DISAGREEMENT',
-      message: `Erstlösung und unabhängige Kontrolle widersprechen sich bei ${mismatches.length} Lücke(n).`,
+      message: `Erstlösung und unabhängige Kontrolle widersprechen sich bei ${mismatches.length} Ziel(en).`,
       taskId: task.taskId,
       targetIds: mismatches.map((slot) => slot.targetId),
       blocking: true,

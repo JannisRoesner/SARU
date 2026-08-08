@@ -114,7 +114,10 @@ function filterAnswersForTasks(
   const inplaceTargetIds = new Set(
     tasks
       .filter(
-        (task) => task.kind === 'free_text_inplace' || task.kind === 'matching_table',
+        (task) =>
+          task.kind === 'free_text_inplace' ||
+          task.kind === 'matching_table' ||
+          task.kind === 'diagram_completion',
       )
       .flatMap((task) => task.targets)
       .filter(
@@ -123,7 +126,9 @@ function filterAnswersForTasks(
           target.kind === 'text_field' ||
           target.kind === 'content_control' ||
           target.kind === 'table_cell' ||
-          target.kind === 'choice_cell',
+          target.kind === 'choice_cell' ||
+          target.kind === 'shape_box' ||
+          target.kind === 'shape_oval',
       )
       .map((target) => target.id),
   )

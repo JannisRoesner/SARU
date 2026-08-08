@@ -3,9 +3,9 @@ import { getSolutionTaskHandlerV2 } from './handler-registry'
 
 export const V2_PROMPT_VERSIONS = {
   layout: 'solution-v2-layout-1',
-  solve: 'solution-v2-solve-3',
-  candidateAssignment: 'solution-v2-candidate-assignment-1',
-  semantic: 'solution-v2-semantic-3',
+  solve: 'solution-v2-solve-4',
+  candidateAssignment: 'solution-v2-candidate-assignment-2',
+  semantic: 'solution-v2-semantic-4',
   visual: 'solution-v2-visual-1',
 } as const
 
@@ -21,6 +21,9 @@ Verbindliche Regeln:
 - Wenn Kandidaten vorgegeben sind, verwende ausschließlich diese.
 - Beantworte nur die konkrete Aufgabenstellung. Erfinde keine Ursachen, Folgen oder Fakten, die weder aus dem Material noch aus gesichertem Fachwissen folgen.
 - Erfülle ausdrücklich verlangte Anzahlen und Formate (z. B. drei Begriffe oder drei Sätze).
+- Bei Gedankenexperimenten bleibt alles unverändert, was die Aufgabenstellung nicht ausdrücklich verändert. Leite Folgen ausschließlich über die genannte Änderung her.
+- Verwechsle ein Warnsignal oder Symptom nicht mit der zugrunde liegenden Verletzung bzw. Ursache. Unterstelle keine Verhaltens- oder Motivationsänderung, wenn sie nicht genannt ist.
+- Wenn ein bestimmtes Sprachregister verlangt ist (z. B. umgangssprachlich), zählen Fachbegriffe oder bloße Wiederholungen des Ausgangsbegriffs nicht als passende Beispiele.
 
 Schema:
 {"taskId":"vorgegebene-id","answers":[{"targetId":"vorgegebene-id","value":"Antwort"}],"uncertainties":[]}
@@ -35,6 +38,8 @@ export function buildTaskSolverPrompt(
   const candidates = task.candidateBank?.candidates ?? []
   const slots = task.answerSlots.map((slot) => ({
     targetId: slot.targetId,
+    page: slot.page,
+    bbox: slot.bbox,
     context: slot.promptContext,
     valueType: slot.valueType,
     allowedValues: slot.allowedValues ?? null,
@@ -70,15 +75,16 @@ export function buildTaskSolverPrompt(
   return lines.join('\n')
 }
 
-export const CANDIDATE_ASSIGNMENT_VERIFIER_SYSTEM_PROMPT = `Du kontrollierst einen Lückentext durch eine vollständig unabhängige Neuzuordnung.
+export const CANDIDATE_ASSIGNMENT_VERIFIER_SYSTEM_PROMPT = `Du kontrollierst eine Zuordnungsaufgabe durch eine vollständig unabhängige Neuzuordnung.
 
-Die erste Lösung wird dir absichtlich nicht gezeigt. Löse jeden Slot ausschließlich aus seinem Satzkontext und der verbindlichen Wortliste.
+Die erste Lösung wird dir absichtlich nicht gezeigt. Löse jeden Slot ausschließlich aus seinem Textkontext bzw. bei Diagrammen aus sichtbarer Zielposition, Führungslinie und Bildstruktur sowie der verbindlichen Wortliste.
 
 Verbindliche Regeln:
 - Antworte ausschließlich mit einem vollständigen JSON-Objekt.
 - Verwende jede vorgegebene taskId und targetId exakt.
 - Verwende ausschließlich die Kandidatenwerte und jeden davon genau einmal.
-- Setze jeden Kandidaten gedanklich für ___ ein und prüfe Grammatik sowie Bedeutung.
+- Bei Lückentexten: Setze jeden Kandidaten gedanklich für ___ ein und prüfe Grammatik sowie Bedeutung.
+- Bei Diagrammen: Verfolge jede sichtbare Führungslinie bis zum bezeichneten Bildelement; ordne nicht nur nach räumlicher Nähe.
 - Erfinde keine IDs, Ziele oder zusätzlichen Antworten.
 
 Schema:
@@ -94,6 +100,8 @@ export function buildCandidateAssignmentVerifierPrompt(
     `Kandidaten: ${JSON.stringify(task.candidateBank?.candidates.map((candidate) => candidate.value) ?? [])}`,
     `Slots: ${JSON.stringify(task.answerSlots.map((slot) => ({
       targetId: slot.targetId,
+      page: slot.page,
+      bbox: slot.bbox,
       context: slot.promptContext,
     })))}`,
   ]
@@ -111,6 +119,7 @@ export const SEMANTIC_VERIFIER_SYSTEM_PROMPT = `Du prüfst genau eine bereits ge
 
 Du änderst keine Antworten. Du bewertest nur, ob jede Antwort zur konkreten Aufgabenstellung und zu ihrem Slot-Kontext passt.
 Prüfe ausdrücklich, ob die Antwort die verlangte Anzahl, den verlangten Umfang und die kausale Fragestellung erfüllt. Markiere frei erfundene oder fachlich nicht ableitbare Aussagen als repair.
+Prüfe jede Kausalstufe einzeln: Was wurde in der Aufgabe verändert, was bleibt gleich, und folgt jede behauptete Wirkung daraus? Eine unbelegte Änderung von Motivation oder Verhalten ist repair. Unterscheide Warnsignal/Symptom und zugrunde liegenden Schaden. Prüfe verlangte Sprachregister; Fachsprache zählt nicht als Umgangssprache.
 Antworte ausschließlich als vollständiges JSON:
 {"taskId":"id","verdict":"pass|repair|uncertain","issues":[{"targetId":"id-oder-null","code":"SEMANTIC_MISMATCH","message":"kurze Begründung"}]}
 

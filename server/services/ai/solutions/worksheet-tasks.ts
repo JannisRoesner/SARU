@@ -43,7 +43,16 @@ export function splitWorksheetUnits(text: string): string[] {
   const units: string[] = []
   for (const part of parts) {
     const trimmed = trimTrailingMeta(part.trim())
-    if (trimmed.length >= 20) units.push(trimmed)
+    if (trimmed.length < 20) continue
+
+    // Formulierungen wie „Erkläre auch …“ setzen die unmittelbar vorherige
+    // Frage fort. In flachen PDF-Textebenen stehen sie oft nach einem Punkt und
+    // wurden deshalb fälschlich als eigene Aufgabe gezählt.
+    if (/^(?:Erkläre|Beschreibe|Nenne)\s+auch\b/iu.test(trimmed) && units.length > 0) {
+      units[units.length - 1] = `${units[units.length - 1]} ${trimmed}`
+      continue
+    }
+    units.push(trimmed)
   }
   return units.length > 0 ? units : [normalized]
 }
@@ -192,7 +201,9 @@ export function detectOpenEndedTaskUnits(text: string): WorksheetTaskUnit[] {
     const pos = estimatePage(unit, text)
     out.push({
       kind: 'open_ended',
-      instruction: unit.slice(0, 280),
+      // Zusammengesetzte Aufgaben (z. B. Hauptfrage + „Erkläre auch …“ +
+      // Mindestumfang) müssen vollständig im Lösungsauftrag erhalten bleiben.
+      instruction: unit.slice(0, 600),
       page: pos.page,
       yNorm: pos.yNorm,
       confidence: hasOpenOp ? 0.88 : 0.8,

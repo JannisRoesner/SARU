@@ -4,6 +4,7 @@ import { chatCompletion, supportsNativePdf, type ChatPart } from '../../client'
 import type { SolutionBBox } from '../../document-fill'
 import { rasterizePdf } from '../../rasterize'
 import type { AnswerTarget, AnswerTargetKind, TaskBlock, TaskKind } from '../types'
+import { detectPdfDiagramLabelTargets } from '../pdf-answer-lines'
 import { detectWorksheetTasks } from '../worksheet-tasks'
 
 const MAX_VISION_PAGES = 200
@@ -398,6 +399,40 @@ export async function repairPdfLayoutViaVision(args: {
   focus?: PdfLayoutVisionFocus
   expectedDiagramTargetCount?: number
 }): Promise<PdfVisionLayoutResult | null> {
+  // Auch der Reparatur-Workflow eines bereits gespeicherten Prüfentwurfs soll
+  // präzise PDF-Vektoren nutzen. Vision bleibt nur der Fallback, falls die
+  // erwartete Anzahl nicht eindeutig aus Führungslinien ableitbar ist.
+  if (args.focus === 'diagram_targets') {
+    const task = args.tasks.find((candidate) => candidate.kind === 'matching_inline')
+    const expected = args.expectedDiagramTargetCount ?? task?.candidateBank?.candidates.length ?? 0
+    if (task && expected >= 2) {
+      try {
+        const targets = await detectPdfDiagramLabelTargets(args.buffer, {
+          page: task.page,
+          expectedCount: expected,
+        })
+        if (targets.length === expected) {
+          return {
+            verdict: 'repair',
+            rawTaskCount: 1,
+            tasks: [{
+              ...task,
+              kind: 'diagram_completion',
+              targets,
+              confidence: Math.max(task.confidence, 0.94),
+              evidence: [...task.evidence, `${targets.length} native PDF diagram leader targets`],
+              renderMode: 'overlay',
+              renderConfidence: 'high',
+              requiresVisionTargetRepair: false,
+            }],
+          }
+        }
+      } catch {
+        // Der vorhandene Vision-Pfad darunter bleibt der sichere Fallback.
+      }
+    }
+  }
+
   if (supportsNativePdf(args.settings.provider)) {
     const completion = await chatCompletion(
       args.settings,
@@ -436,7 +471,14 @@ export async function repairPdfLayoutViaVision(args: {
     return result
   }
 
-  const pages = await rasterizePdf(args.buffer, { maxPages: MAX_VISION_PAGES, scale: 1.6 })
+  const focusedPages = args.focus && args.focus !== 'general'
+    ? [...new Set(args.tasks.map((task) => task.page))].filter((page) => page > 0)
+    : []
+  const pages = focusedPages.length > 0
+    ? (await Promise.all(
+        focusedPages.map((page) => rasterizePdf(args.buffer, { page, scale: 2.2 })),
+      )).flat()
+    : await rasterizePdf(args.buffer, { maxPages: MAX_VISION_PAGES, scale: 1.6 })
   if (pages.length === 0) return null
   const results: PdfVisionLayoutResult[] = []
   for (let start = 0; start < pages.length; start += 3) {

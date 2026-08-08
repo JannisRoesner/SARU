@@ -48,8 +48,10 @@ describe('worksheet-tasks (AB Hoden)', () => {
     expect(tasks.some((t) => t.kind === 'image_labeling')).toBe(true)
     expect(tasks.some((t) => t.kind === 'glossary')).toBe(true)
     const open = tasks.filter((t) => t.kind === 'open_ended')
-    expect(open.length).toBeGreaterThanOrEqual(3)
-    expect(open.some((t) => /warum hängen sie/i.test(t.instruction))).toBe(true)
+    expect(open).toHaveLength(3)
+    expect(open.some((t) =>
+      /warum hängen sie/i.test(t.instruction) && /bei Kälte geschützt/i.test(t.instruction),
+    )).toBe(true)
   })
 
   it('filtert Glossar-Header-Gap Begriff|Bedeutung', () => {

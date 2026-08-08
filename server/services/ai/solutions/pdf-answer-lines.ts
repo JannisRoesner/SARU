@@ -135,6 +135,150 @@ function asNumberArray(value: unknown): number[] | null {
   return null
 }
 
+interface PdfDiagramLeader {
+  outerX: number
+  outerY: number
+  side: 'left' | 'right'
+}
+
+interface PdfDiagramSegment {
+  start: [number, number]
+  end: [number, number]
+}
+
+/**
+ * Erkennt einfache Beschriftungslinien eines Diagramms direkt aus dem
+ * PDF-Vektorstrom. Die Heuristik ist bewusst konservativ: Sie liefert nur
+ * Ziele, wenn exakt die erwartete Anzahl kurzer, schräger Einzelsegmente in
+ * einem gemeinsamen vertikalen Diagrammband gefunden wird.
+ */
+export async function detectPdfDiagramLabelTargets(
+  source: Buffer,
+  options: { page: number; expectedCount: number },
+): Promise<AnswerTarget[]> {
+  if (options.page < 1 || options.expectedCount < 2 || options.expectedCount > 20) return []
+
+  const pdfjs = await loadPdfjs()
+  const loadingTask = pdfjs.getDocument({
+    data: new Uint8Array(source),
+    useSystemFonts: false,
+    disableFontFace: true,
+    verbosity: 0,
+  })
+
+  try {
+    const document = await loadingTask.promise
+    if (options.page > document.numPages) return []
+    const page = await document.getPage(options.page)
+    const viewport = page.getViewport({ scale: 1 })
+    const opList = await page.getOperatorList()
+    const segments: PdfDiagramSegment[] = []
+    let matrix: PdfMatrix = [...IDENTITY_MATRIX]
+    const matrixStack: PdfMatrix[] = []
+
+    for (let i = 0; i < opList.fnArray.length; i++) {
+      const fn = opList.fnArray[i]!
+      const args = opList.argsArray[i]
+      if (fn === pdfjs.OPS.save) {
+        matrixStack.push([...matrix])
+        continue
+      }
+      if (fn === pdfjs.OPS.restore) {
+        matrix = matrixStack.pop() ?? [...IDENTITY_MATRIX]
+        continue
+      }
+      if (fn === pdfjs.OPS.transform) {
+        const values = asNumberArray(args)
+        if (values && values.length >= 6) {
+          matrix = multiplyMatrices(matrix, values.slice(0, 6) as PdfMatrix)
+        }
+        continue
+      }
+      if (fn !== pdfjs.OPS.constructPath) continue
+
+      const pathArgs = Array.isArray(args) ? args : []
+      const paintOperation = pathArgs[0]
+      const isStroked =
+        paintOperation === pdfjs.OPS.stroke ||
+        paintOperation === pdfjs.OPS.closeStroke ||
+        paintOperation === pdfjs.OPS.fillStroke ||
+        paintOperation === pdfjs.OPS.eoFillStroke
+      if (!isStroked) continue
+
+      const groups = Array.isArray(pathArgs[1]) ? pathArgs[1] : []
+      if (groups.length !== 1) continue
+      const path = asNumberArray(groups[0])
+      // pdf.js: [moveTo, x0, y0, lineTo, x1, y1]
+      if (!path || path.length !== 6 || path[0] !== 0 || path[3] !== 1) continue
+      const start = transformPoint(matrix, path[1]!, path[2]!)
+      const end = transformPoint(matrix, path[4]!, path[5]!)
+      const dx = end[0] - start[0]
+      const dy = end[1] - start[1]
+      const length = Math.hypot(dx, dy)
+      if (length < 35 || length > 140 || Math.abs(dx) < 30 || Math.abs(dy) < 4) continue
+
+      segments.push({ start, end })
+    }
+    page.cleanup()
+
+    if (segments.length !== options.expectedCount) return []
+    const endpointXs = segments
+      .flatMap((segment) => [segment.start[0], segment.end[0]])
+      .sort((a, b) => a - b)
+    const centerX = endpointXs[Math.floor(endpointXs.length / 2)] ?? viewport.width / 2
+    const leaders: PdfDiagramLeader[] = segments.map((segment) => {
+      const outer = Math.abs(segment.start[0] - centerX) >= Math.abs(segment.end[0] - centerX)
+        ? segment.start
+        : segment.end
+      return {
+        outerX: outer[0],
+        outerY: outer[1],
+        side: outer[0] < centerX ? 'left' : 'right',
+      }
+    })
+    if (!leaders.some((leader) => leader.side === 'left') || !leaders.some((leader) => leader.side === 'right')) {
+      return []
+    }
+    const ys = leaders.map((leader) => leader.outerY)
+    if (Math.max(...ys) - Math.min(...ys) > viewport.height * 0.22) return []
+
+    const sideRank = new Map<PdfDiagramLeader, number>()
+    for (const side of ['left', 'right'] as const) {
+      [...leaders]
+        .filter((leader) => leader.side === side)
+        .sort((a, b) => b.outerY - a.outerY)
+        .forEach((leader, index) => sideRank.set(leader, index + 1))
+    }
+
+    return [...leaders]
+      .sort((a, b) => b.outerY - a.outerY || a.outerX - b.outerX)
+      .map((leader, index) => {
+        const outerX = leader.outerX / viewport.width
+        const x = leader.side === 'left'
+          ? Math.max(0.04, outerX - 0.2)
+          : Math.max(0.04, outerX - 0.01)
+        const right = leader.side === 'left'
+          ? Math.min(0.96, outerX + 0.01)
+          : Math.min(0.96, outerX + 0.28)
+        return {
+          id: `pdf-diagram-leader-p${options.page}-${index + 1}`,
+          kind: 'shape_box' as const,
+          page: options.page,
+          bbox: {
+            x,
+            y: Math.max(0, 1 - leader.outerY / viewport.height - 0.018),
+            w: Math.max(0.04, right - x),
+            h: 0.036,
+          },
+          leftText: `Beschriftungsziel ${leader.side} ${sideRank.get(leader) ?? index + 1}`,
+          source: 'native' as const,
+        }
+      })
+  } finally {
+    await loadingTask.destroy()
+  }
+}
+
 /**
  * Liest gestrichelte Horizontallinien aus dem pdf.js-Operatorstrom.
  * Nutzt constructPath (moderne pdf.js) und klassische moveTo/lineTo/stroke.

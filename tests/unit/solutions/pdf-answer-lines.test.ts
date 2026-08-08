@@ -13,6 +13,7 @@ import {
 import {
   clusterPdfAnswerLines,
   detectPdfAnswerLines,
+  detectPdfDiagramLabelTargets,
   detectPdfLayoutTargets,
   extractPdfHorizontalStrokes,
 } from '../../../server/services/ai/solutions/pdf-answer-lines'
@@ -178,7 +179,40 @@ async function choiceTablePdf(): Promise<Buffer> {
   return Buffer.from(await pdf.save())
 }
 
+async function diagramLeaderPdf(): Promise<Buffer> {
+  const pdf = await PDFDocument.create()
+  const page = pdf.addPage([595.28, 841.89])
+  const leaders = [
+    { x: 160, y: 510, dx: 80, dy: -18 },
+    { x: 165, y: 455, dx: 80, dy: 8 },
+    { x: 340, y: 520, dx: 80, dy: 14 },
+    { x: 335, y: 485, dx: 90, dy: -12 },
+    { x: 345, y: 445, dx: 85, dy: -16 },
+  ]
+  for (const leader of leaders) {
+    page.pushOperators(
+      pushGraphicsState(),
+      concatTransformationMatrix(1, 0, 0, 1, leader.x, leader.y),
+      moveTo(0, 0),
+      lineTo(leader.dx, leader.dy),
+      stroke(),
+      popGraphicsState(),
+    )
+  }
+  return Buffer.from(await pdf.save())
+}
+
 describe('detectPdfAnswerLines', () => {
+  it('erkennt eine eindeutige Menge nativer Diagramm-Führungslinien', async () => {
+    const source = await diagramLeaderPdf()
+    const targets = await detectPdfDiagramLabelTargets(source, { page: 1, expectedCount: 5 })
+
+    expect(targets).toHaveLength(5)
+    expect(targets.every((target) => target.kind === 'shape_box' && target.source === 'native')).toBe(true)
+    expect(targets.every((target) => target.bbox && target.bbox.x >= 0 && target.bbox.x + target.bbox.w <= 1)).toBe(true)
+    expect(await detectPdfDiagramLabelTargets(source, { page: 1, expectedCount: 4 })).toEqual([])
+  })
+
   it('erkennt die transformierten breiten Schreiblinien aus AB-Rasieren', async () => {
     const source = await rasierenWritingLinesPdf()
     const detected = await detectPdfAnswerLines(source)

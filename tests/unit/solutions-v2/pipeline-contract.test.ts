@@ -50,6 +50,91 @@ describe('solution pipeline v2 contract', () => {
     ))).toBe(true)
   })
 
+  it('erzwingt Mindestumfang und verlangtes Sprachregister bei Freitext', () => {
+    const document = buildTextOnlyLayoutDocumentV2('Nenne mindestens drei umgangssprachliche Begriffe.', 'register')
+    const build = buildSolutionPlanV2({
+      document,
+      sourceFormat: 'pdf',
+      tasks: [{
+        id: 'register-task',
+        page: 1,
+        bbox: { x: 0.1, y: 0.2, w: 0.8, h: 0.08 },
+        instruction: 'Nenne mindestens drei umgangssprachliche Begriffe für Hoden.',
+        kind: 'free_text_separate',
+        confidence: 0.9,
+        evidence: [],
+        targets: [],
+        renderMode: 'appendix',
+      }],
+    })
+    const task = build.plan.tasks[0]!
+    const slot = task.answerSlots[0]!
+    const invalid = solutionTaskHandlersV2.free_text.validateValue(task, slot, 'Klöten, Testis')
+    expect(invalid.map((issue) => issue.code)).toEqual(
+      expect.arrayContaining(['ANSWER_MINIMUM_NOT_MET', 'ANSWER_REGISTER_MISMATCH']),
+    )
+    expect(solutionTaskHandlersV2.free_text.validateValue(task, slot, 'Klöten, Eier, Kronjuwelen')).toEqual([])
+  })
+
+  it('erzwingt die verlangte Mindestzahl an Sätzen', () => {
+    const document = buildTextOnlyLayoutDocumentV2('Erkläre den Zusammenhang in mindestens drei Sätzen.', 'sentences')
+    const build = buildSolutionPlanV2({
+      document,
+      sourceFormat: 'pdf',
+      tasks: [{
+        id: 'sentence-task',
+        page: 1,
+        bbox: { x: 0.1, y: 0.2, w: 0.8, h: 0.08 },
+        instruction: 'Erkläre den Zusammenhang in mindestens drei Sätzen.',
+        kind: 'free_text_separate',
+        confidence: 0.9,
+        evidence: [],
+        targets: [],
+        renderMode: 'appendix',
+      }],
+    })
+    const task = build.plan.tasks[0]!
+    const slot = task.answerSlots[0]!
+    expect(solutionTaskHandlersV2.free_text.validateValue(task, slot, 'Satz eins. Satz zwei.'))
+      .toEqual(expect.arrayContaining([expect.objectContaining({ code: 'ANSWER_MINIMUM_NOT_MET' })]))
+    expect(solutionTaskHandlersV2.free_text.validateValue(task, slot, 'Satz eins. Satz zwei. Satz drei.')).toEqual([])
+  })
+
+  it('blockiert unbelegte Verhaltenssprünge im Hoden-Gedankenexperiment', () => {
+    const document = buildTextOnlyLayoutDocumentV2('Stelle dir vor, ein Tritt würde weniger weh tun.', 'causal')
+    const build = buildSolutionPlanV2({
+      document,
+      sourceFormat: 'pdf',
+      tasks: [{
+        id: 'causal-task',
+        page: 1,
+        bbox: { x: 0.1, y: 0.2, w: 0.8, h: 0.08 },
+        instruction: 'Stelle dir vor, ein Tritt in die Hoden würde weniger weh tun. Warum wäre das schlecht für die Familienplanung und den Fortbestand der Menschheit?',
+        kind: 'free_text_separate',
+        confidence: 0.9,
+        evidence: [],
+        targets: [],
+        renderMode: 'appendix',
+      }],
+    })
+    const task = build.plan.tasks[0]!
+    const slot = task.answerSlots[0]!
+    const invalid = solutionTaskHandlersV2.free_text.validateValue(
+      task,
+      slot,
+      'Die Jungen wären sexuell aktiver und gingen eher eine Schwangerschaft ein.',
+    )
+    expect(invalid.map((issue) => issue.code)).toEqual(expect.arrayContaining([
+      'ANSWER_UNSUPPORTED_CAUSAL_LEAP',
+      'ANSWER_CAUSAL_CHAIN_INCOMPLETE',
+    ]))
+    expect(solutionTaskHandlersV2.free_text.validateValue(
+      task,
+      slot,
+      'Der schwächere Warnschmerz kann Verletzungen unbemerkt lassen. Hodengewebe und Spermienbildung können geschädigt werden. Dadurch kann die Fruchtbarkeit sinken.',
+    )).toEqual([])
+  })
+
   it('weist offenen Schreibbereichen stabile IDs und eigenen Aufgabenbezug zu', () => {
     const document = buildTextOnlyLayoutDocumentV2(
       '1. Worauf ist beim Rasieren zu achten?\n2. Wie funktioniert Epilieren?',
