@@ -51,30 +51,77 @@ const materialienMock = [
   },
 ]
 
+const lehrwerkInhaltMock = [
+  {
+    label: 'Lehrerband, Serviceband & Lösungen',
+    icon: 'book-bookmark',
+    items: [
+      {
+        t: 'Serviceband Biologie 8',
+        b: 'Serviceband',
+        materialType: 'zusatzmaterial' as const,
+        ext: 'PDF',
+      },
+      {
+        t: 'Lösungsheft Biologie 8',
+        b: 'Lösungsbuch',
+        materialType: 'loesungsbuch' as const,
+        ext: 'PDF',
+      },
+    ],
+  },
+  {
+    label: 'Kopiervorlagen & Aufgaben',
+    icon: 'file-lines',
+    items: [
+      {
+        t: 'Photosynthese — Arbeitsblatt',
+        b: 'Arbeitsblatt',
+        materialType: 'arbeitsblatt' as const,
+        ext: 'PDF',
+      },
+      {
+        t: 'Lichtreaktion — Stationen',
+        b: 'Arbeitsblatt',
+        materialType: 'arbeitsblatt' as const,
+        ext: 'PDF',
+      },
+    ],
+  },
+]
+
 const features = [
   {
     id: 'materialien',
     icon: 'folder-open',
     fensterTitel: 'Materialien',
     titel: 'Materialien sammeln',
-    text: 'Arbeitsblätter, Präsentationen, Moodle-Kursarchive (.mbz / .imscc), H5P-Pakete und weitere Anhänge — mit Varianten, Favoriten und Einordnung nach Fach und Jahrgang — alles an einem Ort.',
+    text: 'Arbeitsblätter, Präsentationen, Moodle-Kursarchive (.mbz / .imscc), H5P-Pakete und weitere Anhänge — mit Varianten, Favoriten und Einordnung nach Fach und Jahrgang. Lehrwerke haben eine eigene Übersicht.',
     seite: 'rechts' as const,
+  },
+  {
+    id: 'lehrwerke',
+    icon: 'book',
+    fensterTitel: 'Lehrwerk',
+    titel: 'Lehrwerke führen',
+    text: 'Schulbuch, Serviceband, Lösungsheft und Kopiervorlagen an einem Ort. Zugeordnete Materialien erscheinen in Gruppen — vom Lehrerband bis zu den Arbeitsblättern. Beim Stapel-Upload kannst du alles automatisch dem Lehrwerk zuordnen.',
+    seite: 'links' as const,
   },
   {
     id: 'material-detail',
     icon: 'pen-to-square',
     fensterTitel: 'Material',
     titel: 'Materialiendetails pflegen',
-    text: 'Titel, Fach, Schlagwörter und Notizen direkt bearbeiten — mit Varianten, Anhängen und automatischem Speichern, während du arbeitest.',
-    seite: 'links' as const,
+    text: 'Titel, Fach, Schlagwörter, Lernziele und Notizen direkt bearbeiten — mit Varianten, Anhängen und automatischem Speichern, während du arbeitest.',
+    seite: 'rechts' as const,
   },
   {
     id: 'loesungen-ki',
     icon: 'wand-magic-sparkles',
     fensterTitel: 'Material · Lösungen',
     titel: 'Lösungen verknüpfen — optional mit KI',
-    text: 'Verknüpfe vorhandene Lösungen manuell mit Arbeitsblättern — oder nutze optional die KI, wenn sie in den Einstellungen aktiviert ist: Am Arbeitsblatt startest du „Musterlösung erstellen“, gibst bei Bedarf eine Anweisung an. Die KI legt ein separates Musterlösungs-Material an und verbindet es automatisch. Dort prüfst du den Entwurf in der Dokumentvorschau, korrigierst bei Bedarf und markierst ihn als fachlich geprüft.',
-    seite: 'rechts' as const,
+    text: 'Verknüpfe vorhandene Lösungen manuell mit Arbeitsblättern — oder nutze optional die KI, wenn sie in den Einstellungen aktiviert ist: Am Arbeitsblatt startest du „Musterlösung erstellen“, gibst bei Bedarf eine Anweisung an. Die KI legt ein separates Musterlösungs-Material an und verbindet es automatisch. Dort prüfst du den Entwurf, korrigierst bei Bedarf und markierst ihn als fachlich geprüft. Eine Differenzierungsfassung kannst du genauso als Entwurf erzeugen und übernehmen.',
+    seite: 'links' as const,
   },
   {
     id: 'suche',
@@ -82,7 +129,7 @@ const features = [
     fensterTitel: 'Suche',
     titel: 'Hybrid suchen',
     text: 'Volltext, Ähnlichkeitssuche und optionale Vektorsuche finden Inhalte über Titel, Notizen und extrahierten Dateitext hinweg — auch wenn du dich nur ungefähr erinnerst.',
-    seite: 'links' as const,
+    seite: 'rechts' as const,
   },
   {
     id: 'stunden',
@@ -90,7 +137,7 @@ const features = [
     fensterTitel: 'Verlaufsplan',
     titel: 'Stunden planen',
     text: 'Verlaufspläne mit Phasen, Sozialformen und verknüpften Materialien. Phasen per Drag-and-drop sortieren und den roten Faden im Blick behalten.',
-    seite: 'rechts' as const,
+    seite: 'links' as const,
   },
   {
     id: 'reihen',
@@ -98,7 +145,7 @@ const features = [
     fensterTitel: 'Unterrichtsreihe',
     titel: 'Reihen denken',
     text: 'Unterrichtsreihen als Timeline mit Fortschritt, Druckansicht und wiederverwendbaren Materialien — vom Einstieg bis zur Sicherung.',
-    seite: 'links' as const,
+    seite: 'rechts' as const,
   },
   {
     id: 'import',
@@ -106,13 +153,13 @@ const features = [
     fensterTitel: 'Schulportal-Import',
     titel: 'Schulportal importieren',
     text: 'Kursmappen analysieren, Dubletten erkennen und zuordnen. Vor dem Übernehmen prüfen, bei Bedarf rückgängig machen.',
-    seite: 'rechts' as const,
+    seite: 'links' as const,
   },
 ]
 
 const schritte = [
-  { nr: '01', titel: 'Sammeln', text: 'Materialien anlegen, aus dem Schulportal importieren oder Moodle-Kursarchive für dein SchulMoodle ablegen.' },
-  { nr: '02', titel: 'Ordnen', text: 'Nach Fach, Thema und Lerngruppe einordnen, damit du alles wiederfindest.' },
+  { nr: '01', titel: 'Sammeln', text: 'Materialien und Lehrwerke anlegen, aus dem Schulportal importieren oder Moodle-Kursarchive für dein SchulMoodle ablegen.' },
+  { nr: '02', titel: 'Ordnen', text: 'Nach Fach, Thema und Lerngruppe einordnen — Arbeitsblätter und Servicebände am Lehrwerk sammeln.' },
   { nr: '03', titel: 'Planen', text: 'Stunden und Reihen mit Phasen und Materialien aufbauen.' },
   { nr: '04', titel: 'Unterrichten', text: 'Schnell finden, wiederverwenden, Fortschritt im Blick behalten.' },
 ]
@@ -124,14 +171,19 @@ const mehr = [
     text: 'Optional Lösungen aus PDF- und Office-Dateien erzeugen — klar als KI kennzeichnen, mit dem Ausgangsmaterial verknüpfen und als geprüft markieren.',
   },
   {
+    icon: 'code-branch',
+    titel: 'Differenzierung',
+    text: 'Optional eine weitere Fassung erzeugen — leichte Sprache, grundlegend oder mit Unterstützung. Als Entwurf prüfen, dann als Variante übernehmen.',
+  },
+  {
     icon: 'layer-group',
     titel: 'Stapel-Upload',
-    text: 'PDF, Word und ZIP-Pakete auf einmal hochladen, zusammengehörige Dateien bündeln und mit optionalen KI-Vorschlägen prüfen — vor dem Übernehmen kontrollieren.',
+    text: 'PDF, Word und ZIP-Pakete auf einmal hochladen, Paare prüfen und optional einem Lehrwerk zuordnen — mit KI-Vorschlägen, vor dem Übernehmen kontrollieren.',
   },
   {
     icon: 'users',
     titel: 'Rollen & Rechte',
-    text: 'Lehrkraft und Administration pflegen Materialien, Stunden und Reihen; Lesezugriff bleibt schreibgeschützt. Die Administration verwaltet zusätzlich Benutzer und System.',
+    text: 'Lehrkraft und Administration pflegen Materialien, Lehrwerke, Stunden und Reihen; Lesezugriff bleibt schreibgeschützt. Die Administration verwaltet zusätzlich Benutzer und System.',
   },
   { icon: 'palette', titel: 'Darstellung', text: 'Hell, Dunkel oder System plus ruhige Farbpaletten.' },
   { icon: 'server', titel: 'Self-Hosted', text: 'Deine Daten bleiben in deiner Instanz.' },
@@ -139,7 +191,7 @@ const mehr = [
   {
     icon: 'robot',
     titel: 'Lokale KI',
-    text: 'Optional Ollama auf deiner Infrastruktur — Musterlösungen, Stapel-Vorschläge und Vektorsuche bleiben unter deiner Kontrolle.',
+    text: 'Optional Ollama auf deiner Infrastruktur — Musterlösungen, Differenzierungen, Stapel-Vorschläge und Vektorsuche bleiben unter deiner Kontrolle.',
   },
   { icon: 'shield-halved', titel: 'Datenschutz', text: 'Kein Cloud-Zwang — du bestimmst, wo SARU läuft.' },
 ]
@@ -193,11 +245,11 @@ const mehr = [
 
           <h1 class="mt-8 text-3xl leading-[1.15] tracking-tight text-ink sm:text-4xl lg:text-[2.75rem]">
             Dein Archiv für Materialien,<br class="hidden sm:block">
-            Stunden und Reihen
+            Lehrwerke, Stunden und Reihen
           </h1>
           <p class="mx-auto mt-4 max-w-xl text-base leading-relaxed text-ink-muted sm:text-lg">
             Sammle, ordne und plane Unterricht an einem Ort —
-            mit Suche, Schulportal-Import und optionaler KI.
+            mit Lehrwerken, Suche, Schulportal-Import und optionaler KI.
           </p>
 
           <p class="landing-akronym mx-auto mt-6 max-w-lg text-sm leading-relaxed sm:text-base">
@@ -319,6 +371,88 @@ const mehr = [
                             <UiIcon name="clock-rotate-left" fest />
                             vor {{ m.tage }} Tagen
                           </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Lehrwerke -->
+                  <div v-else-if="f.id === 'lehrwerke'" class="space-y-3 p-4 sm:p-5">
+                    <div>
+                      <p class="text-[0.65rem] font-medium tracking-[0.14em] text-ink-subtle uppercase">
+                        Lehrwerk
+                      </p>
+                      <p class="text-sm font-semibold text-ink">Biologie 8 — Schülerbuch</p>
+                      <div class="mt-2 flex flex-wrap gap-1.5">
+                        <UiBadge groesse="sm" farbe="#3b82f6">
+                          Biologie
+                        </UiBadge>
+                        <UiBadge groesse="sm">
+                          Klasse 8
+                        </UiBadge>
+                        <UiBadge groesse="sm" icon="layer-group">
+                          4 Materialien
+                        </UiBadge>
+                      </div>
+                    </div>
+
+                    <div class="overflow-hidden rounded-xl border border-line bg-surface shadow-soft">
+                      <div class="flex items-center gap-2 border-b border-line bg-surface-sunken/60 px-3 py-2">
+                        <UiIcon name="book" fest class="text-xs text-ink-subtle" />
+                        <span class="text-xs font-medium text-ink">Schulbuch</span>
+                      </div>
+                      <div class="flex items-center gap-3 p-3">
+                        <div
+                          class="landing-lehrwerk-vorschau relative h-14 w-11 shrink-0 overflow-hidden rounded-md border border-line shadow-sm"
+                        >
+                          <span class="absolute inset-0 flex flex-col items-center justify-center gap-1">
+                            <UiIcon name="book" fest class="text-lg opacity-80" />
+                            <span class="text-[0.6rem] font-semibold uppercase tracking-wide">PDF</span>
+                          </span>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                          <p class="truncate text-xs font-medium text-ink">biologie_8_schuelerbuch.pdf</p>
+                          <p class="text-[0.65rem] text-ink-subtle">24,1 MB</p>
+                        </div>
+                        <span class="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg bg-primary-solid px-2.5 text-[0.65rem] font-medium text-primary-contrast">
+                          <UiIcon name="eye" fest />
+                          Öffnen
+                        </span>
+                      </div>
+                    </div>
+
+                    <div
+                      v-for="gruppe in lehrwerkInhaltMock"
+                      :key="gruppe.label"
+                      class="space-y-1.5"
+                    >
+                      <p class="flex items-center gap-1.5 text-[0.7rem] font-semibold text-ink">
+                        <UiIcon :name="gruppe.icon" fest class="text-primary" />
+                        {{ gruppe.label }}
+                        <span class="font-normal text-ink-subtle">{{ gruppe.items.length }}</span>
+                      </p>
+                      <div
+                        v-for="m in gruppe.items"
+                        :key="m.t"
+                        class="karte flex items-center gap-2.5 p-2.5"
+                      >
+                        <div class="relative h-11 w-8 shrink-0 overflow-hidden rounded-md border border-line bg-gradient-to-b from-surface to-surface-sunken shadow-sm">
+                          <span class="absolute inset-0 flex flex-col items-center justify-center gap-0.5 text-ink-subtle">
+                            <UiIcon name="file" fest class="text-sm opacity-80" />
+                            <span class="text-[0.5rem] font-semibold uppercase tracking-wide">{{ m.ext }}</span>
+                          </span>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                          <p class="truncate text-xs font-medium text-ink">{{ m.t }}</p>
+                          <div class="mt-1">
+                            <UiBadge
+                              groesse="sm"
+                              :ton="materialTypes.tone(m.materialType)"
+                              :icon="materialTypes.icon(m.materialType) ?? undefined"
+                            >
+                              {{ m.b }}
+                            </UiBadge>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -639,7 +773,7 @@ const mehr = [
                       <div class="flex items-center justify-between gap-2">
                         <p class="text-sm font-semibold text-ink">Photosynthese & Zellatmung</p>
                         <span class="rounded-md bg-success-soft px-2 py-0.5 text-[0.7rem] font-medium text-success-strong">
-                          Aktiv
+                          Laufend
                         </span>
                       </div>
                       <div class="mt-2 h-2 overflow-hidden rounded-full bg-surface-sunken">
@@ -755,7 +889,7 @@ const mehr = [
             <span class="akronym-buchstabe">U</span>nterrichtsmaterialien
           </p>
           <p class="mx-auto mt-4 max-w-lg text-sm leading-relaxed text-ink-muted sm:text-base">
-            Kurz gesagt: ein Archiv, das Materialien, Stunden und Reihen zusammenhält —
+            Kurz gesagt: ein Archiv, das Materialien, Lehrwerke, Stunden und Reihen zusammenhält —
             damit Vorbereitung nicht bei jedem Schuljahr neu beginnt.
           </p>
         </div>
@@ -815,7 +949,7 @@ const mehr = [
             Starte mit deinem Unterrichtsarchiv
           </h2>
           <p class="mx-auto mt-4 max-w-lg text-sm leading-relaxed text-ink-muted sm:text-base">
-            Melde dich an, lege Materialien an oder importiere eine Kursmappe aus dem Schulportal.
+            Melde dich an, lege Materialien oder ein Lehrwerk an oder importiere eine Kursmappe aus dem Schulportal.
           </p>
           <div class="mt-8 flex justify-center">
             <UiButton variante="primaer" groesse="lg" icon="right-to-bracket" @click="emit('anmelden')">
@@ -938,6 +1072,11 @@ const mehr = [
 .landing-moodle-vorschau {
   background: linear-gradient(160deg, rgb(249 128 18 / 0.14), var(--surface-sunken));
   color: #f98012;
+}
+
+.landing-lehrwerk-vorschau {
+  background: linear-gradient(160deg, color-mix(in oklab, var(--palette-primary) 16%, transparent), var(--surface-sunken));
+  color: var(--palette-primary);
 }
 
 .landing-ki-optional-chip {
