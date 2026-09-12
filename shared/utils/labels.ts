@@ -1,6 +1,7 @@
 import type {
   AiProvider,
   DifferentiationLevel,
+  DifferenzierungProfil,
   ImportStatus,
   LessonStatus,
   MaterialRelationType,
@@ -109,6 +110,33 @@ export const differentiationLevels = definitions<DifferentiationLevel>({
   grundlegend: { label: 'Grundlegend', tone: 'gruen' },
   mittel: { label: 'Mittel', tone: 'gelb' },
   erweitert: { label: 'Erweitert', tone: 'rot' },
+})
+
+export const differenzierungProfile = definitions<DifferenzierungProfil>({
+  leichte_sprache: {
+    label: 'Leichte Sprache',
+    icon: 'language',
+    tone: 'gruen',
+    description: 'Kurze Sätze, ein Gedanke pro Satz, schwere Wörter im Glossar.',
+  },
+  grundlegend: {
+    label: 'Grundlegend',
+    icon: 'layer-group',
+    tone: 'gruen',
+    description: 'Weniger Text, klare Operatoren, ggf. weniger Aufgaben.',
+  },
+  unterstuetzung: {
+    label: 'Mit Unterstützung',
+    icon: 'life-ring',
+    tone: 'gelb',
+    description: 'Wortspeicher, Satzanfänge und weniger Schreibaufwand.',
+  },
+  erweitert: {
+    label: 'Erweitert',
+    icon: 'arrow-trend-up',
+    tone: 'rot',
+    description: 'Transferaufgabe oder Zusatzimpuls für stärkere Lernende.',
+  },
 })
 
 export const materialRelationTypes = definitions<MaterialRelationType>({

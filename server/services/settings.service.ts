@@ -13,7 +13,6 @@ export const SETTING_KEYS = {
   privacy: 'datenschutz',
   appearance: 'darstellung.standard',
   collabora: 'vorschau.collabora',
-  hermes: 'ki.hermes',
 } as const
 
 export type AiProviderId = 'openai' | 'ollama' | 'openrouter'
@@ -266,60 +265,3 @@ export async function saveCollaboraSettings(patch: Partial<CollaboraSettings>, u
   })
 }
 
-/**
- * Optionaler Hermes-Agent-Container für agentische Dokumentfüllung.
- * Analog zu Ollama/Collabora: Basis-URL (+ optional API-Schlüssel).
- */
-export interface HermesSettings {
-  enabled: boolean
-  /** z. B. http://localhost:8642 oder http://hermes:8642 */
-  baseUrl: string
-  /** Optional; wird verschlüsselt gespeichert. */
-  apiKey: string
-  timeoutMs: number
-}
-
-export const defaultHermesSettings: HermesSettings = {
-  enabled: false,
-  baseUrl: '',
-  apiKey: '',
-  timeoutMs: 300_000,
-}
-
-export async function getHermesSettings(): Promise<HermesSettings> {
-  const stored = (await readRaw<HermesSettings>(SETTING_KEYS.hermes)) ?? {}
-  const merged = { ...defaultHermesSettings, ...stored }
-  if (merged.apiKey) {
-    try {
-      merged.apiKey = decryptSecret(merged.apiKey)
-    } catch (error) {
-      log.error('Hermes-API-Schlüssel konnte nicht entschlüsselt werden.', error)
-      merged.apiKey = ''
-    }
-  }
-  return merged
-}
-
-export async function saveHermesSettings(
-  patch: Partial<HermesSettings> & { apiKey?: string | null },
-  userId?: string,
-): Promise<void> {
-  const stored = (await readRaw<HermesSettings>(SETTING_KEYS.hermes)) ?? {}
-  const next: Record<string, unknown> = { ...defaultHermesSettings, ...stored, ...patch }
-
-  if (patch.apiKey === undefined) {
-    next.apiKey = stored.apiKey ?? ''
-  } else if (!patch.apiKey) {
-    next.apiKey = ''
-  } else {
-    next.apiKey = encryptSecret(patch.apiKey)
-  }
-
-  if (typeof next.baseUrl === 'string') next.baseUrl = next.baseUrl.replace(/\/+$/, '')
-
-  await writeRaw(SETTING_KEYS.hermes, next, userId)
-  log.info('Hermes-Einstellungen aktualisiert', {
-    enabled: next.enabled,
-    configured: Boolean(next.baseUrl),
-  })
-}

@@ -6,7 +6,6 @@ import {
   getAiSettings,
   getAppearanceSettings,
   getCollaboraSettings,
-  getHermesSettings,
   getPrivacySettings,
   getUploadSettings,
   PROVIDER_MODEL_HINTS,
@@ -17,13 +16,12 @@ import { requireAdmin } from '../../utils/auth'
 export default defineEventHandler(async (event) => {
   await requireAdmin(event)
 
-  const [ai, uploads, privacy, appearance, collabora, hermes] = await Promise.all([
+  const [ai, uploads, privacy, appearance, collabora] = await Promise.all([
     getAiSettings(),
     getUploadSettings(),
     getPrivacySettings(),
     getAppearanceSettings(),
     getCollaboraSettings(),
-    getHermesSettings(),
   ])
 
   // Der API-Schlüssel verlässt den Server nie im Klartext.
@@ -39,11 +37,6 @@ export default defineEventHandler(async (event) => {
     privacy,
     appearance,
     collabora,
-    hermes: {
-      ...hermes,
-      apiKey: maskSecret(hermes.apiKey),
-      apiKeyGesetzt: Boolean(hermes.apiKey),
-    },
     modelHints: PROVIDER_MODEL_HINTS,
   }
 })

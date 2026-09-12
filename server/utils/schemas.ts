@@ -2,6 +2,7 @@ import { z } from 'zod'
 import {
   AI_PROVIDERS,
   DIFFERENTIATION_LEVELS,
+  DIFFERENZIERUNG_PROFILE,
   LESSON_STATUSES,
   MATERIAL_RELATION_TYPES,
   MATERIAL_TYPES,
@@ -474,20 +475,8 @@ export const collaboraSettingsSchema = z
     path: ['baseUrl'],
   })
 
-export const hermesSettingsSchema = z
-  .object({
-    enabled: z.boolean(),
-    baseUrl: z
-      .string()
-      .max(500)
-      .refine((v) => !v || /^https?:\/\//i.test(v), {
-        message: 'Bitte eine http(s)-URL angeben.',
-      }),
-    apiKey: z.string().max(500).optional(),
-    timeoutMs: z.coerce.number().int().min(5000).max(900_000),
-  })
-  .partial()
-  .refine((v) => !v.enabled || Boolean(v.baseUrl?.trim()), {
-    message: 'Bei aktiviertem Hermes-Agent ist eine Basis-URL nötig.',
-    path: ['baseUrl'],
-  })
+export const differentiationEnqueueSchema = z.object({
+  profile: z.enum(DIFFERENZIERUNG_PROFILE),
+  variantId: uuidSchema.nullish(),
+  userInstructions: z.string().max(4000).nullish(),
+})

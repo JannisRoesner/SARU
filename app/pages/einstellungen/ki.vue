@@ -31,13 +31,6 @@ const { data, refresh } = await useFetch<{
     refererUrl: string
     appTitle: string
   }
-  hermes: {
-    enabled: boolean
-    baseUrl: string
-    apiKey: string
-    apiKeyGesetzt: boolean
-    timeoutMs: number
-  }
   modelHints: Record<
     ProviderId,
     { chatModel: string; visionModel: string; embeddingModel: string; useVision: boolean }
@@ -61,13 +54,6 @@ const formular = reactive({
   appTitle: 'SARU',
 })
 
-const hermes = reactive({
-  enabled: false,
-  baseUrl: '',
-  apiKey: '',
-  timeoutMs: 300000,
-})
-
 watch(
   data,
   (wert) => {
@@ -76,20 +62,11 @@ watch(
       ...wert.ai,
       apiKey: '',
     })
-    if (wert.hermes) {
-      Object.assign(hermes, {
-        enabled: wert.hermes.enabled,
-        baseUrl: wert.hermes.baseUrl,
-        apiKey: '',
-        timeoutMs: wert.hermes.timeoutMs,
-      })
-    }
   },
   { immediate: true },
 )
 
 const testErgebnis = ref<string | null>(null)
-const hermesTestErgebnis = ref<string | null>(null)
 
 const hinweise = computed(() => {
   const hints = data.value?.modelHints?.[formular.provider as ProviderId]
@@ -160,33 +137,6 @@ async function testen() {
     testErgebnis.value = (error as { nachricht?: string }).nachricht ?? 'Test fehlgeschlagen.'
   }
 }
-
-async function hermesSpeichern() {
-  const body: Record<string, unknown> = { ...hermes }
-  if (!hermes.apiKey.trim()) delete body.apiKey
-  await aufruf('/api/settings/hermes', {
-    method: 'PATCH',
-    body,
-    erfolgsmeldung: 'Hermes-Einstellungen gespeichert.',
-  })
-  await refresh()
-}
-
-async function hermesTesten() {
-  hermesTestErgebnis.value = null
-  const body: Record<string, unknown> = { ...hermes }
-  if (!hermes.apiKey.trim()) delete body.apiKey
-  try {
-    const ergebnis = await aufruf<{ ok?: boolean; message?: string }>(
-      '/api/settings/hermes-test',
-      { method: 'POST', body, stumm: true },
-    )
-    hermesTestErgebnis.value = ergebnis?.message ?? 'Verbindung erfolgreich.'
-  } catch (error) {
-    hermesTestErgebnis.value =
-      (error as { nachricht?: string }).nachricht ?? 'Test fehlgeschlagen.'
-  }
-}
 </script>
 
 <template>
@@ -196,7 +146,7 @@ async function hermesTesten() {
       zurueck-label="Einstellungen"
       kicker="System"
       titel="KI-Anbindung"
-      untertitel="Musterlösungen erzeugen, multimodale Modelle anbinden und optional Hermes nutzen. API-Schlüssel werden serverseitig verschlüsselt gespeichert."
+      untertitel="Musterlösungen und Differenzierungsfassungen erzeugen, multimodale Modelle anbinden. API-Schlüssel werden serverseitig verschlüsselt gespeichert."
     />
 
     <UiCard titel="Anbieter" icon="wand-magic-sparkles">
@@ -285,77 +235,6 @@ async function hermesTesten() {
             Verbindung testen
           </UiButton>
           <UiButton variante="primaer" icon="floppy-disk" :laedt="laeuft" @click="speichern">
-            Speichern
-          </UiButton>
-        </div>
-      </div>
-    </UiCard>
-
-    <UiCard titel="Hermes-Agent (optional)" icon="robot">
-      <div class="space-y-4">
-        <p class="text-sm text-ink-muted">
-          Optionaler Agent-Container für die Dokumentfüllung. SARU ruft
-          <code class="rounded bg-surface-sunken px-1 py-0.5">POST /v1/document-fill</code>
-          auf (JSON mit Datei + Anweisung → ausgefülltes Dokument). Fehlt der Endpunkt, greift der
-          lokale Multimodal-/Dokument-Pfad. OpenAI-kompatible Hermes-APIs
-          (<code class="rounded bg-surface-sunken px-1 py-0.5">/v1/chat/completions</code>) bleiben unberührt.
-        </p>
-
-        <label class="flex items-center gap-2 text-sm">
-          <input v-model="hermes.enabled" type="checkbox" class="accent-[var(--color-primary)]">
-          Hermes-Agent aktivieren
-        </label>
-
-        <div class="grid gap-4 sm:grid-cols-2">
-          <UiField
-            label="Basis-URL"
-            hinweis="z. B. http://localhost:8642"
-            class="sm:col-span-2"
-          >
-            <UiInput
-              v-model="hermes.baseUrl"
-              placeholder="http://localhost:8642"
-              :disabled="!hermes.enabled"
-            />
-          </UiField>
-          <UiField
-            label="API-Schlüssel"
-            :hinweis="data?.hermes?.apiKeyGesetzt ? 'Gesetzt – leer lassen, um beizubehalten.' : 'Optional, falls der Container Auth verlangt'"
-          >
-            <UiInput
-              v-model="hermes.apiKey"
-              type="password"
-              autocomplete="off"
-              placeholder="••••••••"
-              :disabled="!hermes.enabled"
-            />
-          </UiField>
-          <UiField label="Timeout (ms)">
-            <UiInput
-              v-model="hermes.timeoutMs"
-              type="number"
-              min="5000"
-              step="1000"
-              :disabled="!hermes.enabled"
-            />
-          </UiField>
-        </div>
-
-        <p v-if="hermesTestErgebnis" class="rounded-lg bg-surface-sunken px-3 py-2 text-sm text-ink-muted">
-          {{ hermesTestErgebnis }}
-        </p>
-
-        <div class="flex justify-end gap-2">
-          <UiButton
-            variante="sekundaer"
-            icon="flask"
-            :laedt="laeuft"
-            :disabled="!hermes.enabled"
-            @click="hermesTesten"
-          >
-            Verbindung testen
-          </UiButton>
-          <UiButton variante="primaer" icon="floppy-disk" :laedt="laeuft" @click="hermesSpeichern">
             Speichern
           </UiButton>
         </div>

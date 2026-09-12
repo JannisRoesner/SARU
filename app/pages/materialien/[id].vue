@@ -5,6 +5,8 @@ import {
   variantKinds,
   materialRelationTypes,
   relationAnzeigeLabel,
+  differentiationLevels,
+  differenzierungProfile,
 } from '#shared/utils/labels'
 import { materialPfad } from '#shared/utils/material-pfad'
 import { istKiMusterloesung, kiAutorAnzeige } from '#shared/utils/ki'
@@ -110,6 +112,7 @@ const neueVariante = reactive({
   label: '',
   variantKind: 'standard',
   schoolYear: '',
+  differentiationLevel: '' as string,
 })
 
 function varianteModalOeffnen() {
@@ -117,10 +120,12 @@ function varianteModalOeffnen() {
     neueVariante.label = ''
     neueVariante.variantKind = 'jahrgang'
     neueVariante.schoolYear = ''
+    neueVariante.differentiationLevel = ''
   } else {
     neueVariante.label = ''
     neueVariante.variantKind = 'standard'
     neueVariante.schoolYear = ''
+    neueVariante.differentiationLevel = ''
   }
   varianteOffen.value = true
 }
@@ -132,6 +137,12 @@ const neueRelation = reactive({
   note: '',
 })
 const kiAnweisung = ref('')
+const diffOffen = ref(false)
+const diffPruefOffen = ref(false)
+const diffAnweisung = ref('')
+const diffProfil = ref<'leichte_sprache' | 'grundlegend' | 'unterstuetzung' | 'erweitert'>('leichte_sprache')
+const diffQuelleId = ref('')
+
 type LoesungsJobStatus = 'wartend' | 'laeuft' | 'pruefung_noetig' | 'erfolgreich' | 'fehlgeschlagen'
 const loesungsJob = ref<{
   id: string
@@ -221,14 +232,16 @@ onMounted(async () => {
       `/api/materials/${id.value}/solution-job`,
     )
     const job = result.job
-    if (!job) return
-    loesungsJob.value = job
-    if (job.status === 'wartend' || job.status === 'laeuft' || job.status === 'pruefung_noetig') {
-      if (job.status === 'wartend' || job.status === 'laeuft') loesungsJobPollingStarten()
+    if (job) {
+      loesungsJob.value = job
+      if (job.status === 'wartend' || job.status === 'laeuft' || job.status === 'pruefung_noetig') {
+        if (job.status === 'wartend' || job.status === 'laeuft') loesungsJobPollingStarten()
+      }
     }
   } catch {
     // Die Materialseite bleibt auch ohne Jobstatus vollständig nutzbar.
   }
+  await diffJobAktualisieren(true)
 })
 
 function loesungsEntwurfOeffnen() {
@@ -237,7 +250,175 @@ function loesungsEntwurfOeffnen() {
   void navigateTo(`/musterloesungen/entwurf/${draftId}`)
 }
 
-onBeforeUnmount(loesungsJobPollingStoppen)
+type DiffJobStatus = 'wartend' | 'laeuft' | 'pruefung_noetig' | 'erfolgreich' | 'fehlgeschlagen'
+type DiffJob = {
+  id: string
+  status: DiffJobStatus
+  errorMessage: string | null
+  profile: string | null
+  profileLabel: string | null
+  title: string | null
+  previewMarkdown: string | null
+  tasks: Array<{
+    number: string
+    title: string | null
+    prompt: string
+    hints: string[]
+    figureNote: string | null
+  }>
+  wordBank: string[]
+  glossary: Array<{ term: string; explanation: string }>
+  uncertainties: string | null
+  draftFileName: string | null
+  hasDraftFile: boolean
+  resultVariantId: string | null
+}
+
+const diffJob = ref<DiffJob | null>(null)
+let diffJobTimer: ReturnType<typeof setInterval> | null = null
+
+const diffJobAktiv = computed(
+  () => diffJob.value?.status === 'wartend' || diffJob.value?.status === 'laeuft',
+)
+
+const diffQuellOptionen = computed(() =>
+  (data.value?.variants ?? [])
+    .filter((variante) => variante.assets.some((asset) => asset.kind === 'datei'))
+    .map((variante) => ({ value: variante.id, label: variante.label })),
+)
+
+const darfDifferenzieren = computed(() =>
+  Boolean(
+    darfBearbeiten.value
+    && data.value
+    && !kiLoesungAktiv.value
+    && !istMoodleKurs.value
+    && !istH5p.value
+    && data.value.materialType !== 'lehrwerk'
+    && diffQuellOptionen.value.length > 0,
+  ),
+)
+
+function diffJobPollingStoppen() {
+  if (!diffJobTimer) return
+  clearInterval(diffJobTimer)
+  diffJobTimer = null
+}
+
+async function diffJobAktualisieren(initial = false) {
+  try {
+    const result = await $fetch<{ job: DiffJob | null }>(
+      `/api/materials/${id.value}/differenzierung-job`,
+    )
+    const job = result.job
+    if (!job) return
+    if (!initial && diffJob.value && job.id !== diffJob.value.id) return
+    const vorher = diffJob.value?.status
+    diffJob.value = job
+    if (job.status === 'wartend' || job.status === 'laeuft') return
+    diffJobPollingStoppen()
+    if (initial) {
+      if (job.status === 'pruefung_noetig') diffPruefOffen.value = true
+      return
+    }
+    if (job.status === 'fehlgeschlagen') {
+      hinweise.fehler(job.errorMessage || 'Die Differenzierungsfassung konnte nicht erzeugt werden.')
+      return
+    }
+    if (job.status === 'pruefung_noetig' && vorher !== 'pruefung_noetig') {
+      diffPruefOffen.value = true
+      hinweise.warnung('Bitte die erzeugte Fassung prüfen, bevor du sie übernimmst.')
+    }
+  } catch {
+    // Beim nächsten Intervall erneut versuchen.
+  }
+}
+
+function diffJobPollingStarten() {
+  diffJobPollingStoppen()
+  void diffJobAktualisieren()
+  diffJobTimer = setInterval(() => void diffJobAktualisieren(), 2500)
+}
+
+function diffModalOeffnen() {
+  diffProfil.value = 'leichte_sprache'
+  diffAnweisung.value = ''
+  diffQuelleId.value =
+    data.value?.variants.find((item) => item.isDefault)?.id
+    ?? diffQuellOptionen.value[0]?.value
+    ?? ''
+  diffOffen.value = true
+}
+
+async function diffStarten() {
+  const ergebnis = await aufruf<{ jobId: string; status: 'wartend' }>(
+    `/api/materials/${id.value}/differenzierung`,
+    {
+      method: 'POST',
+      body: {
+        profile: diffProfil.value,
+        variantId: diffQuelleId.value || null,
+        userInstructions: diffAnweisung.value || null,
+      },
+    },
+  )
+  if (ergebnis) {
+    diffOffen.value = false
+    diffJob.value = {
+      id: ergebnis.jobId,
+      status: ergebnis.status,
+      errorMessage: null,
+      profile: diffProfil.value,
+      profileLabel: differenzierungProfile.label(diffProfil.value),
+      title: null,
+      previewMarkdown: null,
+      tasks: [],
+      wordBank: [],
+      glossary: [],
+      uncertainties: null,
+      draftFileName: null,
+      hasDraftFile: false,
+      resultVariantId: null,
+    }
+    diffJobPollingStarten()
+    hinweise.erfolg('Die Differenzierungsfassung wird im Hintergrund erstellt.')
+  }
+}
+
+async function diffUebernehmen() {
+  if (!diffJob.value) return
+  const ergebnis = await aufruf<{ variantId: string }>(
+    `/api/differenzierung-drafts/${diffJob.value.id}/publish`,
+    { method: 'POST', erfolgsmeldung: 'Differenzierungsfassung übernommen.' },
+  )
+  if (ergebnis) {
+    diffPruefOffen.value = false
+    diffJob.value = { ...diffJob.value, status: 'erfolgreich', resultVariantId: ergebnis.variantId }
+    await refresh()
+  }
+}
+
+async function diffVerwerfen() {
+  if (!diffJob.value) return
+  const ok = await aufruf(`/api/differenzierung-drafts/${diffJob.value.id}`, {
+    method: 'DELETE',
+    erfolgsmeldung: 'Entwurf verworfen.',
+  })
+  if (ok !== null) {
+    diffPruefOffen.value = false
+    diffJob.value = null
+  }
+}
+
+function diffHerunterladen() {
+  if (!diffJob.value?.hasDraftFile) return
+  window.open(`/api/differenzierung-drafts/${diffJob.value.id}/download`, '_blank')
+}
+
+onBeforeUnmount(() => {
+  loesungsJobPollingStoppen()
+  diffJobPollingStoppen()
+})
 
 async function varianteAnlegen() {
   const body = istMoodleKurs.value
@@ -246,7 +427,11 @@ async function varianteAnlegen() {
         variantKind: neueVariante.variantKind,
         schoolYear: neueVariante.schoolYear.trim() || null,
       }
-    : { label: neueVariante.label, variantKind: neueVariante.variantKind }
+    : { 
+        label: neueVariante.label,
+        variantKind: neueVariante.variantKind,
+        differentiationLevel: neueVariante.differentiationLevel || null,
+      }
 
   const ergebnis = await aufruf(`/api/materials/${id.value}/variants`, {
     method: 'POST',
@@ -573,6 +758,17 @@ function loesungKorrigieren() {
             <span class="hidden sm:inline">Musterlösung erstellen</span>
           </UiButton>
           <UiButton
+            v-if="darfDifferenzieren"
+            variante="sekundaer"
+            icon="code-branch"
+            title="Differenzierungsfassung erzeugen"
+            :disabled="diffJobAktiv"
+            @click="diffModalOeffnen"
+          >
+            <span class="sm:hidden">Diff.</span>
+            <span class="hidden sm:inline">Differenzierung erzeugen</span>
+          </UiButton>
+          <UiButton
             v-if="loesungBearbeitbar && hauptVorschau"
             variante="sekundaer"
             icon="pen-to-square"
@@ -637,6 +833,30 @@ function loesungKorrigieren() {
           @click="loesungsEntwurfOeffnen"
         >
           Entwurf öffnen
+        </UiButton>
+      </div>
+      <div
+        v-if="diffJobAktiv"
+        class="mb-5 flex items-center gap-3 rounded-xl border border-primary/25 bg-primary-soft px-4 py-3 text-sm text-primary-strong"
+        role="status"
+      >
+        <UiIcon name="circle-notch" dreht fest />
+        <span>
+          Differenzierungsfassung wird im Hintergrund {{ diffJob?.status === 'wartend' ? 'vorbereitet' : 'erstellt' }}.
+          Du kannst weiterarbeiten und diese Seite auch verlassen.
+        </span>
+      </div>
+      <div
+        v-else-if="diffJob?.status === 'pruefung_noetig'"
+        class="mb-5 flex flex-wrap items-center gap-3 rounded-xl border border-warning/30 bg-warning-soft px-4 py-3 text-sm text-ink"
+        role="status"
+      >
+        <UiIcon name="triangle-exclamation" fest />
+        <span class="min-w-0 flex-1">
+          Die KI-Fassung „{{ diffJob.profileLabel || 'Differenzierung' }}“ liegt als Entwurf vor.
+        </span>
+        <UiButton variante="sekundaer" icon="eye" @click="diffPruefOffen = true">
+          Entwurf prüfen
         </UiButton>
       </div>
 
@@ -850,6 +1070,21 @@ function loesungKorrigieren() {
                     <h3 class="font-medium text-ink">
                       {{ variante.label }}
                       <UiBadge v-if="variante.isDefault" groesse="sm" ton="primary">Standard</UiBadge>
+                      <UiBadge
+                        v-if="variante.differentiationLevel"
+                        groesse="sm"
+                        :ton="differentiationLevels.tone(variante.differentiationLevel as never)"
+                      >
+                        {{ differentiationLevels.label(variante.differentiationLevel as never) }}
+                      </UiBadge>
+                      <UiBadge
+                        v-if="kiAutorAnzeige(variante.aiMeta)"
+                        groesse="sm"
+                        ton="ki"
+                        icon="wand-magic-sparkles"
+                      >
+                        {{ kiAutorAnzeige(variante.aiMeta) }}
+                      </UiBadge>
                     </h3>
                     <p class="text-xs text-ink-subtle">
                       {{ variantKinds.label(variante.variantKind as never) }}
@@ -1089,6 +1324,15 @@ function loesungKorrigieren() {
             :optionen="variantKinds.options().map((o) => ({ value: o.value, label: o.label }))"
           />
         </UiField>
+        <UiField v-if="!istMoodleKurs && neueVariante.variantKind === 'differenzierung'" label="Stufe">
+          <UiSelect
+            v-model="neueVariante.differentiationLevel"
+            :optionen="[
+              { value: '', label: 'Keine Angabe' },
+              ...differentiationLevels.options().map((o) => ({ value: o.value, label: o.label })),
+            ]"
+          />
+        </UiField>
       </div>
       <template #aktionen>
         <UiButton variante="sekundaer" @click="varianteOffen = false">Abbrechen</UiButton>
@@ -1198,6 +1442,86 @@ function loesungKorrigieren() {
         <UiButton variante="primaer" icon="wand-magic-sparkles" :laedt="laeuft" :disabled="loesungsJobAktiv" @click="kiLoesung">
           Musterlösung erstellen
         </UiButton>
+      </template>
+    </UiModal>
+
+    <UiModal v-model="diffOffen" titel="Differenzierung erzeugen" icon="code-branch">
+      <div class="mb-4 space-y-2 text-sm text-ink-muted">
+        <p>
+          Die KI schreibt eine neue Fassung als Word-Dokument. Das Original bleibt unverändert.
+          Bitte die Fassung danach fachlich prüfen.
+        </p>
+      </div>
+      <div class="space-y-4">
+        <UiField label="Profil" pflicht>
+          <UiSelect
+            v-model="diffProfil"
+            :optionen="differenzierungProfile.options().map((o) => ({ value: o.value, label: o.label }))"
+          />
+        </UiField>
+        <p class="text-sm text-ink-muted">
+          {{ differenzierungProfile.map[diffProfil]?.description }}
+        </p>
+        <UiField v-if="diffQuellOptionen.length > 1" label="Quellfassung">
+          <UiSelect v-model="diffQuelleId" :optionen="diffQuellOptionen" />
+        </UiField>
+        <UiField label="Zusätzliche Anweisung">
+          <UiTextarea
+            v-model="diffAnweisung"
+            :zeilen="3"
+            placeholder="z. B. Fachbegriffe behalten, nur Aufgaben 1–3 …"
+            :disabled="laeuft || diffJobAktiv"
+          />
+        </UiField>
+      </div>
+      <template #aktionen>
+        <UiButton variante="sekundaer" :disabled="laeuft" @click="diffOffen = false">Abbrechen</UiButton>
+        <UiButton
+          variante="primaer"
+          icon="wand-magic-sparkles"
+          :laedt="laeuft"
+          :disabled="diffJobAktiv || !diffQuelleId"
+          @click="diffStarten"
+        >
+          Erzeugen
+        </UiButton>
+      </template>
+    </UiModal>
+
+    <UiModal v-model="diffPruefOffen" titel="Differenzierungsentwurf prüfen" icon="code-branch">
+      <div v-if="diffJob" class="space-y-4">
+        <p class="text-sm text-ink-muted">
+          {{ diffJob.profileLabel }} · bitte Fachinhalt und Sprache kontrollieren, bevor die Fassung übernommen wird.
+        </p>
+        <div>
+          <h3 class="font-medium text-ink">{{ diffJob.title }}</h3>
+        </div>
+        <ol v-if="diffJob.tasks.length" class="list-decimal space-y-3 pl-5 text-sm text-ink">
+          <li v-for="aufgabe in diffJob.tasks" :key="aufgabe.number" class="whitespace-pre-wrap">
+            <span v-if="aufgabe.title" class="font-medium">{{ aufgabe.title }} — </span>
+            {{ aufgabe.prompt }}
+          </li>
+        </ol>
+        <p v-if="diffJob.wordBank.length" class="text-sm text-ink">
+          <span class="font-medium">Wortspeicher:</span>
+          {{ diffJob.wordBank.join(' · ') }}
+        </p>
+        <ul v-if="diffJob.glossary.length" class="space-y-1 text-sm text-ink">
+          <li v-for="eintrag in diffJob.glossary" :key="eintrag.term">
+            <span class="font-medium">{{ eintrag.term }}:</span>
+            {{ eintrag.explanation }}
+          </li>
+        </ul>
+        <p v-if="diffJob.uncertainties" class="rounded-lg bg-warning-soft px-3 py-2 text-sm text-ink">
+          {{ diffJob.uncertainties }}
+        </p>
+      </div>
+      <template #aktionen>
+        <UiButton variante="sekundaer" icon="download" :disabled="!diffJob?.hasDraftFile" @click="diffHerunterladen">
+          Download
+        </UiButton>
+        <UiButton variante="gefahr" :laedt="laeuft" @click="diffVerwerfen">Verwerfen</UiButton>
+        <UiButton variante="primaer" :laedt="laeuft" @click="diffUebernehmen">Als Variante übernehmen</UiButton>
       </template>
     </UiModal>
 

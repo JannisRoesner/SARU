@@ -72,7 +72,6 @@ export interface AiMeta {
   fillStrategy?: string
   /** lueckentext = Antworten in Dokumentlücken; offen = Erwartungshorizont ohne Lückenfüllung. */
   fillMode?: 'lueckentext' | 'offen'
-  hermesUsed?: boolean
   /** Unsicheren PDF-Aufgabenplan zusätzlich visuell geprüft. */
   layoutVisionChecked?: boolean
   /** Aufgaben oder Antwortbereiche aus dem Vision-Check übernommen. */
@@ -93,6 +92,8 @@ export interface AiMeta {
   solutionPlan?: unknown
   renderManifest?: unknown
   qualityReport?: unknown
+  /** Profil einer KI-Differenzierungsfassung (nur an Varianten). */
+  differenzierungProfil?: string
   /** Varianten-ID der Quelldatei, aus der die Lösung erzeugt wurde. */
   sourceVariantId?: string | null
   /** Asset-ID der Quell-PDF (für visuelle Nachbearbeitung). */
@@ -163,6 +164,8 @@ export const materialVariants = pgTable(
     schoolYear: text(),
     version: text().notNull().default('1'),
     notes: text(),
+    /** Herkunft einer KI-erzeugten Fassung; das Material selbst behält origin. */
+    aiMeta: jsonb().$type<AiMeta>(),
     isDefault: boolean().notNull().default(false),
     sortOrder: integer().notNull().default(0),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),

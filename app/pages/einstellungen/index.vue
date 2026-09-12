@@ -23,7 +23,7 @@ const eintraege = computed(() =>
       to: '/einstellungen/ki',
       icon: 'wand-magic-sparkles',
       titel: 'KI-Anbindung',
-      text: 'Modelle anbinden, Musterlösungen erzeugen, optional Hermes nutzen.',
+      text: 'Modelle anbinden, Musterlösungen und Differenzierungsfassungen erzeugen.',
       sichtbar: istAdmin.value,
     },
     {

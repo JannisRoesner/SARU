@@ -75,7 +75,6 @@ export type FillStrategy =
   /** Originalseiten mit Overlay + angehängte Lösungsseiten für offene Aufgaben. */
   | 'pdf_hybrid'
   | 'docx_from_structure'
-  | 'hermes'
 
 export interface FilledDocument {
   buffer: Buffer

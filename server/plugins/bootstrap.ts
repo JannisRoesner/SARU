@@ -5,6 +5,7 @@ import { createLogger } from '../utils/logger'
 import { pruneRateLimits } from '../utils/rate-limit'
 import { purgeExpiredSessions } from '../utils/auth'
 import { startSolutionWorker } from '../services/ai/solutions-v2/worker'
+import { startDifferentiationWorker } from '../services/ai/differenzierung/worker'
 
 const log = createLogger('bootstrap')
 
@@ -33,6 +34,12 @@ export default defineNitroPlugin(async () => {
     await startSolutionWorker()
   } catch (error) {
     log.error('Musterlösungs-Worker konnte nicht gestartet werden', error)
+  }
+
+  try {
+    await startDifferentiationWorker()
+  } catch (error) {
+    log.error('Differenzierungs-Worker konnte nicht gestartet werden', error)
   }
 
   // Stündlich abgelaufene Sitzungen und Rate-Limit-Einträge entfernen.

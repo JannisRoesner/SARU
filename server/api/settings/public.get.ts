@@ -2,7 +2,6 @@ import {
   getAiSettings,
   getAppearanceSettings,
   getCollaboraSettings,
-  getHermesSettings,
 } from '../../services/settings.service'
 import { requireUser } from '../../utils/auth'
 
@@ -13,20 +12,16 @@ import { requireUser } from '../../utils/auth'
 export default defineEventHandler(async (event) => {
   await requireUser(event)
 
-  const [appearance, ai, collabora, hermes] = await Promise.all([
+  const [appearance, ai, collabora] = await Promise.all([
     getAppearanceSettings(),
     getAiSettings(),
     getCollaboraSettings(),
-    getHermesSettings(),
   ])
 
   return {
     ...appearance,
-    kiVerfuegbar:
-      (ai.enabled && Boolean(ai.chatModel || ai.visionModel)) ||
-      (hermes.enabled && Boolean(hermes.baseUrl.trim())),
+    kiVerfuegbar: ai.enabled && Boolean(ai.chatModel || ai.visionModel),
     kiVisionVerfuegbar: ai.enabled && ai.useVision,
     collaboraVerfuegbar: collabora.enabled && Boolean(collabora.baseUrl.trim()),
-    hermesVerfuegbar: hermes.enabled && Boolean(hermes.baseUrl.trim()),
   }
 })

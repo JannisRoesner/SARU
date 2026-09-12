@@ -62,6 +62,15 @@ export type VariantKind = (typeof VARIANT_KINDS)[number]
 export const DIFFERENTIATION_LEVELS = ['grundlegend', 'mittel', 'erweitert'] as const
 export type DifferentiationLevel = (typeof DIFFERENTIATION_LEVELS)[number]
 
+/** KI-Profile für erzeugte Differenzierungsfassungen. */
+export const DIFFERENZIERUNG_PROFILE = [
+  'leichte_sprache',
+  'grundlegend',
+  'unterstuetzung',
+  'erweitert',
+] as const
+export type DifferenzierungProfil = (typeof DIFFERENZIERUNG_PROFILE)[number]
+
 export const ASSET_KINDS = ['datei', 'link'] as const
 export type AssetKind = (typeof ASSET_KINDS)[number]
 

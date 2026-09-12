@@ -112,7 +112,6 @@ export interface GenerateSolutionResult {
   attachments: number
   usedVision: boolean
   fillStrategy: string
-  hermesUsed: boolean
   fileName: string | null
 }
 
@@ -849,7 +848,6 @@ export async function generateSolution(
 
   try {
     let filled: FilledDocument | null = null
-    const hermesUsed = false
     let attachments = 0
     let visionUsed = false
     let usedModel = model
@@ -1085,7 +1083,6 @@ export async function generateSolution(
           solutionSchemaVersion: 2,
           reviewed: false,
           fillStrategy: filled.strategy,
-          hermesUsed,
           layoutVisionChecked: pdfLayoutVisionChecked,
           layoutVisionRepaired: pdfLayoutRepairedViaVision,
           qualityVision: qualityVision ?? undefined,
@@ -1145,7 +1142,6 @@ export async function generateSolution(
       materialId,
       solutionMaterialId,
       strategy: filled.strategy,
-      hermesUsed,
       durationMs: Date.now() - startedAt,
     })
     log.info('Musterlösung erzeugt', {
@@ -1153,7 +1149,6 @@ export async function generateSolution(
       solutionMaterialId,
       model: usedModel,
       strategy: filled.strategy,
-      hermesUsed,
     })
 
     return {
@@ -1163,7 +1158,6 @@ export async function generateSolution(
       attachments,
       usedVision: visionUsed,
       fillStrategy: filled.strategy,
-      hermesUsed,
       fileName: filled.fileName,
     }
   } catch (error) {

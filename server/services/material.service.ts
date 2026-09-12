@@ -355,6 +355,7 @@ export async function duplicateMaterial(
         schoolYear: variant.schoolYear,
         version: variant.version,
         notes: variant.notes,
+        aiMeta: variant.aiMeta,
         isDefault: variant.isDefault,
         sortOrder: variant.sortOrder,
       })
@@ -402,6 +403,7 @@ export interface VariantInput {
   schoolYear?: string | null
   version?: string
   notes?: string | null
+  aiMeta?: AiMeta | null
 }
 
 export async function addVariant(
@@ -426,6 +428,7 @@ export async function addVariant(
       schoolYear: input.schoolYear ?? null,
       version: input.version ?? '1',
       notes: sanitizeText(input.notes),
+      aiMeta: input.aiMeta ?? null,
       sortOrder: (highest ?? -1) + 1,
     })
     .returning({ id: materialVariants.id })
@@ -448,6 +451,7 @@ export async function updateVariant(
   if (input.schoolYear !== undefined) patch.schoolYear = input.schoolYear
   if (input.version !== undefined) patch.version = input.version
   if (input.notes !== undefined) patch.notes = sanitizeText(input.notes)
+  if (input.aiMeta !== undefined) patch.aiMeta = input.aiMeta
 
   const [updated] = await db
     .update(materialVariants)

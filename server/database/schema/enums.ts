@@ -144,6 +144,7 @@ export const aiJobKindEnum = pgEnum('ai_job_kind', [
   'zusammenfassung',
   'verschlagwortung',
   'embedding',
+  'differenzierung',
 ])
 
 export const aiJobStatusEnum = pgEnum('ai_job_status', [

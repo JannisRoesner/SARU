@@ -381,6 +381,7 @@ export type MaterialVariantDetail = {
   notes: string | null
   isDefault: boolean
   sortOrder: number
+  aiMeta: AiMeta | null
   assets: {
     id: string
     kind: 'datei' | 'link'
@@ -462,7 +463,7 @@ export async function getMaterialDetail(
             'id', v.id, 'label', v.label, 'variantKind', v.variant_kind,
             'differentiationLevel', v.differentiation_level, 'schoolYear', v.school_year,
             'version', v.version, 'notes', v.notes, 'isDefault', v.is_default,
-            'sortOrder', v.sort_order,
+            'sortOrder', v.sort_order, 'aiMeta', v.ai_meta,
             'assets', coalesce((
               select json_agg(json_build_object(
                 'id', a.id, 'kind', a.kind, 'role', a.role, 'title', a.title,
