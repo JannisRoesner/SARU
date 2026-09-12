@@ -40,6 +40,7 @@ export function guessMaterialType(
   if (/(praesentation|prasentation|folien)/.test(base) || /\.(pptx?|odp)$/.test(base)) {
     return 'praesentation'
   }
+  if (/(lehrwerk|schulbuch|schuelerbuch|schulerbuch)/.test(name)) return 'lehrwerk'
   if (/(elternbrief|brief|einverst(a|ae)ndnis)/.test(base)) return 'sonstiges'
   return fallback
 }

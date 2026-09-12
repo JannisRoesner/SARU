@@ -1,4 +1,4 @@
-import { readMultipartFormData } from 'h3'
+import { readMultipartParts } from '../../utils/multipart'
 import { analyzeImport } from '../../services/import/importer'
 import { getUploadSettings } from '../../services/settings.service'
 import { recordAudit } from '../../services/audit.service'
@@ -10,7 +10,7 @@ import { formatBytes } from '../../services/storage.service'
 export default defineEventHandler(async (event) => {
   const user = await requireEditor(event)
 
-  const parts = await readMultipartFormData(event)
+  const parts = await readMultipartParts(event)
   const file = parts?.find((part) => part.filename && part.data?.length)
   if (!file) throw invalidInput('Es wurde keine Exportdatei übermittelt.')
 

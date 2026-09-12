@@ -42,7 +42,16 @@ export async function extractTextFromStorage(
   }
 }
 
-export async function extractText(buffer: Buffer, fileName: string): Promise<ExtractionResult> {
+export interface ExtractTextOptions {
+  /** Nur die ersten N PDF-Seiten bzw. Folien lesen. */
+  maxPages?: number
+}
+
+export async function extractText(
+  buffer: Buffer,
+  fileName: string,
+  options: ExtractTextOptions = {},
+): Promise<ExtractionResult> {
   const extension = extensionOf(fileName)
   if (!EXTRACTABLE.has(extension)) {
     return { status: 'nicht_unterstuetzt', text: '' }
@@ -51,11 +60,11 @@ export async function extractText(buffer: Buffer, fileName: string): Promise<Ext
   try {
     switch (extension) {
       case 'pdf':
-        return await extractPdf(buffer)
+        return await extractPdf(buffer, options.maxPages)
       case 'docx':
         return await extractDocx(buffer)
       case 'pptx':
-        return extractOoxml(buffer, /^ppt\/slides\/slide\d+\.xml$/)
+        return extractOoxml(buffer, /^ppt\/slides\/slide\d+\.xml$/, options.maxPages)
       case 'xlsx':
         return extractOoxml(buffer, /^xl\/sharedStrings\.xml$/)
       case 'odt':
@@ -65,7 +74,7 @@ export async function extractText(buffer: Buffer, fileName: string): Promise<Ext
       case 'doc':
       case 'ppt':
       case 'xls':
-        return await extractLegacyOffice(buffer, fileName)
+        return await extractLegacyOffice(buffer, fileName, options.maxPages)
       default:
         return { status: 'erfolgreich', text: truncate(buffer.toString('utf8')) }
     }
@@ -75,7 +84,7 @@ export async function extractText(buffer: Buffer, fileName: string): Promise<Ext
   }
 }
 
-async function extractPdf(buffer: Buffer): Promise<ExtractionResult> {
+async function extractPdf(buffer: Buffer, maxPages?: number): Promise<ExtractionResult> {
   // Der Legacy-Build von pdf.js kommt ohne Browser-APIs aus.
   const pdfjs = await loadPdfjs()
 
@@ -92,7 +101,10 @@ async function extractPdf(buffer: Buffer): Promise<ExtractionResult> {
     const pages: string[] = []
     let length = 0
 
-    for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber++) {
+    const lastPage =
+      maxPages && maxPages > 0 ? Math.min(document.numPages, maxPages) : document.numPages
+
+    for (let pageNumber = 1; pageNumber <= lastPage; pageNumber++) {
       const page = await document.getPage(pageNumber)
       const content = await page.getTextContent()
 
@@ -195,7 +207,11 @@ async function extractDocx(buffer: Buffer): Promise<ExtractionResult> {
 }
 
 /** Konvertiert .doc/.ppt/.xls per LibreOffice nach PDF und extrahiert die Textebene. */
-async function extractLegacyOffice(buffer: Buffer, fileName: string): Promise<ExtractionResult> {
+async function extractLegacyOffice(
+  buffer: Buffer,
+  fileName: string,
+  maxPages?: number,
+): Promise<ExtractionResult> {
   const workDir = await mkdtemp(join(tmpdir(), 'saru-legacy-office-'))
   const safeName = fileName.replace(/[^\w.\-()+äöüÄÖÜß ]/g, '_').slice(0, 120) || `datei.${extensionOf(fileName)}`
   const inputPath = join(workDir, safeName)
@@ -210,22 +226,22 @@ async function extractLegacyOffice(buffer: Buffer, fileName: string): Promise<Ex
           'Für ältere Office-Dateien (.doc, .ppt, .xls) ist LibreOffice auf dem Server nötig.',
       }
     }
-    return await extractPdf(pdfBuffer)
+    return await extractPdf(pdfBuffer, maxPages)
   } finally {
     await rm(workDir, { recursive: true, force: true }).catch(() => {})
   }
 }
 
 /** Liest Text aus den XML-Teilen eines ZIP-basierten Office-Formats. */
-function extractOoxml(buffer: Buffer, pattern: RegExp): ExtractionResult {
+function extractOoxml(buffer: Buffer, pattern: RegExp, maxParts?: number): ExtractionResult {
   const entries = unzipSync(new Uint8Array(buffer), {
     filter: (file) => pattern.test(file.name),
   })
 
   const decoder = new TextDecoder('utf-8')
-  const names = Object.keys(entries).sort((a, b) =>
-    a.localeCompare(b, 'de', { numeric: true }),
-  )
+  const names = Object.keys(entries)
+    .sort((a, b) => a.localeCompare(b, 'de', { numeric: true }))
+    .slice(0, maxParts && maxParts > 0 ? maxParts : undefined)
 
   const parts = names.map((name) => xmlToText(decoder.decode(entries[name]!)))
   const text = truncate(parts.filter(Boolean).join('\n\n'))

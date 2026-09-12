@@ -98,7 +98,7 @@ export interface UploadSettings {
 }
 
 export const defaultUploadSettings: UploadSettings = {
-  maxBytes: Number(process.env.NUXT_MAX_UPLOAD_BYTES ?? 104_857_600),
+  maxBytes: Number(process.env.NUXT_MAX_UPLOAD_BYTES ?? 268_435_456),
   maxImportBytes: Number(process.env.NUXT_MAX_IMPORT_BYTES ?? 536_870_912),
   allowedExtensions: [],
   scanArchives: true,

@@ -1,8 +1,8 @@
-import { readMultipartFormData } from 'h3'
 import { analyzeAiMaterialCreate } from '../../../services/ai/material-create'
 import { recordAudit } from '../../../services/audit.service'
 import { requireEditor } from '../../../utils/auth'
 import { invalidInput } from '../../../utils/errors'
+import { readMultipartParts } from '../../../utils/multipart'
 import { normalizeGradeLevel } from '#shared/utils/jahrgangsstufen'
 import type { MaterialType } from '#shared/types/domain'
 
@@ -10,7 +10,7 @@ import type { MaterialType } from '#shared/types/domain'
 export default defineEventHandler(async (event) => {
   const user = await requireEditor(event)
 
-  const parts = await readMultipartFormData(event)
+  const parts = await readMultipartParts(event)
   if (!parts?.length) throw invalidInput('Es wurde keine Datei übermittelt.')
 
   const filePart = parts.find((part) => part.filename && part.data?.length)

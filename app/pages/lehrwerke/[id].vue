@@ -34,9 +34,19 @@ watch(
   { immediate: true },
 )
 
-const { favoritSetzen, alsVerwendetMerken } = useMaterialAktionen(() =>
-  Promise.all([refresh(), inhaltLaden()]),
-)
+const {
+  favoritSetzen,
+  alsVerwendetMerken,
+  loeschen,
+} = useMaterialAktionen(() => Promise.all([refresh(), inhaltLaden()]))
+
+const loeschenOffen = ref(false)
+
+async function lehrwerkLoeschen() {
+  const ok = await loeschen(id.value, 'Lehrwerk gelöscht.')
+  loeschenOffen.value = false
+  if (ok) await navigateTo('/lehrwerke')
+}
 
 const inhalt = computed(() => inhaltDaten.value?.items ?? [])
 const inhaltSuche = ref('')
@@ -201,6 +211,14 @@ async function zuordnungLoesen(relationId: string) {
           <UiButton :to="`/materialien/${data.id}`" variante="still" icon="pen-to-square">
             Angaben
           </UiButton>
+          <UiButton
+            v-if="darfBearbeiten"
+            variante="gefahr"
+            icon="trash"
+            nur-icon
+            title="Löschen"
+            @click="loeschenOffen = true"
+          />
         </LayoutAktionen>
       </header>
 
@@ -384,6 +402,15 @@ async function zuordnungLoesen(relationId: string) {
       :asset-id="vorschauAssetId"
       :titel="vorschauTitel"
       @herunterladen="assetHerunterladen"
+    />
+
+    <UiConfirm
+      v-model="loeschenOffen"
+      gefahr
+      titel="Lehrwerk löschen?"
+      text="Das Lehrwerk und die Buchdatei werden unwiderruflich entfernt. Zugeordnete Materialien (Lösungsheft, Arbeitsblätter …) bleiben erhalten, nur die Zuordnung entfällt."
+      bestaetigen="Ja, ich will löschen"
+      @bestaetigt="lehrwerkLoeschen"
     />
   </div>
 </template>

@@ -22,7 +22,7 @@ const { data, refresh } = await useFetch<{
 }>('/api/settings')
 
 const uploads = reactive({
-  maxBytes: 100 * 1024 * 1024,
+  maxBytes: 256 * 1024 * 1024,
   maxImportBytes: 500 * 1024 * 1024,
   allowedExtensions: '' as string,
   scanArchives: true,

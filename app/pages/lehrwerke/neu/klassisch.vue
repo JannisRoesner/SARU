@@ -4,7 +4,7 @@ import { materialPfad } from '#shared/utils/material-pfad'
 import type { MaterialDetail } from '~~/server/repositories/material.repository'
 
 definePageMeta({ middleware: [] })
-useHead({ title: 'Lehrwerk anlegen' })
+useHead({ title: 'Lehrwerk klassisch anlegen' })
 
 const { darfBearbeiten } = useSitzung()
 const { aufruf, laeuft } = useApi()
@@ -84,10 +84,10 @@ async function anlegen() {
 <template>
   <div>
     <LayoutSeitenkopf
-      zurueck-to="/lehrwerke"
-      zurueck-label="Alle Lehrwerke"
+      zurueck-to="/lehrwerke/neu"
+      zurueck-label="Wege zum Anlegen"
       kicker="Lehrwerke"
-      titel="Lehrwerk anlegen"
+      titel="Klassisch anlegen"
       untertitel="Titel genügt zum Start. Die Buch-PDF und zugeordnete Materialien kannst du danach ergänzen."
     />
 
@@ -177,7 +177,7 @@ async function anlegen() {
       </UiCard>
 
       <div class="flex justify-end gap-2">
-        <UiButton to="/lehrwerke" variante="sekundaer">Abbrechen</UiButton>
+        <UiButton to="/lehrwerke/neu" variante="sekundaer">Abbrechen</UiButton>
         <UiButton
           type="submit"
           variante="primaer"

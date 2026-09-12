@@ -74,6 +74,17 @@ describe('extractText', () => {
     expect(result.text).toContain('Zellteilung')
   })
 
+  it('begrenzt die PDF-Textextraktion auf die ersten Seiten', async () => {
+    const buffer = await readFile(fixture('sample.pdf'))
+    const full = await extractText(buffer, 'sample.pdf')
+    const preview = await extractText(buffer, 'sample.pdf', { maxPages: 1 })
+
+    expect(preview.status).toBe('erfolgreich')
+    expect(preview.pageCount).toBe(2)
+    expect(preview.text).toContain('Photosynthese')
+    expect(preview.text.length).toBeLessThan(full.text.length)
+  })
+
   it('gibt bei beschädigten Dateien einen Fehlerstatus statt einer Ausnahme zurück', async () => {
     const result = await extractText(Buffer.from('kein echtes PDF'), 'kaputt.pdf')
     expect(result.status).toBe('fehlgeschlagen')

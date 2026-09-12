@@ -21,6 +21,9 @@ describe('suggest-material-metadata helpers', () => {
     expect(guessMaterialType('Klausur-2024.pdf')).toBe('klausur')
     expect(guessMaterialType('AB-Zellatmung_Loesung.pdf')).toBe('musterloesung')
     expect(guessMaterialType('bio_zel_s2_ka_001.docx')).toBe('klausur')
+    expect(guessMaterialType('Klett_Biologie_Schulbuch.pdf')).toBe('lehrwerk')
+    expect(guessMaterialType('Schuelerbuch_Band2.pdf')).toBe('lehrwerk')
+    expect(guessMaterialType('Schulbuch_Loesung.pdf')).toBe('musterloesung')
   })
 
   it('erzeugt Dateiname-basierte Vorschläge ohne KI', () => {

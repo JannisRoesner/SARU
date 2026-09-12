@@ -43,6 +43,9 @@ export const AI_CREATE_ADAPTER_VERSION = '1'
 
 const LEGACY_OFFICE = new Set(['doc', 'ppt', 'xls'])
 
+/** Titel, Fach, Jahrgang und Kurzinhalt stehen typischerweise vorn. */
+export const AI_CREATE_PREVIEW_PAGES = 6
+
 export interface AiCreateAnalyzeResult {
   analyzeId: string
   fileName: string
@@ -120,10 +123,18 @@ export async function analyzeAiMaterialCreate(
     let extractedText = ''
 
     if (isExtractable(fileName)) {
-      const ensured = await ensureExtractedText(file.buffer, fileName, settings)
+      const ensured = await ensureExtractedText(file.buffer, fileName, settings, {
+        maxPages: AI_CREATE_PREVIEW_PAGES,
+      })
       extractedText = ensured.text
       extractionMethod = ensured.method
       pageCount = ensured.pageCount ?? null
+      const pagesUsed = ensured.pagesUsed ?? (extractedText.trim() ? AI_CREATE_PREVIEW_PAGES : 0)
+      if (pageCount && pageCount > AI_CREATE_PREVIEW_PAGES) {
+        warnings.push(
+          `Vorschläge beruhen auf den ersten ${pagesUsed} Seiten (von ${pageCount}).`,
+        )
+      }
     }
 
     let extractedTextKey: string | null = null

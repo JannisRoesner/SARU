@@ -51,10 +51,10 @@ export function useMaterialAktionen(nachAenderung?: () => unknown) {
     return ergebnis.id
   }
 
-  async function loeschen(id: string) {
+  async function loeschen(id: string, erfolgsmeldung = 'Material gelöscht.') {
     const ergebnis = await aufruf(`/api/materials/${id}`, {
       method: 'DELETE',
-      erfolgsmeldung: 'Material gelöscht.',
+      erfolgsmeldung,
     })
     if (ergebnis !== null) await fertig()
     return ergebnis !== null

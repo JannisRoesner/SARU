@@ -1,4 +1,4 @@
-import { readMultipartFormData } from 'h3'
+import { readMultipartParts } from '../../../utils/multipart'
 import {
   istKursarchivDatei,
   kursarchivErweiterung,
@@ -23,7 +23,7 @@ function quelleAusMeta(meta: Awaited<ReturnType<typeof parseKursarchivMetadata>>
 export default defineEventHandler(async (event) => {
   await requireEditor(event)
 
-  const parts = await readMultipartFormData(event)
+  const parts = await readMultipartParts(event)
   const file = parts?.find((part) => part.filename && part.data?.length)
   if (!file?.filename || !file.data?.length) {
     throw invalidInput('Bitte eine Kursarchiv-Datei (.mbz oder .imscc) hochladen.')

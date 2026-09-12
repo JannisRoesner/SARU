@@ -1,4 +1,4 @@
-import { readMultipartFormData } from 'h3'
+import { readMultipartParts } from '../../../utils/multipart'
 import { addFileAsset } from '../../../services/material.service'
 import { recordAudit } from '../../../services/audit.service'
 import { requireEditor } from '../../../utils/auth'
@@ -9,7 +9,7 @@ export default defineEventHandler(async (event) => {
   const user = await requireEditor(event)
   const variantId = parseOrThrow(uuidSchema, getRouterParam(event, 'variantId'))
 
-  const parts = await readMultipartFormData(event)
+  const parts = await readMultipartParts(event)
   const files = parts?.filter((part) => part.filename && part.data?.length) ?? []
   if (!files.length) throw invalidInput('Es wurde keine Datei übermittelt.')
 

@@ -1,21 +1,18 @@
 <script setup lang="ts">
-import { materialTypes } from '#shared/utils/labels'
 import { aiMaterialAcceptAttribute, aiMaterialFormatsLabel } from '#shared/utils/ai-material-formats'
 import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
 import { materialPfad } from '#shared/utils/material-pfad'
 import type { MaterialDetail } from '~~/server/repositories/material.repository'
-import type { MaterialType } from '#shared/types/domain'
 
 definePageMeta({ middleware: [] })
-useHead({ title: 'Material mit KI anlegen' })
+useHead({ title: 'Lehrwerk mit KI anlegen' })
 
 const { darfBearbeiten } = useSitzung()
 const { aufruf, laeuft } = useApi()
 const { schlagwortNamen } = useTaxonomie()
-const { optionen: schulformOptionen } = useSchulformen()
 
 if (!darfBearbeiten.value) {
-  await navigateTo('/materialien')
+  await navigateTo('/lehrwerke')
 }
 
 interface AnalyseErgebnis {
@@ -29,11 +26,8 @@ interface AnalyseErgebnis {
   aiEnabled: boolean
   suggestions: {
     title: string
-    materialType: MaterialType
-    schoolForm: string | null
     subjectNames: string[]
     tagNames: string[]
-    learningObjectives: string[]
     description: string
     contentSummary: string
     aiUsed: boolean
@@ -60,13 +54,11 @@ const kiVorschlaegeFehlgeschlagen = computed(
 const formular = reactive({
   title: '',
   description: '',
-  content: '',
-  materialType: 'arbeitsblatt' as MaterialType,
-  schoolForm: null as string | null,
+  source: '',
+  author: '',
   subjectNames: [] as string[],
   gradeLevels: [] as GradeLevel[],
   tagNames: [] as string[],
-  learningObjectives: [] as string[],
 })
 
 const ACCEPT = aiMaterialAcceptAttribute()
@@ -91,6 +83,7 @@ async function dateiAnalysieren(files: FileList | null | undefined) {
 
   const body = new FormData()
   body.append('file', file)
+  body.append('context', JSON.stringify({ defaultMaterialType: 'lehrwerk' }))
 
   try {
     const ergebnis = await $fetch<AnalyseErgebnis>('/api/materials/ai/analyze', {
@@ -99,13 +92,9 @@ async function dateiAnalysieren(files: FileList | null | undefined) {
     })
     analyse.value = ergebnis
     formular.title = ergebnis.suggestions.title
-    formular.description = ergebnis.suggestions.description
-    formular.content = ergebnis.suggestions.contentSummary
-    formular.materialType = ergebnis.suggestions.materialType
-    formular.schoolForm = ergebnis.suggestions.schoolForm
+    formular.description = ergebnis.suggestions.description || ergebnis.suggestions.contentSummary
     formular.subjectNames = [...ergebnis.suggestions.subjectNames]
     formular.tagNames = [...ergebnis.suggestions.tagNames]
-    formular.learningObjectives = [...ergebnis.suggestions.learningObjectives]
   } catch (error) {
     analyse.value = null
     fehler.value = toApiFehler(error).nachricht
@@ -130,15 +119,14 @@ async function anlegen() {
       body: {
         title: formular.title.trim(),
         description: formular.description || null,
-        content: formular.content || null,
-        materialType: formular.materialType,
-        schoolForm: formular.schoolForm || null,
+        materialType: 'lehrwerk',
+        source: formular.source || null,
+        author: formular.author || null,
         subjectNames: formular.subjectNames,
         gradeLevels: formular.gradeLevels,
         tagNames: formular.tagNames,
-        learningObjectives: formular.learningObjectives,
       },
-      erfolgsmeldung: 'Material mit KI-Vorschlägen angelegt.',
+      erfolgsmeldung: 'Lehrwerk mit KI-Vorschlägen angelegt.',
     },
   )
   if (!ergebnis) return
@@ -158,28 +146,26 @@ async function zuruecksetzen() {
   fehler.value = null
   formular.title = ''
   formular.description = ''
-  formular.content = ''
-  formular.materialType = 'arbeitsblatt'
-  formular.schoolForm = null
+  formular.source = ''
+  formular.author = ''
   formular.subjectNames = []
   formular.gradeLevels = []
   formular.tagNames = []
-  formular.learningObjectives = []
 }
 </script>
 
 <template>
   <div>
     <LayoutSeitenkopf
-      zurueck-to="/materialien/neu"
+      zurueck-to="/lehrwerke/neu"
       zurueck-label="Wege zum Anlegen"
-      kicker="Materialien"
+      kicker="Lehrwerke"
       titel="Mit KI anlegen"
-      untertitel="Datei hochladen – Vorschläge prüfen und nach Bedarf anpassen. Scans werden per Vision/OCR lesbar."
+      untertitel="Buchdatei hochladen – Vorschläge prüfen und nach Bedarf anpassen. Scans werden per Vision/OCR lesbar."
     />
 
     <form class="space-y-5" @submit.prevent="anlegen">
-      <UiCard titel="Dokument" icon="wand-magic-sparkles">
+      <UiCard titel="Buchdatei" icon="wand-magic-sparkles">
         <div
           v-if="analysiertLaeuft"
           class="rounded-xl border border-line bg-surface-sunken/40 px-6 py-10 text-center"
@@ -192,7 +178,7 @@ async function zuruecksetzen() {
             {{ analyseDateiname }}
           </p>
           <p class="mt-2 text-xs text-ink-subtle">
-            Text wird extrahiert und KI-Vorschläge erstellt – das kann einige Sekunden dauern.
+            Text wird extrahiert und KI-Vorschläge erstellt – bei ganzen Büchern kann das etwas länger dauern.
           </p>
         </div>
 
@@ -205,9 +191,9 @@ async function zuruecksetzen() {
           @drop.prevent="ziehe = false; dateiAnalysieren(($event as DragEvent).dataTransfer?.files)"
         >
           <UiIcon name="cloud-arrow-up" class="mb-3 text-3xl text-primary" />
-          <p class="font-medium text-ink">Datei hier ablegen</p>
+          <p class="font-medium text-ink">Buchdatei hier ablegen</p>
           <p class="mt-1 text-sm text-ink-muted">
-            {{ FORMAT_HINWEIS }} – Moodle-Archive bitte separat
+            {{ FORMAT_HINWEIS }} – meist die PDF des Schülerbuchs
           </p>
           <label class="mt-4 inline-flex cursor-pointer">
             <input
@@ -268,45 +254,31 @@ async function zuruecksetzen() {
       </UiCard>
 
       <template v-if="analyse">
-        <UiCard titel="Grundangaben" icon="file-lines" einklappbar einklapp-id="material-ki-grundangaben">
+        <UiCard titel="Angaben" icon="book" einklappbar einklapp-id="lehrwerk-ki-angaben">
           <div class="space-y-4">
             <UiField label="Titel" pflicht>
-              <UiInput v-model="formular.title" placeholder="z. B. AB 1 – Photosynthese" />
+              <UiInput v-model="formular.title" placeholder="z. B. Klett Biologie Oberstufe" />
             </UiField>
             <UiEinklappbaresFeld
               v-model="formular.description"
               label="Kurzbeschreibung"
-              einklapp-id="material-ki-beschreibung"
+              einklapp-id="lehrwerk-ki-beschreibung"
               leer-vorschau="Keine Beschreibung"
-              placeholder="Worum geht es?"
+              placeholder="Ausgabe, Band, Verlag …"
               immer-offen
             />
             <div class="grid gap-4 sm:grid-cols-2">
-              <UiField label="Materialart" pflicht>
-                <UiSelect
-                  v-model="formular.materialType"
-                  :optionen="materialTypes.options().map((o) => ({ value: o.value, label: o.label }))"
-                />
+              <UiField label="Verlag / Quelle">
+                <UiInput v-model="formular.source" placeholder="z. B. Klett" />
               </UiField>
-              <UiField label="Schulform">
-                <UiSelect
-                  v-model="formular.schoolForm"
-                  platzhalter="Optional"
-                  :optionen="schulformOptionen.map((o) => ({ value: o.value, label: o.label }))"
-                />
+              <UiField label="Autor">
+                <UiInput v-model="formular.author" />
               </UiField>
             </div>
           </div>
         </UiCard>
 
-        <UiCard titel="Inhalt / Textfassung" icon="align-left">
-          <MaterialInhaltFeld
-            v-model="formular.content"
-            einklapp-id="material-ki-inhalt"
-          />
-        </UiCard>
-
-        <UiCard titel="Einordnung" icon="sitemap" einklappbar einklapp-id="material-ki-einordnung">
+        <UiCard titel="Einordnung" icon="sitemap" einklappbar einklapp-id="lehrwerk-ki-einordnung">
           <div class="space-y-4">
             <UiField label="Fächer">
               <MaterialFachAuswahl v-model="formular.subjectNames" />
@@ -316,12 +288,6 @@ async function zuruecksetzen() {
             </UiField>
             <UiField label="Schlagwörter">
               <UiTagInput v-model="formular.tagNames" :vorschlaege="schlagwortNamen" />
-            </UiField>
-            <UiField label="Lernziele">
-              <UiTagInput
-                v-model="formular.learningObjectives"
-                platzhalter="Lernziel hinzufügen …"
-              />
             </UiField>
           </div>
         </UiCard>

@@ -55,7 +55,7 @@ export default defineNuxtConfig({
     sessionSecret: '',
     encryptionKey: '',
     uploadDir: './data/uploads',
-    maxUploadBytes: '104857600',
+    maxUploadBytes: '268435456',
     initialAdminEmail: '',
     initialAdminPassword: '',
     logLevel: 'info',

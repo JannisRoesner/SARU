@@ -1,4 +1,5 @@
 import { writeFile, readFile } from 'node:fs/promises'
+import { PDFDocument } from 'pdf-lib'
 import { oeffentlicheFehlermeldung } from '#shared/utils/public-error'
 import { createLogger } from '../../utils/logger'
 import {
@@ -23,9 +24,16 @@ export interface EnsuredTextResult {
   status: ExtractionResult['status']
   text: string
   pageCount?: number
+  /** Tatsächlich gelesene Seiten, wenn per maxPages begrenzt. */
+  pagesUsed?: number
   error?: string
   /** Woher der Text stammt – Vision nur, wenn die Textebene leer war. */
   method: ExtractionMethod
+}
+
+export interface EnsureExtractedTextOptions {
+  /** Nur die ersten N Seiten für Text/Vision (Metadaten-Vorschau). */
+  maxPages?: number
 }
 
 export function visionExtractionAvailable(settings: AiSettings): boolean {
@@ -41,13 +49,32 @@ export async function ensureExtractedText(
   buffer: Buffer,
   fileName: string,
   settings: AiSettings | null,
+  options: EnsureExtractedTextOptions = {},
 ): Promise<EnsuredTextResult> {
-  const layer = await extractText(buffer, fileName)
+  let work = buffer
+  let totalPages: number | undefined
+  const maxPages = options.maxPages && options.maxPages > 0 ? options.maxPages : undefined
+
+  if (maxPages && extensionOf(fileName) === 'pdf') {
+    try {
+      const sliced = await slicePdfFront(buffer, maxPages)
+      work = sliced.preview
+      totalPages = sliced.pageCount
+    } catch (error) {
+      log.warn('PDF-Vorschau (erste Seiten) fehlgeschlagen – lese Original', { fileName, error })
+    }
+  }
+
+  const layer = await extractText(work, fileName, { maxPages })
+  const pageCount = totalPages ?? layer.pageCount
+  const pagesUsed = maxPages && pageCount ? Math.min(maxPages, pageCount) : pageCount
+
   if (layer.text.trim()) {
     return {
       status: 'erfolgreich',
       text: layer.text,
-      pageCount: layer.pageCount,
+      pageCount,
+      pagesUsed,
       method: 'text_layer',
     }
   }
@@ -57,26 +84,29 @@ export async function ensureExtractedText(
     return {
       status: layer.status,
       text: '',
-      pageCount: layer.pageCount,
+      pageCount,
+      pagesUsed,
       error: layer.error,
       method: 'none',
     }
   }
 
   try {
-    const vision = await extractTextViaVision(buffer, fileName, settings)
+    const vision = await extractTextViaVision(work, fileName, settings, maxPages)
     if (vision.text.trim()) {
       return {
         status: 'erfolgreich',
         text: truncate(vision.text),
-        pageCount: vision.pageCount ?? layer.pageCount,
+        pageCount: totalPages ?? vision.pageCount ?? layer.pageCount,
+        pagesUsed: vision.pageCount ?? pagesUsed,
         method: 'vision',
       }
     }
     return {
       status: layer.status === 'fehlgeschlagen' ? 'fehlgeschlagen' : 'nicht_unterstuetzt',
       text: '',
-      pageCount: layer.pageCount ?? vision.pageCount,
+      pageCount: totalPages ?? layer.pageCount ?? vision.pageCount,
+      pagesUsed,
       error:
         vision.error ||
         layer.error ||
@@ -88,7 +118,8 @@ export async function ensureExtractedText(
     return {
       status: layer.status === 'fehlgeschlagen' ? 'fehlgeschlagen' : 'nicht_unterstuetzt',
       text: '',
-      pageCount: layer.pageCount,
+      pageCount,
+      pagesUsed,
       error: oeffentlicheFehlermeldung(
         error,
         'Die Vision-Textextraktion ist fehlgeschlagen.',
@@ -103,10 +134,11 @@ export async function ensureExtractedTextFromStorage(
   storageKey: string,
   fileName: string,
   settings: AiSettings | null,
+  options: EnsureExtractedTextOptions = {},
 ): Promise<EnsuredTextResult> {
   try {
     const buffer = await readFile(resolveStoragePath(storageKey))
-    return await ensureExtractedText(buffer, fileName, settings)
+    return await ensureExtractedText(buffer, fileName, settings, options)
   } catch (error) {
     log.warn('Textextraktion aus Speicher fehlgeschlagen', { storageKey, error })
     // Fallback ohne Vision, damit der Status konsistent bleibt.
@@ -140,10 +172,25 @@ export async function readExtractedTextSidecar(
   }
 }
 
+async function slicePdfFront(
+  buffer: Buffer,
+  maxPages: number,
+): Promise<{ preview: Buffer; pageCount: number }> {
+  const src = await PDFDocument.load(buffer, { ignoreEncryption: true })
+  const pageCount = src.getPageCount()
+  if (pageCount <= maxPages) return { preview: buffer, pageCount }
+
+  const out = await PDFDocument.create()
+  const copied = await out.copyPages(src, Array.from({ length: maxPages }, (_, i) => i))
+  for (const page of copied) out.addPage(page)
+  return { preview: Buffer.from(await out.save()), pageCount }
+}
+
 async function extractTextViaVision(
   buffer: Buffer,
   fileName: string,
   settings: AiSettings,
+  maxPages?: number,
 ): Promise<{ text: string; pageCount?: number; error?: string }> {
   const model = (settings.visionModel || settings.chatModel).trim()
   const parts: ChatPart[] = [
@@ -166,7 +213,10 @@ Wenn etwas unleserlich ist, überspringe es still.`,
       fileName,
     })
   } else {
-    const pages = await rasterizePdf(buffer, { maxPages: MAX_OCR_PAGES, scale: 1.8 })
+    const pages = await rasterizePdf(buffer, {
+      maxPages: maxPages ?? MAX_OCR_PAGES,
+      scale: 1.8,
+    })
     if (!pages.length) {
       return {
         text: '',

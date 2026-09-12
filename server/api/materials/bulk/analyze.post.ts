@@ -1,4 +1,4 @@
-import { readMultipartFormData } from 'h3'
+import { readMultipartParts } from '../../../utils/multipart'
 import { analyzeBulkPdfUpload } from '../../../services/bulk-upload/bulk-upload.service'
 import type { BulkUploadMapping } from '../../../services/bulk-upload/types'
 import { recordAudit } from '../../../services/audit.service'
@@ -11,7 +11,7 @@ import { parseOrThrow } from '../../../utils/validation'
 export default defineEventHandler(async (event) => {
   const user = await requireEditor(event)
 
-  const parts = await readMultipartFormData(event)
+  const parts = await readMultipartParts(event)
   if (!parts?.length) throw invalidInput('Es wurden keine Dateien übermittelt.')
 
   const fileParts = parts.filter((part) => part.filename && part.data?.length)

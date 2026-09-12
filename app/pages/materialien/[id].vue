@@ -553,9 +553,29 @@ async function kiLoesung() {
 }
 
 async function materialLoeschen() {
-  const ok = await loeschen(id.value)
+  const typ = data.value?.materialType
+  const ok = await loeschen(
+    id.value,
+    typ === 'lehrwerk' ? 'Lehrwerk gelöscht.' : 'Material gelöscht.',
+  )
   loeschenOffen.value = false
-  if (ok) await navigateTo('/materialien')
+  if (ok) await navigateTo(typ === 'lehrwerk' ? '/lehrwerke' : '/materialien')
+}
+
+async function alsLehrwerkFuehren() {
+  if (!darfBearbeiten.value || formular.materialType === 'lehrwerk') return
+  formular.materialType = 'lehrwerk'
+  const ergebnis = await aufruf(`/api/materials/${id.value}`, {
+    method: 'PATCH',
+    body: { ...formular, materialType: 'lehrwerk' },
+    erfolgsmeldung: 'Als Lehrwerk geführt.',
+  })
+  if (!ergebnis) {
+    formular.materialType = data.value?.materialType ?? formular.materialType
+    return
+  }
+  autosave.alsGespeichertMarkieren()
+  await navigateTo(`/lehrwerke/${id.value}`)
 }
 
 function assetOeffnen(asset: {
@@ -956,6 +976,19 @@ function loesungKorrigieren() {
                     :disabled="!darfBearbeiten || istMoodleKurs"
                     :optionen="materialTypes.options().map((o) => ({ value: o.value, label: o.label }))"
                   />
+                  <p
+                    v-if="darfBearbeiten && !istMoodleKurs && formular.materialType !== 'lehrwerk'"
+                    class="mt-1.5 text-xs text-ink-muted"
+                  >
+                    Ein ganzes Schulbuch?
+                    <button
+                      type="button"
+                      class="font-medium text-primary hover:underline"
+                      @click="alsLehrwerkFuehren"
+                    >
+                      Als Lehrwerk führen
+                    </button>
+                  </p>
                 </UiField>
                 <UiField label="Schulform">
                   <UiSelect
@@ -1297,8 +1330,10 @@ function loesungKorrigieren() {
     <UiConfirm
       v-model="loeschenOffen"
       gefahr
-      titel="Material löschen?"
-      text="Das Material und alle Varianten sowie Anhänge werden unwiderruflich entfernt. Dieser Vorgang kann nicht rückgängig gemacht werden."
+      :titel="data?.materialType === 'lehrwerk' ? 'Lehrwerk löschen?' : 'Material löschen?'"
+      :text="data?.materialType === 'lehrwerk'
+        ? 'Das Lehrwerk und die Buchdatei werden unwiderruflich entfernt. Zugeordnete Materialien bleiben erhalten, nur die Zuordnung entfällt.'
+        : 'Das Material und alle Varianten sowie Anhänge werden unwiderruflich entfernt. Dieser Vorgang kann nicht rückgängig gemacht werden.'"
       bestaetigen="Ja, ich will löschen"
       @bestaetigt="materialLoeschen"
     />
