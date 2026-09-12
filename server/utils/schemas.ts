@@ -93,6 +93,8 @@ export const materialListSchema = paginationSchema.extend({
   onlyFavorites: booleanish,
   includeArchived: booleanish,
   missingSolution: booleanish,
+  belongsToId: uuidSchema.optional(),
+  excludeMaterialTypes: csvArray(z.enum(MATERIAL_TYPES)),
 })
 
 export const variantCreateSchema = z.object({
@@ -120,6 +122,8 @@ export const relationSchema = z.object({
   targetId: uuidSchema,
   relationType: z.enum(MATERIAL_RELATION_TYPES),
   note: nullableText(500),
+  /** Standard: vom geöffneten Material zum Ziel. `eingehend` dreht die Richtung. */
+  direction: z.enum(['ausgehend', 'eingehend']).optional().default('ausgehend'),
 })
 
 export const materialRefSchema = z.object({
@@ -330,7 +334,7 @@ export const importMappingSchema = z.object({
     .optional(),
 })
 
-/** Gemeinsame Zuordnung + pro Datei editierbare Vorschläge beim PDF-Stapel-Upload. */
+/** Gemeinsame Zuordnung + pro Bündel editierbare Vorschläge beim Stapel-Upload. */
 export const bulkUploadMappingSchema = z.object({
   subjectId: uuidSchema.nullish(),
   subjectName: z.string().max(120).optional(),
@@ -338,6 +342,8 @@ export const bulkUploadMappingSchema = z.object({
   schoolForm: z.enum(SCHOOL_FORMS).nullish(),
   defaultMaterialType: z.enum(MATERIAL_TYPES).default('arbeitsblatt'),
   linkDuplicates: z.boolean().default(true),
+  createLehrwerk: z.boolean().optional(),
+  lehrwerkTitle: z.string().max(300).optional(),
   records: z
     .record(
       z.string(),
@@ -351,6 +357,11 @@ export const bulkUploadMappingSchema = z.object({
         content: z.string().max(20_000).optional(),
         action: z.enum(['erstellen', 'ueberspringen']).default('erstellen'),
         duplicateOfId: uuidSchema.nullish(),
+        fileRoles: z
+          .record(z.string(), z.enum(['schueler', 'loesung', 'einzeln', 'anhaengsel']))
+          .optional(),
+        links: z.record(z.string(), z.boolean()).optional(),
+        solutionTitle: z.string().max(300).optional(),
       }),
     )
     .optional(),

@@ -4,12 +4,14 @@ import {
   origins,
   variantKinds,
   materialRelationTypes,
+  relationAnzeigeLabel,
 } from '#shared/utils/labels'
+import { materialPfad } from '#shared/utils/material-pfad'
 import { istKiMusterloesung, kiAutorAnzeige } from '#shared/utils/ki'
 import { solutionEditorMode, type SolutionEditorMode } from '#shared/utils/solution-editor'
 import { istMoodleKursMaterial, istH5pMaterial, kursarchivErweiterung } from '#shared/utils/moodle'
 import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
-import type { MaterialDetail } from '~~/server/repositories/material.repository'
+import type { MaterialDetail, MaterialSummary } from '~~/server/repositories/material.repository'
 import type { StoredStructuredSolution } from '~~/server/database/schema/materials'
 
 const route = useRoute()
@@ -96,6 +98,8 @@ const loeschenOffen = ref(false)
 const varianteOffen = ref(false)
 const linkOffen = ref(false)
 const relationOffen = ref(false)
+const relationPickerOffen = ref(false)
+const relationZiel = ref<MaterialSummary | null>(null)
 const kiOffen = ref(false)
 const vorschauOffen = ref(false)
 const vorschauAssetId = ref<string | null>(null)
@@ -296,6 +300,23 @@ async function assetLoeschen(assetId: string) {
   if (ok !== null) await refresh()
 }
 
+const relationPickerTypen = computed(() =>
+  neueRelation.relationType === 'gehoert_zu' ? ['lehrwerk'] : [],
+)
+
+watch(
+  () => neueRelation.relationType,
+  () => {
+    neueRelation.targetId = ''
+    relationZiel.value = null
+  },
+)
+
+function relationZielWaehlen(material: MaterialSummary) {
+  relationZiel.value = material
+  neueRelation.targetId = material.id
+}
+
 async function relationHinzufuegen() {
   const ergebnis = await aufruf(`/api/materials/${id.value}/relations`, {
     method: 'POST',
@@ -310,6 +331,7 @@ async function relationHinzufuegen() {
     relationOffen.value = false
     neueRelation.targetId = ''
     neueRelation.note = ''
+    relationZiel.value = null
     await refresh()
   }
 }
@@ -472,8 +494,12 @@ function loesungKorrigieren() {
 
     <template v-else>
       <div class="mb-2">
-        <NuxtLink to="/materialien" class="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-primary">
-          <UiIcon name="arrow-left" fest /> Materialien
+        <NuxtLink
+          :to="data.materialType === 'lehrwerk' ? '/lehrwerke' : '/materialien'"
+          class="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-primary"
+        >
+          <UiIcon name="arrow-left" fest />
+          {{ data.materialType === 'lehrwerk' ? 'Lehrwerke' : 'Materialien' }}
         </NuxtLink>
       </div>
 
@@ -514,6 +540,14 @@ function loesungKorrigieren() {
         </div>
 
         <LayoutAktionen class="sm:ml-auto sm:justify-end">
+          <UiButton
+            v-if="data.materialType === 'lehrwerk'"
+            :to="`/lehrwerke/${data.id}`"
+            variante="sekundaer"
+            icon="book"
+          >
+            Lehrwerk-Ansicht
+          </UiButton>
           <UiSpeichernAnzeige
             v-if="darfBearbeiten"
             :zustand="autosave.zustand.value"
@@ -943,10 +977,10 @@ function loesungKorrigieren() {
                 class="flex items-center gap-3 rounded-lg border border-line px-3 py-2"
               >
                 <UiBadge groesse="sm" :ton="materialRelationTypes.tone(rel.relationType as never)">
-                  {{ materialRelationTypes.label(rel.relationType as never) }}
+                  {{ relationAnzeigeLabel(rel.relationType, rel.direction) }}
                 </UiBadge>
                 <NuxtLink
-                  :to="`/materialien/${rel.material.id}`"
+                  :to="materialPfad(rel.material)"
                   class="min-w-0 flex-1 truncate font-medium hover:text-primary"
                 >
                   {{ rel.material.title }}
@@ -1088,14 +1122,25 @@ function loesungKorrigieren() {
 
     <UiModal v-model="relationOffen" titel="Material verknüpfen" icon="link">
       <div class="space-y-4">
-        <UiField label="Ziel-Material-ID" pflicht hinweis="UUID des verknüpften Materials">
-          <UiInput v-model="neueRelation.targetId" placeholder="xxxxxxxx-xxxx-…" />
-        </UiField>
         <UiField label="Art der Verknüpfung">
           <UiSelect
             v-model="neueRelation.relationType"
             :optionen="materialRelationTypes.options().map((o) => ({ value: o.value, label: o.label }))"
           />
+        </UiField>
+        <UiField
+          label="Material"
+          pflicht
+          :hinweis="neueRelation.relationType === 'gehoert_zu' ? 'Wähle das zugehörige Lehrwerk.' : undefined"
+        >
+          <div class="flex flex-wrap items-center gap-2">
+            <UiButton variante="sekundaer" icon="folder-open" @click="relationPickerOffen = true">
+              {{ relationZiel ? 'Anders wählen' : 'Material wählen' }}
+            </UiButton>
+            <span v-if="relationZiel" class="min-w-0 truncate text-sm font-medium text-ink">
+              {{ relationZiel.title }}
+            </span>
+          </div>
         </UiField>
         <UiField label="Notiz">
           <UiInput v-model="neueRelation.note" />
@@ -1113,6 +1158,14 @@ function loesungKorrigieren() {
         </UiButton>
       </template>
     </UiModal>
+
+    <MaterialAuswahlModal
+      v-model="relationPickerOffen"
+      :titel="neueRelation.relationType === 'gehoert_zu' ? 'Lehrwerk wählen' : 'Material wählen'"
+      :ausschliessen="[id]"
+      :material-types="relationPickerTypen"
+      @ausgewaehlt="relationZielWaehlen"
+    />
 
     <UiModal v-model="kiOffen" titel="Musterlösung erstellen" icon="wand-magic-sparkles">
       <div class="mb-4 space-y-2 text-sm text-ink-muted">

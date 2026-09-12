@@ -17,12 +17,14 @@ export default defineEventHandler(async (event) => {
     getActiveSeries(4),
     db.execute<{
       materialien: number
+      lehrwerke: number
       stunden: number
       reihen: number
       anhaenge: number
       kiLoesungen: number
     }>(sql`select
-      (select count(*)::int from materials where not is_archived) as materialien,
+      (select count(*)::int from materials where not is_archived and material_type <> 'lehrwerk') as materialien,
+      (select count(*)::int from materials where not is_archived and material_type = 'lehrwerk') as lehrwerke,
       (select count(*)::int from lessons) as stunden,
       (select count(*)::int from series where status <> 'archiviert') as reihen,
       (select count(*)::int from material_assets where kind = 'datei') as anhaenge,
@@ -36,6 +38,7 @@ export default defineEventHandler(async (event) => {
     aktiveReihen: activeSeries,
     kennzahlen: counts[0] ?? {
       materialien: 0,
+      lehrwerke: 0,
       stunden: 0,
       reihen: 0,
       anhaenge: 0,

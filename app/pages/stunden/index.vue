@@ -79,8 +79,13 @@ watch(page, syncQuery)
     </LayoutSeitenkopf>
 
     <div class="mb-5 grid gap-3 lg:grid-cols-[1fr_12rem_12rem]">
-      <UiField label="Suche">
-        <UiInput v-model="suche" icon="magnifying-glass" placeholder="Thema, Notiz …" />
+      <UiField>
+        <UiInput
+          v-model="suche"
+          icon="magnifying-glass"
+          placeholder="Liste eingrenzen …"
+          aria-label="Stundenliste eingrenzen"
+        />
       </UiField>
       <UiField label="Status">
         <UiSelect

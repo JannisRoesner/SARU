@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { seriesStatuses, materialTypes } from '#shared/utils/labels'
+import { materialPfad } from '#shared/utils/material-pfad'
 import { istMoodleKursMaterial } from '#shared/utils/moodle'
 import type { SeriesDetail } from '~~/server/repositories/series.repository'
 import type { LessonSummary } from '~~/server/repositories/lesson.repository'
@@ -369,7 +370,7 @@ async function reiheLoeschen() {
                   title="Moodle-Kursbackup"
                 />
                 <NuxtLink
-                  :to="`/materialien/${mat.materialId}`"
+                  :to="materialPfad({ id: mat.materialId, materialType: mat.materialType })"
                   class="min-w-0 flex-1 truncate font-medium hover:text-primary"
                 >
                   {{ mat.title }}
@@ -395,8 +396,13 @@ async function reiheLoeschen() {
     </template>
 
     <UiModal v-model="stundeModal" titel="Stunde zuordnen" icon="chalkboard-user" breite="lg">
-      <UiField label="Suche">
-        <UiInput v-model="stundenSuche" icon="magnifying-glass" placeholder="Freie Stunden ohne Reihe …" />
+      <UiField>
+        <UiInput
+          v-model="stundenSuche"
+          icon="magnifying-glass"
+          placeholder="Freie Stunden ohne Reihe …"
+          aria-label="Freie Stunden eingrenzen"
+        />
       </UiField>
       <div class="mt-4 max-h-[50vh] space-y-2 overflow-y-auto">
         <UiLeerzustand

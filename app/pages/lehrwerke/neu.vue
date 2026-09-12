@@ -1,36 +1,27 @@
 <script setup lang="ts">
-import { materialTypes } from '#shared/utils/labels'
-import { materialPfad } from '#shared/utils/material-pfad'
 import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
+import { materialPfad } from '#shared/utils/material-pfad'
 import type { MaterialDetail } from '~~/server/repositories/material.repository'
 
 definePageMeta({ middleware: [] })
-useHead({ title: 'Material klassisch anlegen' })
+useHead({ title: 'Lehrwerk anlegen' })
 
 const { darfBearbeiten } = useSitzung()
 const { aufruf, laeuft } = useApi()
 const { schlagwortNamen } = useTaxonomie()
-const { optionen: schulformOptionen } = useSchulformen()
-const route = useRoute()
-const startTyp = String(route.query.typ ?? '')
 
 if (!darfBearbeiten.value) {
-  await navigateTo('/materialien')
+  await navigateTo('/lehrwerke')
 }
 
 const formular = reactive({
   title: '',
   description: '',
-  materialType: startTyp && startTyp in materialTypes.map ? startTyp : 'arbeitsblatt',
-  schoolForm: null as string | null,
-  subjectNames: [] as string[],
-  topicIds: [] as string[],
-  learningGroupIds: [] as string[],
-  gradeLevels: [] as GradeLevel[],
-  tagNames: [] as string[],
-  learningObjectives: [] as string[],
   source: '',
   author: '',
+  subjectNames: [] as string[],
+  gradeLevels: [] as GradeLevel[],
+  tagNames: [] as string[],
 })
 
 const dateien = ref<File[]>([])
@@ -59,13 +50,16 @@ async function anlegen() {
   const ergebnis = await aufruf<MaterialDetail>('/api/materials', {
     method: 'POST',
     body: {
-      ...formular,
+      title: formular.title,
       description: formular.description || null,
-      schoolForm: formular.schoolForm || null,
+      materialType: 'lehrwerk',
       source: formular.source || null,
       author: formular.author || null,
+      subjectNames: formular.subjectNames,
+      gradeLevels: formular.gradeLevels,
+      tagNames: formular.tagNames,
     },
-    erfolgsmeldung: mitDateien ? undefined : 'Material angelegt.',
+    erfolgsmeldung: mitDateien ? undefined : 'Lehrwerk angelegt.',
   })
   if (!ergebnis) return
 
@@ -74,11 +68,11 @@ async function anlegen() {
     if (variante) {
       const body = new FormData()
       for (const file of dateien.value) body.append('files', file)
-      body.append('role', 'anhang')
+      body.append('role', 'haupt')
       await aufruf(`/api/variants/${variante.id}/uploads`, {
         method: 'POST',
         body,
-        erfolgsmeldung: 'Material angelegt und Dateien hochgeladen.',
+        erfolgsmeldung: 'Lehrwerk angelegt und Buchdatei hochgeladen.',
       })
     }
   }
@@ -90,49 +84,51 @@ async function anlegen() {
 <template>
   <div>
     <LayoutSeitenkopf
-      zurueck-to="/materialien/neu"
-      zurueck-label="Wege zum Anlegen"
-      kicker="Materialien"
-      titel="Klassisch anlegen"
-      untertitel="Titel und Typ genügen zum Start. Dateien kannst du direkt hier anhängen."
+      zurueck-to="/lehrwerke"
+      zurueck-label="Alle Lehrwerke"
+      kicker="Lehrwerke"
+      titel="Lehrwerk anlegen"
+      untertitel="Titel genügt zum Start. Die Buch-PDF und zugeordnete Materialien kannst du danach ergänzen."
     />
 
     <form class="space-y-5" @submit.prevent="anlegen">
-      <UiCard titel="Grundangaben" icon="file-lines" einklappbar einklapp-id="material-neu-grundangaben">
+      <UiCard titel="Angaben" icon="book">
         <div class="space-y-4">
           <UiField label="Titel" pflicht>
-            <UiInput v-model="formular.title" placeholder="z. B. AB 1 – Photosynthese" />
+            <UiInput v-model="formular.title" placeholder="z. B. Klett Biologie Oberstufe" />
           </UiField>
           <UiEinklappbaresFeld
             v-model="formular.description"
             label="Kurzbeschreibung"
-            einklapp-id="material-neu-beschreibung"
+            einklapp-id="lehrwerk-neu-beschreibung"
             leer-vorschau="Keine Beschreibung"
-            placeholder="Worum geht es?"
+            placeholder="Ausgabe, Band, Verlag …"
             immer-offen
           />
           <div class="grid gap-4 sm:grid-cols-2">
-            <UiField label="Materialart" pflicht>
-              <UiSelect
-                v-model="formular.materialType"
-                :optionen="materialTypes.options().map((o) => ({ value: o.value, label: o.label }))"
-              />
+            <UiField label="Verlag / Quelle">
+              <UiInput v-model="formular.source" placeholder="z. B. Klett" />
             </UiField>
-            <UiField label="Schulform">
-              <UiSelect
-                v-model="formular.schoolForm"
-                platzhalter="Optional"
-                :optionen="schulformOptionen.map((o) => ({ value: o.value, label: o.label }))"
-              />
+            <UiField label="Autor">
+              <UiInput v-model="formular.author" />
             </UiField>
           </div>
+          <UiField label="Fächer">
+            <MaterialFachAuswahl v-model="formular.subjectNames" />
+          </UiField>
+          <UiField label="Jahrgangsstufen">
+            <UiJahrgangsstufenAuswahl v-model="formular.gradeLevels" />
+          </UiField>
+          <UiField label="Schlagwörter">
+            <UiTagInput v-model="formular.tagNames" :vorschlaege="schlagwortNamen" />
+          </UiField>
         </div>
       </UiCard>
 
       <UiCard
-        titel="Dateien"
-        untertitel="Optional – Anhänge werden nach dem Anlegen zur Standardfassung hochgeladen."
-        icon="cloud-arrow-up"
+        titel="Buchdatei"
+        untertitel="Optional – meist die PDF des Schülerbuchs. Serviceband und Lösungsheft ordnest du danach als eigene Materialien zu."
+        icon="book"
       >
         <div
           class="rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors"
@@ -142,10 +138,8 @@ async function anlegen() {
           @drop.prevent="ziehe = false; dateienHinzufuegen(($event as DragEvent).dataTransfer?.files)"
         >
           <UiIcon name="cloud-arrow-up" class="mb-3 text-3xl text-primary" />
-          <p class="font-medium text-ink">Dateien hier ablegen</p>
-          <p class="mt-1 text-sm text-ink-muted">
-            z. B. PDF, Bilder oder Office-Dokumente – mehrere Dateien möglich
-          </p>
+          <p class="font-medium text-ink">Buch-PDF hier ablegen</p>
+          <p class="mt-1 text-sm text-ink-muted">PDF oder andere Dateien – mehrere möglich</p>
           <label class="mt-4 inline-flex cursor-pointer">
             <input
               ref="dateiInput"
@@ -182,28 +176,8 @@ async function anlegen() {
         </ul>
       </UiCard>
 
-      <UiCard titel="Einordnung" icon="sitemap" einklappbar einklapp-id="material-neu-einordnung">
-        <div class="space-y-4">
-          <UiField label="Fächer">
-            <MaterialFachAuswahl v-model="formular.subjectNames" />
-          </UiField>
-          <UiField label="Jahrgangsstufen">
-            <UiJahrgangsstufenAuswahl v-model="formular.gradeLevels" />
-          </UiField>
-          <UiField label="Schlagwörter">
-            <UiTagInput v-model="formular.tagNames" :vorschlaege="schlagwortNamen" />
-          </UiField>
-          <UiField label="Lernziele">
-            <UiTagInput
-              v-model="formular.learningObjectives"
-              platzhalter="Lernziel hinzufügen …"
-            />
-          </UiField>
-        </div>
-      </UiCard>
-
       <div class="flex justify-end gap-2">
-        <UiButton to="/materialien/neu" variante="sekundaer">Abbrechen</UiButton>
+        <UiButton to="/lehrwerke" variante="sekundaer">Abbrechen</UiButton>
         <UiButton
           type="submit"
           variante="primaer"

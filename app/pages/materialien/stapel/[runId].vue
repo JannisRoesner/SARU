@@ -6,6 +6,12 @@ import {
   type GradeLevel,
 } from '#shared/utils/jahrgangsstufen'
 import type { MaterialType } from '#shared/types/domain'
+import {
+  BULK_FILE_ROLE_LABELS,
+  BULK_FOLDER_ROLE_LABELS,
+  type BulkFileRole,
+  type BulkFolderRole,
+} from '#shared/utils/bulk-upload'
 
 const route = useRoute()
 const runId = computed(() => String(route.params.runId))
@@ -18,14 +24,29 @@ const jahrgangOptionen = jahrgangsstufenOptionen()
 
 if (!darfBearbeiten.value) await navigateTo('/materialien')
 
+const dateiRollen = (Object.entries(BULK_FILE_ROLE_LABELS) as [BulkFileRole, string][]).map(
+  ([value, label]) => ({ value, label }),
+)
+
 interface DetectedFile {
   sourceRef: string
   fileName: string
+  relativePath?: string | null
   sizeBytes: number
   pageCount: number | null
   hasText: boolean
   textPreview: string | null
   duplicate: { materialId: string; title: string; reason: string } | null
+  warnings: string[]
+}
+
+interface DetectedCluster {
+  clusterId: string
+  kind: 'paar' | 'einzeln' | 'unklar'
+  folderRole: BulkFolderRole
+  stem: string
+  fileRefs: string[]
+  suggestedRoles: Record<string, BulkFileRole>
   suggestions: {
     title: string
     materialType: MaterialType
@@ -36,6 +57,12 @@ interface DetectedFile {
     contentSummary?: string
     aiUsed: boolean
   }
+  proposedLinks: Array<{
+    targetClusterId: string
+    relationType: string
+    reason: string
+    confidence: 'hoch' | 'mittel'
+  }>
   warnings: string[]
 }
 
@@ -46,6 +73,7 @@ interface RunOverview {
   sourceFileName: string
   sourceSizeBytes: number | null
   files: DetectedFile[]
+  clusters: DetectedCluster[]
   mapping: {
     subjectId?: string | null
     subjectName?: string
@@ -53,6 +81,9 @@ interface RunOverview {
     schoolForm?: string | null
     defaultMaterialType?: MaterialType
     linkDuplicates?: boolean
+    createLehrwerk?: boolean
+    lehrwerkTitle?: string
+    lehrwerkId?: string
     records?: Record<
       string,
       {
@@ -65,6 +96,9 @@ interface RunOverview {
         content?: string
         action?: string
         duplicateOfId?: string | null
+        fileRoles?: Record<string, BulkFileRole>
+        links?: Record<string, boolean>
+        solutionTitle?: string
       }
     >
   } | null
@@ -88,6 +122,8 @@ const mapping = reactive({
   schoolForm: null as string | null,
   defaultMaterialType: 'arbeitsblatt' as MaterialType,
   linkDuplicates: true,
+  createLehrwerk: false,
+  lehrwerkTitle: '',
   records: {} as Record<
     string,
     {
@@ -100,11 +136,28 @@ const mapping = reactive({
       content: string
       action: string
       duplicateOfId: string | null
+      fileRoles: Record<string, BulkFileRole>
+      links: Record<string, boolean>
+      solutionTitle: string
     }
   >,
 })
 
 const geladen = ref(false)
+
+const dateiNachRef = computed(() => {
+  const map = new Map<string, DetectedFile>()
+  for (const file of data.value?.files ?? []) map.set(file.sourceRef, file)
+  return map
+})
+
+const titelNachCluster = computed(() => {
+  const map = new Map<string, string>()
+  for (const cluster of data.value?.clusters ?? []) {
+    map.set(cluster.clusterId, mapping.records[cluster.clusterId]?.title ?? cluster.suggestions.title)
+  }
+  return map
+})
 
 watch(
   data,
@@ -117,22 +170,30 @@ watch(
     mapping.schoolForm = m.schoolForm ?? null
     mapping.defaultMaterialType = m.defaultMaterialType ?? 'arbeitsblatt'
     mapping.linkDuplicates = m.linkDuplicates ?? true
+    mapping.createLehrwerk = m.createLehrwerk ?? false
+    mapping.lehrwerkTitle = m.lehrwerkTitle ?? ''
 
     const records: typeof mapping.records = {}
-    for (const file of wert.files) {
-      const existing = m.records?.[file.sourceRef]
-      records[file.sourceRef] = {
+    for (const cluster of wert.clusters ?? []) {
+      const existing = m.records?.[cluster.clusterId] ?? m.records?.[cluster.fileRefs[0] ?? '']
+      records[cluster.clusterId] = {
         include: existing?.include ?? true,
-        title: existing?.title ?? file.suggestions.title,
-        materialType: existing?.materialType ?? file.suggestions.materialType,
-        description: existing?.description ?? file.suggestions.description ?? '',
-        tagNames: [...(existing?.tagNames ?? file.suggestions.tagNames ?? [])],
+        title: existing?.title ?? cluster.suggestions.title,
+        materialType: existing?.materialType ?? cluster.suggestions.materialType,
+        description: existing?.description ?? cluster.suggestions.description ?? '',
+        tagNames: [...(existing?.tagNames ?? cluster.suggestions.tagNames ?? [])],
         learningObjectives: [
-          ...(existing?.learningObjectives ?? file.suggestions.learningObjectives ?? []),
+          ...(existing?.learningObjectives ?? cluster.suggestions.learningObjectives ?? []),
         ],
-        content: existing?.content ?? file.suggestions.contentSummary ?? '',
+        content: existing?.content ?? cluster.suggestions.contentSummary ?? '',
         action: existing?.action ?? 'erstellen',
-        duplicateOfId: existing?.duplicateOfId ?? file.duplicate?.materialId ?? null,
+        duplicateOfId: existing?.duplicateOfId ?? null,
+        fileRoles: { ...cluster.suggestedRoles, ...(existing?.fileRoles ?? {}) },
+        links: {
+          ...Object.fromEntries(cluster.proposedLinks.map((link) => [link.targetClusterId, link.confidence === 'hoch'])),
+          ...(existing?.links ?? {}),
+        },
+        solutionTitle: existing?.solutionTitle ?? '',
       }
     }
     mapping.records = records
@@ -163,9 +224,47 @@ const schritt = computed(() => {
   return 2
 })
 
+function clusterMaterialzahl(clusterId: string): number {
+  const record = mapping.records[clusterId]
+  if (!record?.include) return 0
+  const roles = Object.values(record.fileRoles)
+  const hatPrimaer = roles.some((role) => role === 'schueler' || role === 'einzeln')
+  const hatLoesung = roles.includes('loesung')
+  return (hatPrimaer ? 1 : 0) + (hatLoesung ? 1 : 0)
+}
+
 const ausgewaehlt = computed(
   () => Object.values(mapping.records).filter((r) => r.include).length,
 )
+
+const materialzahl = computed(() => {
+  let n = Object.keys(mapping.records).reduce((sum, id) => sum + clusterMaterialzahl(id), 0)
+  if (mapping.createLehrwerk && mapping.lehrwerkTitle.trim() && ausgewaehlt.value) n += 1
+  return n
+})
+
+const gruppen = computed(() => {
+  const clusters = data.value?.clusters ?? []
+  const order: BulkFolderRole[] = [
+    'kopiervorlagen',
+    'klausuren',
+    'versuche',
+    'gefaehrdungsbeurteilung',
+    'abbildungen',
+    'sonstiges',
+  ]
+  return order
+    .map((role) => ({
+      role,
+      label: BULK_FOLDER_ROLE_LABELS[role],
+      clusters: clusters.filter((cluster) =>
+        role === 'sonstiges'
+          ? cluster.folderRole === 'sonstiges' || cluster.kind === 'unklar'
+          : cluster.folderRole === role && cluster.kind !== 'unklar',
+      ),
+    }))
+    .filter((gruppe) => gruppe.clusters.length)
+})
 
 async function committen() {
   await autosave.jetztSpeichern()
@@ -203,6 +302,17 @@ function alleWaehlen(wert: boolean) {
     mapping.records[key]!.include = wert
   }
 }
+
+function rolleUeberspringen(role: BulkFolderRole, wert: boolean) {
+  for (const cluster of data.value?.clusters ?? []) {
+    if (cluster.folderRole !== role) continue
+    if (mapping.records[cluster.clusterId]) mapping.records[cluster.clusterId]!.include = wert
+  }
+}
+
+function hatLoesung(clusterId: string): boolean {
+  return Object.values(mapping.records[clusterId]?.fileRoles ?? {}).includes('loesung')
+}
 </script>
 
 <template>
@@ -233,6 +343,7 @@ function alleWaehlen(wert: boolean) {
             </UiBadge>
             <span>{{ data.adapterLabel }}</span>
             <span v-if="data.sourceSizeBytes">{{ formatBytes(data.sourceSizeBytes) }}</span>
+            <span>{{ data.clusters.length }} Bündel · {{ data.files.length }} Dateien</span>
             <span v-if="data.aiEnabled">KI-Vorschläge</span>
             <span v-else>ohne KI</span>
           </div>
@@ -246,7 +357,7 @@ function alleWaehlen(wert: boolean) {
             :disabled="!ausgewaehlt"
             @click="committen"
           >
-            {{ ausgewaehlt }} Materialien anlegen
+            {{ materialzahl }} Materialien anlegen
           </UiButton>
           <UiButton
             v-if="data.canUndo"
@@ -256,6 +367,14 @@ function alleWaehlen(wert: boolean) {
             @click="rueckgaengig"
           >
             Rückgängig
+          </UiButton>
+          <UiButton
+            v-if="data.mapping?.lehrwerkId"
+            :to="`/lehrwerke/${data.mapping.lehrwerkId}`"
+            variante="sekundaer"
+            icon="book"
+          >
+            Zum Lehrwerk
           </UiButton>
           <UiButton
             v-if="data.status === 'importiert' || data.status === 'teilweise_importiert'"
@@ -326,7 +445,14 @@ function alleWaehlen(wert: boolean) {
                   :optionen="materialTypes.options().map((o) => ({ value: o.value, label: o.label }))"
                 />
               </UiField>
+              <UiField v-if="mapping.createLehrwerk" label="Lehrwerk-Titel" class="sm:col-span-2">
+                <UiInput v-model="mapping.lehrwerkTitle" platzhalter="z. B. Klett Biologie Oberstufe" />
+              </UiField>
             </div>
+            <label class="mt-3 flex items-center gap-2 text-sm">
+              <input v-model="mapping.createLehrwerk" type="checkbox" class="accent-[var(--color-primary)]">
+              Alles einem Lehrwerk zuordnen
+            </label>
             <p class="mt-3 text-xs text-ink-subtle">
               Änderungen werden automatisch gespeichert.
             </p>
@@ -335,101 +461,160 @@ function alleWaehlen(wert: boolean) {
           <UiCard titel="Vorschau &amp; Prüfung" icon="eye" einklappbar einklapp-id="stapel-vorschau">
             <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
               <p class="text-sm text-ink-muted">
-                {{ data.files.length }} Dateien · {{ ausgewaehlt }} ausgewählt
+                {{ data.clusters.length }} Bündel · {{ ausgewaehlt }} ausgewählt · {{ materialzahl }} Materialien
               </p>
-              <div v-if="data.canCommit" class="flex gap-2 text-xs">
+              <div v-if="data.canCommit" class="flex flex-wrap gap-2 text-xs">
                 <button type="button" class="text-primary hover:underline" @click="alleWaehlen(true)">
                   Alle
                 </button>
                 <button type="button" class="text-ink-muted hover:underline" @click="alleWaehlen(false)">
                   Keine
                 </button>
+                <button
+                  type="button"
+                  class="text-ink-muted hover:underline"
+                  @click="rolleUeberspringen('gefaehrdungsbeurteilung', false)"
+                >
+                  GFB überspringen
+                </button>
               </div>
             </div>
 
-            <ul class="space-y-3">
-              <li
-                v-for="file in data.files"
-                :key="file.sourceRef"
-                class="rounded-xl border border-line p-3"
-              >
-                <div class="flex flex-wrap items-start gap-3">
-                  <label v-if="data.canCommit && mapping.records[file.sourceRef]" class="mt-2">
-                    <input
-                      v-model="mapping.records[file.sourceRef]!.include"
-                      type="checkbox"
-                      class="accent-[var(--color-primary)]"
-                    >
-                  </label>
-                  <div class="min-w-0 flex-1 space-y-3">
-                    <div>
-                      <p class="truncate text-xs text-ink-subtle">
-                        <UiIcon name="file-pdf" class="mr-1" />
-                        {{ file.fileName }}
-                        · {{ formatBytes(file.sizeBytes) }}
-                        <template v-if="file.pageCount"> · {{ file.pageCount }} S.</template>
-                        <template v-if="file.suggestions.aiUsed"> · KI</template>
-                      </p>
-                      <p v-if="file.duplicate" class="mt-1 text-xs text-warning">
-                        Dublette: {{ file.duplicate.title }}
-                      </p>
-                      <ul v-if="file.warnings.length" class="mt-1 space-y-0.5">
-                        <li
-                          v-for="(w, i) in file.warnings"
-                          :key="i"
-                          class="text-xs text-warning"
+            <div class="space-y-6">
+              <section v-for="gruppe in gruppen" :key="gruppe.role">
+                <h3 class="mb-2 text-sm font-semibold text-ink">
+                  {{ gruppe.label }}
+                  <span class="font-normal text-ink-subtle">· {{ gruppe.clusters.length }}</span>
+                </h3>
+                <ul class="space-y-3">
+                  <li
+                    v-for="cluster in gruppe.clusters"
+                    :key="cluster.clusterId"
+                    class="rounded-xl border border-line p-3"
+                  >
+                    <div class="flex flex-wrap items-start gap-3">
+                      <label v-if="data.canCommit && mapping.records[cluster.clusterId]" class="mt-2">
+                        <input
+                          v-model="mapping.records[cluster.clusterId]!.include"
+                          type="checkbox"
+                          class="accent-[var(--color-primary)]"
                         >
-                          {{ w }}
-                        </li>
-                      </ul>
-                    </div>
+                      </label>
+                      <div class="min-w-0 flex-1 space-y-3">
+                        <div>
+                          <p class="text-xs text-ink-subtle">
+                            {{ cluster.kind === 'paar' ? 'Paar' : cluster.kind === 'unklar' ? 'Bitte prüfen' : 'Einzeldatei' }}
+                            · {{ cluster.fileRefs.length }} Datei{{ cluster.fileRefs.length === 1 ? '' : 'en' }}
+                            <template v-if="cluster.suggestions.aiUsed"> · KI</template>
+                          </p>
+                          <ul class="mt-1 space-y-0.5">
+                            <li
+                              v-for="ref in cluster.fileRefs"
+                              :key="ref"
+                              class="truncate text-xs text-ink-muted"
+                            >
+                              <UiIcon :name="dateiIcon(dateiNachRef.get(ref)?.fileName)" class="mr-1" />
+                              {{ dateiNachRef.get(ref)?.relativePath || dateiNachRef.get(ref)?.fileName }}
+                              <template v-if="dateiNachRef.get(ref)?.sizeBytes">
+                                · {{ formatBytes(dateiNachRef.get(ref)!.sizeBytes) }}
+                              </template>
+                              <template v-if="dateiNachRef.get(ref)?.duplicate">
+                                · Dublette: {{ dateiNachRef.get(ref)!.duplicate!.title }}
+                              </template>
+                            </li>
+                          </ul>
+                          <ul v-if="cluster.warnings.length" class="mt-1 space-y-0.5">
+                            <li
+                              v-for="(w, i) in cluster.warnings"
+                              :key="i"
+                              class="text-xs text-warning"
+                            >
+                              {{ w }}
+                            </li>
+                          </ul>
+                        </div>
 
-                    <template v-if="data.canCommit && mapping.records[file.sourceRef]">
-                      <div class="grid gap-3 sm:grid-cols-2">
-                        <UiField label="Titel" class="sm:col-span-2">
-                          <UiInput v-model="mapping.records[file.sourceRef]!.title" />
-                        </UiField>
-                        <UiField label="Materialart">
-                          <UiSelect
-                            v-model="mapping.records[file.sourceRef]!.materialType"
-                            :optionen="materialTypes.options().map((o) => ({ value: o.value, label: o.label }))"
-                          />
-                        </UiField>
-                        <UiField label="Schlagwörter">
-                          <UiTagInput
-                            v-model="mapping.records[file.sourceRef]!.tagNames"
-                            :vorschlaege="schlagwortNamen"
-                          />
-                        </UiField>
-                        <UiField label="Kurzbeschreibung" class="sm:col-span-2">
-                          <UiInput v-model="mapping.records[file.sourceRef]!.description" />
-                        </UiField>
-                        <UiField label="Lernziele" class="sm:col-span-2">
-                          <UiTagInput
-                            v-model="mapping.records[file.sourceRef]!.learningObjectives"
-                            platzhalter="Lernziel hinzufügen …"
-                          />
-                        </UiField>
-                        <UiField label="Inhalt / Zusammenfassung" class="sm:col-span-2">
-                          <UiInput v-model="mapping.records[file.sourceRef]!.content" />
-                        </UiField>
-                      </div>
-                    </template>
-                    <template v-else>
-                      <p class="font-medium text-ink">
-                        {{ mapping.records[file.sourceRef]?.title ?? file.suggestions.title }}
-                      </p>
-                      <p class="text-sm text-ink-muted">
-                        {{ materialTypes.label((mapping.records[file.sourceRef]?.materialType ?? file.suggestions.materialType) as never) }}
-                        <template v-if="file.suggestions.subjectNames?.length">
-                          · {{ file.suggestions.subjectNames.join(', ') }}
+                        <template v-if="data.canCommit && mapping.records[cluster.clusterId]">
+                          <div class="grid gap-3 sm:grid-cols-2">
+                            <UiField label="Titel" class="sm:col-span-2">
+                              <UiInput v-model="mapping.records[cluster.clusterId]!.title" />
+                            </UiField>
+                            <UiField label="Materialart">
+                              <UiSelect
+                                v-model="mapping.records[cluster.clusterId]!.materialType"
+                                :optionen="materialTypes.options().map((o) => ({ value: o.value, label: o.label }))"
+                              />
+                            </UiField>
+                            <UiField label="Schlagwörter">
+                              <UiTagInput
+                                v-model="mapping.records[cluster.clusterId]!.tagNames"
+                                :vorschlaege="schlagwortNamen"
+                              />
+                            </UiField>
+                            <UiField
+                              v-for="ref in cluster.fileRefs"
+                              :key="`role-${ref}`"
+                              :label="dateiNachRef.get(ref)?.fileName ?? 'Datei'"
+                            >
+                              <UiSelect
+                                v-model="mapping.records[cluster.clusterId]!.fileRoles[ref]"
+                                :optionen="dateiRollen"
+                              />
+                            </UiField>
+                            <UiField v-if="hatLoesung(cluster.clusterId)" label="Titel der Lösung" class="sm:col-span-2">
+                              <UiInput
+                                v-model="mapping.records[cluster.clusterId]!.solutionTitle"
+                                :platzhalter="`Musterlösung: ${mapping.records[cluster.clusterId]!.title}`"
+                              />
+                            </UiField>
+                            <UiField label="Kurzbeschreibung" class="sm:col-span-2">
+                              <UiInput v-model="mapping.records[cluster.clusterId]!.description" />
+                            </UiField>
+                            <UiField label="Lernziele" class="sm:col-span-2">
+                              <UiTagInput
+                                v-model="mapping.records[cluster.clusterId]!.learningObjectives"
+                                platzhalter="Lernziel hinzufügen …"
+                              />
+                            </UiField>
+                            <UiField label="Inhalt / Zusammenfassung" class="sm:col-span-2">
+                              <UiInput v-model="mapping.records[cluster.clusterId]!.content" />
+                            </UiField>
+                          </div>
+                          <div v-if="cluster.proposedLinks.length" class="space-y-1">
+                            <p class="text-xs font-medium text-ink-muted">Vorgeschlagene Verknüpfungen</p>
+                            <label
+                              v-for="link in cluster.proposedLinks"
+                              :key="link.targetClusterId"
+                              class="flex items-start gap-2 text-sm"
+                            >
+                              <input
+                                v-model="mapping.records[cluster.clusterId]!.links[link.targetClusterId]"
+                                type="checkbox"
+                                class="mt-1 accent-[var(--color-primary)]"
+                              >
+                              <span>
+                                {{ link.reason }}
+                                <span class="text-xs text-ink-subtle">
+                                  → {{ titelNachCluster.get(link.targetClusterId) || 'anderes Bündel' }}
+                                </span>
+                              </span>
+                            </label>
+                          </div>
                         </template>
-                      </p>
-                    </template>
-                  </div>
-                </div>
-              </li>
-            </ul>
+                        <template v-else>
+                          <p class="font-medium text-ink">
+                            {{ mapping.records[cluster.clusterId]?.title ?? cluster.suggestions.title }}
+                          </p>
+                          <p class="text-sm text-ink-muted">
+                            {{ materialTypes.label((mapping.records[cluster.clusterId]?.materialType ?? cluster.suggestions.materialType) as never) }}
+                          </p>
+                        </template>
+                      </div>
+                    </div>
+                  </li>
+                </ul>
+              </section>
+            </div>
           </UiCard>
         </div>
 

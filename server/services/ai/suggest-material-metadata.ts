@@ -4,6 +4,7 @@ import {
   type MaterialType,
   type SchoolForm,
 } from '#shared/types/domain'
+import { guessMaterialType } from '#shared/utils/material-type-guess'
 import { materialTypes, schoolForms } from '#shared/utils/labels'
 import {
   normalizeSchulfach,
@@ -20,7 +21,7 @@ const log = createLogger('ai:suggest-metadata')
 const MATERIAL_TYPE_SET = new Set<string>(MATERIAL_TYPES)
 const SCHOOL_FORM_SET = new Set<string>(SCHOOL_FORMS)
 
-export const MATERIAL_METADATA_PROMPT_VERSION = 'material-metadata-v2'
+export const MATERIAL_METADATA_PROMPT_VERSION = 'material-metadata-v3'
 
 export interface MaterialMetadataSuggestion {
   title: string
@@ -58,24 +59,7 @@ export function titleFromFileName(fileName: string): string {
     .trim()
 }
 
-/** Grobe Einordnung anhand des Dateinamens – vom Nutzer jederzeit änderbar. */
-export function guessMaterialType(
-  fileName: string,
-  fallback: MaterialType = 'arbeitsblatt',
-): MaterialType {
-  const name = fileName.toLowerCase()
-  if (/(l(ö|oe)sung|-lsg|_lsg)/.test(name)) return 'musterloesung'
-  if (/(klausur|klassenarbeit)/.test(name)) return 'klausur'
-  if (/(lernkontrolle|test|quiz)/.test(name)) return 'lernkontrolle'
-  if (/(steckbrief|vorlage|^ab[-_ ]|arbeitsblatt)/.test(name)) return 'arbeitsblatt'
-  if (/\.(png|jpe?g|gif|webp|avif)$/.test(name)) return 'bild'
-  if (/\.(mp4|webm|mov)$/.test(name)) return 'video'
-  if (/(praesentation|präsentation|folien)/.test(name) || /\.(pptx?|odp)$/.test(name)) {
-    return 'praesentation'
-  }
-  if (/(elternbrief|brief|einverst(ä|ae)ndnis)/.test(name)) return 'sonstiges'
-  return fallback
-}
+export { guessMaterialType }
 
 export function filenameBasedMaterialSuggestion(
   fileName: string,
@@ -111,9 +95,6 @@ export async function suggestMaterialMetadata(
   }
 
   const text = options.extractedText.trim()
-  if (!text) {
-    return fallback
-  }
 
   const typeList = MATERIAL_TYPES.map((t) => `${t} (${materialTypes.label(t)})`).join(', ')
   const schoolList = SCHOOL_FORMS.map((s) => `${s} (${schoolForms.label(s)})`).join(', ')
@@ -129,6 +110,9 @@ export async function suggestMaterialMetadata(
   ].filter(Boolean)
 
   const fachListe = schulfaecherPromptListe()
+  const excerpt = text
+    ? text.slice(0, 8000)
+    : '(kein Dokumenttext – Titel, Dateiname und Kontext nutzen)'
   const prompt = `Du hilfst einer Lehrkraft in Hessen, Metadaten und eine kurze Zusammenfassung für Unterrichtsmaterial vorzuschlagen.
 
 Dateiname: ${options.fileName}
@@ -147,9 +131,14 @@ Regeln für subjectNames:
 - Typisch 1 Fach, höchstens 2 bei klarer fächerübergreifender Zuordnung.
 - Bei Unsicherheit lieber leeres Array als raten.
 
+Regeln für title und description:
+- title: klarer deutscher Titel, keine Dateiendung, keine kryptischen Verlags-IDs wenn der Inhalt erkennbar ist.
+- description: 1–2 Sätze zum fachlichen Inhalt.
+- Keine Herkunfts- oder Prozessfloskeln (nicht: importiert, Schulportal, KI-Entwurf, automatisch erstellt, manuell geprüft).
+
 Auszug aus dem Dokument:
 """
-${text.slice(0, 8000)}
+${excerpt}
 """
 
 Antworte ausschließlich mit einem JSON-Objekt (kein Markdown):
@@ -262,6 +251,71 @@ Antworte ausschließlich mit einem JSON-Objekt (kein Markdown):
     antwortVorschau: lastRawResponse.slice(0, 600),
   })
   return fallback
+}
+
+/**
+ * Eine knappe Inhaltsbeschreibung – für Reihen, Musterlösungen und ähnliche Fälle
+ * ohne vollständiges Material-JSON.
+ */
+export async function suggestShortDescription(options: {
+  title: string
+  context: string
+  settings: AiSettings
+}): Promise<string | null> {
+  if (!options.settings.enabled || !options.settings.chatModel) return null
+  const title = options.title.trim()
+  const context = options.context.trim().slice(0, 6000)
+  if (!title && !context) return null
+
+  try {
+    const result = await chatCompletion(
+      options.settings,
+      [
+        {
+          role: 'system',
+          parts: [
+            {
+              type: 'text',
+              text: 'Du antwortest ausschließlich mit einem gültigen JSON-Objekt.',
+            },
+          ],
+        },
+        {
+          role: 'user',
+          parts: [
+            {
+              type: 'text',
+              text: `Schreibe eine knappe deutsche Kurzbeschreibung (1–2 Sätze) für Unterrichtsmaterial.
+
+Titel: ${title || '–'}
+Kontext:
+${context || '(nur Titel)'}
+
+Regeln:
+- Nur den fachlichen Inhalt beschreiben.
+- Keine Herkunfts- oder Prozessfloskeln (nicht: importiert, Schulportal, KI-Entwurf, automatisch erstellt, manuell geprüft).
+- Kein Markdown.
+
+Antworte ausschließlich mit JSON: {"description":"..."}`,
+            },
+          ],
+        },
+      ],
+      {
+        temperature: 0.1,
+        maxOutputTokens: Math.min(Math.max(options.settings.maxOutputTokens || 400, 400), 800),
+        jsonMode: true,
+      },
+    )
+
+    const parsed = extractJsonObject(result.text)
+    const description =
+      typeof parsed?.description === 'string' ? parsed.description.replace(/\s+/g, ' ').trim() : ''
+    return description ? description.slice(0, 2000) : null
+  } catch (error) {
+    log.warn('Kurzbeschreibung per KI fehlgeschlagen', { title, error })
+    return null
+  }
 }
 
 function pause(ms: number): Promise<void> {

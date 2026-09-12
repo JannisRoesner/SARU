@@ -7,21 +7,32 @@ import { invalidInput } from '../../../utils/errors'
 import { bulkUploadMappingSchema } from '../../../utils/schemas'
 import { parseOrThrow } from '../../../utils/validation'
 
-/** PDF-Stapel hochladen, Text extrahieren, Metadaten vorschlagen. */
+/** Stapel hochladen (PDF, Office, ZIP), clustern, Metadaten vorschlagen. */
 export default defineEventHandler(async (event) => {
   const user = await requireEditor(event)
 
   const parts = await readMultipartFormData(event)
   if (!parts?.length) throw invalidInput('Es wurden keine Dateien übermittelt.')
 
-  const files = parts
-    .filter((part) => part.filename && part.data?.length)
-    .map((part) => ({
-      buffer: Buffer.from(part.data),
-      fileName: part.filename!,
-    }))
+  const fileParts = parts.filter((part) => part.filename && part.data?.length)
+  if (!fileParts.length) throw invalidInput('Bitte mindestens eine Datei auswählen.')
 
-  if (!files.length) throw invalidInput('Bitte mindestens eine PDF-Datei auswählen.')
+  const pathsRaw = parts.find((p) => p.name === 'relativePaths' && !p.filename)?.data.toString()
+  let relativePaths: string[] = []
+  if (pathsRaw) {
+    try {
+      const parsed = JSON.parse(pathsRaw) as unknown
+      if (Array.isArray(parsed)) relativePaths = parsed.map((entry) => String(entry))
+    } catch {
+      relativePaths = []
+    }
+  }
+
+  const files = fileParts.map((part, index) => ({
+    buffer: Buffer.from(part.data),
+    fileName: part.filename!,
+    relativePath: relativePaths[index] || part.filename!,
+  }))
 
   const mappingRaw = parts.find((p) => p.name === 'mapping' && !p.filename)?.data.toString()
   let mapping: BulkUploadMapping = {}
@@ -42,7 +53,7 @@ export default defineEventHandler(async (event) => {
       action: 'material.stapel.analysiert',
       entityType: 'import',
       entityId: result.runId,
-      details: { dateien: result.fileCount, ki: result.aiEnabled },
+      details: { dateien: result.fileCount, buendel: result.clusterCount, ki: result.aiEnabled },
     },
     event,
   )

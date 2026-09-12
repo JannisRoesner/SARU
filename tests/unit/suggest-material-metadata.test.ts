@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import * as aiClient from '../../server/services/ai/client'
 import {
   filenameBasedMaterialSuggestion,
   guessMaterialType,
@@ -19,6 +20,7 @@ describe('suggest-material-metadata helpers', () => {
     expect(guessMaterialType('Lernkontrolle_Kapitel3.pdf')).toBe('lernkontrolle')
     expect(guessMaterialType('Klausur-2024.pdf')).toBe('klausur')
     expect(guessMaterialType('AB-Zellatmung_Loesung.pdf')).toBe('musterloesung')
+    expect(guessMaterialType('bio_zel_s2_ka_001.docx')).toBe('klausur')
   })
 
   it('erzeugt Dateiname-basierte Vorschläge ohne KI', () => {
@@ -29,6 +31,10 @@ describe('suggest-material-metadata helpers', () => {
     expect(vorschlag.learningObjectives).toEqual([])
     expect(vorschlag.subjectNames).toEqual([])
   })
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 
 describe('bulk suggestFileMetadata Wrapper', () => {
@@ -61,15 +67,33 @@ describe('bulk suggestFileMetadata Wrapper', () => {
     expect(result.contentSummary).toBe('')
   })
 
-  it('fällt bei leerem Text auch mit aktivierter KI zurück', async () => {
+  it('erzeugt ohne Dokumenttext Vorschläge aus Dateiname und Kontext', async () => {
+    vi.spyOn(aiClient, 'chatCompletion').mockResolvedValue({
+      text: JSON.stringify({
+        title: 'Klausur Zellteilung',
+        materialType: 'klausur',
+        schoolForm: null,
+        subjectNames: ['Biologie'],
+        tagNames: ['Mitose'],
+        learningObjectives: ['Zellteilung beschreiben'],
+        description: 'Klausur zur Mitose und Zellteilung.',
+        contentSummary: 'Aufgaben zur Zellteilung.',
+      }),
+      model: 'test',
+      finishReason: 'stop',
+      outputTokens: 40,
+    })
+
     const result = await suggestFileMetadata({
       fileName: 'Scan.pdf',
       extractedText: '   ',
       mapping: { defaultMaterialType: 'klausur' },
+      extraContext: 'Ordner: Klausuren',
       settings: { ...disabledSettings, enabled: true, chatModel: 'test' },
     })
-    expect(result.aiUsed).toBe(false)
-    expect(result.materialType).toBe('klausur')
+    expect(result.aiUsed).toBe(true)
+    expect(result.title).toBe('Klausur Zellteilung')
+    expect(result.description).toContain('Zellteilung')
   })
 
   it('reicht Bulk-Vorschläge mit erweiterten Feldern durch', () => {

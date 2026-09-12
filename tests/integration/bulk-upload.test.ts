@@ -138,4 +138,92 @@ describe('PDF-Stapel-Upload', () => {
       expect(commit.stats.uebersprungen).toBe(1)
     })
   })
+
+  it('paart Word und PDF und legt eine Musterlösung mit Relation an', async () => {
+    await withTempUploadDir(async () => {
+      const { zipSync, strToU8 } = await import('fflate')
+      const docx = Buffer.from(
+        zipSync({
+          '[Content_Types].xml': strToU8(
+            '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>',
+          ),
+          'word/document.xml': strToU8(
+            '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Zellmembran</w:t></w:r></w:p></w:body></w:document>',
+          ),
+        }),
+      )
+
+      const { runId, clusterCount } = await analyzeBulkPdfUpload(
+        [
+          { buffer: docx, fileName: 'bio_zel_s2_ab_007.docx', relativePath: 'Kopiervorlagen/bio_zel_s2_ab_007.docx' },
+          { buffer: pdf, fileName: 'bio_zel_s2_ab_007.pdf', relativePath: 'Kopiervorlagen/bio_zel_s2_ab_007.pdf' },
+        ],
+        userId,
+        { subjectName: 'Biologie' },
+      )
+
+      expect(clusterCount).toBe(1)
+      const overview = await getBulkRunOverview(runId)
+      expect(overview.clusters).toHaveLength(1)
+      expect(overview.clusters[0]!.kind).toBe('paar')
+      expect(overview.clusters[0]!.suggestions.materialType).toBe('arbeitsblatt')
+
+      const commit = await commitBulkUpload(runId, userId)
+      expect(commit.status).toBe('importiert')
+      expect(commit.stats.materialien).toBe(2)
+      expect(commit.stats.verknuepft).toBe(1)
+
+      const materials = await listMaterials({ pageSize: 20 })
+      const types = materials.items.map((m) => m.materialType).sort()
+      expect(types).toEqual(['arbeitsblatt', 'musterloesung'])
+
+      const ab = materials.items.find((m) => m.materialType === 'arbeitsblatt')!
+      const detail = await getMaterialDetail(ab.id)
+      expect(detail?.hasSolution).toBe(true)
+      expect(detail?.relations.some((r) => r.relationType === 'musterloesung')).toBe(true)
+    })
+  })
+
+  it('entpackt ein ZIP und verknüpft Versuch mit Gefährdungsbeurteilung', async () => {
+    await withTempUploadDir(async () => {
+      const { zipSync, strToU8 } = await import('fflate')
+      const docx = Buffer.from(
+        zipSync({
+          '[Content_Types].xml': strToU8(
+            '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>',
+          ),
+          'word/document.xml': strToU8(
+            '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Katalase</w:t></w:r></w:p></w:body></w:document>',
+          ),
+        }),
+      )
+      const archive = Buffer.from(
+        zipSync({
+          'Gefährdungsbeurteilung/wd01_049000_gfb_081_katalase.docx': new Uint8Array(docx),
+          'Versuche/versuch_katalase.pdf': new Uint8Array(pdf),
+        }),
+      )
+
+      const { runId, fileCount, clusterCount } = await analyzeBulkPdfUpload(
+        [{ buffer: archive, fileName: 'Klett-Dateien.zip' }],
+        userId,
+      )
+      expect(fileCount).toBe(2)
+      expect(clusterCount).toBe(2)
+
+      const overview = await getBulkRunOverview(runId)
+      const versuch = overview.clusters.find((c) => c.folderRole === 'versuche')!
+      const gfb = overview.clusters.find((c) => c.folderRole === 'gefaehrdungsbeurteilung')!
+      expect(gfb.suggestions.materialType).toBe('gefaehrdungsbeurteilung')
+      expect(versuch.proposedLinks[0]?.targetClusterId).toBe(gfb.clusterId)
+
+      const commit = await commitBulkUpload(runId, userId)
+      expect(commit.stats.materialien).toBe(2)
+      expect((commit.stats.verknuepft ?? 0) >= 1).toBe(true)
+
+      const materials = await listMaterials({ pageSize: 20 })
+      const gfbMaterial = materials.items.find((m) => m.materialType === 'gefaehrdungsbeurteilung')
+      expect(gfbMaterial).toBeTruthy()
+    })
+  })
 })

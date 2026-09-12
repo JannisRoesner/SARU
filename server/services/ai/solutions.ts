@@ -41,12 +41,14 @@ import {
   type TextBlankInfo,
 } from './document-fill'
 import { kiAutorAnzeige } from '#shared/utils/ki'
+import { chooseMaterialDescription } from '#shared/utils/material-description'
 import {
   AI_CONTENT_NOTICE,
   AI_CONTENT_NOTICE_MD,
 } from './prompts'
 import { rasterizePdf } from './rasterize'
 import { ensureExtractedText } from './document-text'
+import { suggestShortDescription } from './suggest-material-metadata'
 import { analyzeDocxTargets } from './solutions/docx-analyzer'
 import { logPipeline } from './solutions/logging'
 import { buildSolutionPlan } from './solutions/orchestrator'
@@ -1048,10 +1050,23 @@ export async function generateSolution(
       kiAutorAnzeige({ model: usedModel, provider: settings.provider }) ??
       `KI · ${usedModel}`
 
+    const aiDescription = await suggestShortDescription({
+      title: `Musterlösung – ${material.title}`,
+      context: [
+        material.description,
+        material.subjects.map((subject) => subject.name).join(', '),
+        filled.summary,
+        structured ? solutionToMarkdown(structured) : '',
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      settings,
+    })
+
     const solutionMaterialId = await createMaterial(
       {
         title: `Musterlösung – ${material.title}`,
-        description: `Automatisch erstellte Musterlösung zum Material „${material.title}“.`,
+        description: chooseMaterialDescription(aiDescription, material.description),
         content: summaryMd,
         materialType: 'musterloesung',
         schoolForm: material.schoolForm,

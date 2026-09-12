@@ -20,7 +20,7 @@ const {
   updateMaterial,
 } = await import('../../server/services/material.service')
 
-const { getMaterialDetail, getMaterialFacets, listMaterials } = await import(
+const { getMaterialDetail, getMaterialFacets, listLehrwerkInhalt, listMaterials } = await import(
   '../../server/repositories/material.repository'
 )
 const { getOrCreateSubject, getOrCreateTopic } = await import(
@@ -397,6 +397,30 @@ describe('Materialverwaltung', () => {
       await deleteMaterial(id)
       expect(await getMaterialDetail(id)).toBeNull()
     })
+  })
+
+  it('zählt und listet dem Lehrwerk zugeordnete Materialien', async () => {
+    const lehrwerk = await createMaterial({ title: 'Klett Biologie', materialType: 'lehrwerk' }, userId)
+    const arbeitsblatt = await createMaterial({ title: 'AB Photosynthese' }, userId)
+    const loesung = await createMaterial(
+      { title: 'Lösungsheft', materialType: 'loesungsbuch' },
+      userId,
+    )
+    await addRelation(arbeitsblatt, lehrwerk, 'gehoert_zu')
+    await addRelation(loesung, lehrwerk, 'gehoert_zu')
+
+    const inhalt = await listLehrwerkInhalt(lehrwerk)
+    expect(inhalt.map((m) => m.id).sort()).toEqual([arbeitsblatt, loesung].sort())
+    expect(inhalt.every((m) => m.relationId)).toBe(true)
+
+    const buch = await getMaterialDetail(lehrwerk)
+    expect(buch!.childCount).toBe(2)
+
+    const kinder = await listMaterials({ filters: { belongsToId: lehrwerk } })
+    expect(kinder.total).toBe(2)
+
+    const ohneBuecher = await listMaterials({ filters: { excludeMaterialTypes: ['lehrwerk'] } })
+    expect(ohneBuecher.items.map((m) => m.id)).not.toContain(lehrwerk)
   })
 
   it('schaltet den Favoritenstatus um', async () => {

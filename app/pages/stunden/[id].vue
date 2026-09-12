@@ -7,6 +7,7 @@ import {
   phaseSuggestions,
   methodSuggestions,
 } from '#shared/utils/labels'
+import { materialPfad } from '#shared/utils/material-pfad'
 import type { LessonDetail, LessonPhaseDetail } from '~~/server/repositories/lesson.repository'
 import type { MaterialSummary } from '~~/server/repositories/material.repository'
 
@@ -482,7 +483,7 @@ function phaseGeaendert(phase: LessonPhaseDetail) {
                       :key="mat.id"
                       class="flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-surface-hover"
                     >
-                      <NuxtLink :to="`/materialien/${mat.materialId}`" class="flex-1 truncate hover:text-primary">
+                      <NuxtLink :to="materialPfad({ id: mat.materialId, materialType: mat.materialType })" class="flex-1 truncate hover:text-primary">
                         {{ mat.title }}
                       </NuxtLink>
                       <UiButton
@@ -544,7 +545,7 @@ function phaseGeaendert(phase: LessonPhaseDetail) {
                 </button>
                 <div class="min-w-0 flex-1">
                   <NuxtLink
-                    :to="`/materialien/${mat.materialId}`"
+                    :to="materialPfad({ id: mat.materialId, materialType: mat.materialType })"
                     class="block truncate text-sm font-medium hover:text-primary"
                   >
                     {{ mat.title }}

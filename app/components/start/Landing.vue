@@ -126,7 +126,7 @@ const mehr = [
   {
     icon: 'layer-group',
     titel: 'Stapel-Upload',
-    text: 'Mehrere PDFs auf einmal hochladen, gemeinsam einordnen und mit optionalen KI-Vorschlägen für Titel und Typ prüfen — vor dem Übernehmen kontrollieren.',
+    text: 'PDF, Word und ZIP-Pakete auf einmal hochladen, zusammengehörige Dateien bündeln und mit optionalen KI-Vorschlägen prüfen — vor dem Übernehmen kontrollieren.',
   },
   {
     icon: 'users',

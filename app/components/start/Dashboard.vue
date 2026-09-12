@@ -10,6 +10,7 @@ interface Dashboard {
   aktiveReihen: SeriesSummary[]
   kennzahlen: {
     materialien: number
+    lehrwerke: number
     stunden: number
     reihen: number
     anhaenge: number
@@ -44,6 +45,7 @@ const kennzahlen = computed(() => {
   const k = data.value?.kennzahlen
   return [
     { label: 'Materialien', wert: k?.materialien ?? 0, icon: 'folder-open', to: '/materialien' },
+    { label: 'Lehrwerke', wert: k?.lehrwerke ?? 0, icon: 'book', to: '/lehrwerke' },
     { label: 'Unterrichtsstunden', wert: k?.stunden ?? 0, icon: 'chalkboard-user', to: '/stunden' },
     { label: 'Reihen', wert: k?.reihen ?? 0, icon: 'layer-group', to: '/reihen' },
     { label: 'Anhänge', wert: k?.anhaenge ?? 0, icon: 'paperclip', to: '/materialien?hatDateien=1' },
@@ -91,7 +93,7 @@ const { favoritSetzen } = useMaterialAktionen(() => refresh())
 
     <div v-else class="flex flex-col gap-4">
       <!-- Kennzahlen und Abschnitte teilen gap-4; auf xl bilden 2 Abschnitte eine 4er-Zeile -->
-      <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
         <NuxtLink
           v-for="zahl in kennzahlen"
           :key="zahl.label"

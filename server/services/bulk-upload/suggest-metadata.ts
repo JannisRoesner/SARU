@@ -20,8 +20,7 @@ export function filenameBasedSuggestion(
 }
 
 /**
- * Schlägt Metadaten vor. Nutzt bevorzugt den extrahierten Text;
- * ohne Text oder bei deaktivierter KI greift der Dateiname.
+ * Schlägt Metadaten vor. Nutzt extrahierten Text, sonst Dateiname und Paketkontext.
  */
 export async function suggestFileMetadata(options: {
   fileName: string
@@ -31,6 +30,7 @@ export async function suggestFileMetadata(options: {
     'defaultMaterialType' | 'subjectName' | 'gradeLevel' | 'schoolForm'
   >
   subjectLabel?: string | null
+  extraContext?: string | null
   settings: AiSettings
 }): Promise<BulkUploadFileSuggestion> {
   const result = await suggestMaterialMetadata({
@@ -42,6 +42,7 @@ export async function suggestFileMetadata(options: {
       gradeLevel: options.mapping.gradeLevel,
       schoolForm: options.mapping.schoolForm,
       defaultMaterialType: options.mapping.defaultMaterialType ?? 'arbeitsblatt',
+      lessonContext: options.extraContext,
     },
   })
   return toBulkSuggestion(result)

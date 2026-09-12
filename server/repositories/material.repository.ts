@@ -29,6 +29,9 @@ export interface MaterialFilters {
   ownerId?: string
   /** Beschränkt auf eine Menge von IDs – wird von der Volltextsuche genutzt. */
   ids?: string[]
+  /** Materialien, die per `gehoert_zu` auf dieses Material zeigen (Lehrwerk-Inhalt). */
+  belongsToId?: string
+  excludeMaterialTypes?: string[]
 }
 
 export type MaterialSort =
@@ -84,6 +87,8 @@ export type MaterialSummary = {
   usageCount: number
   hasSolution: boolean
   aiSolutionCount: number
+  /** Eingehende `gehoert_zu`-Verknüpfungen – bei Lehrwerken die zugeordneten Materialien. */
+  childCount: number
 }
 
 /**
@@ -165,7 +170,11 @@ const summarySelection = sql`
     join materials sol on sol.id = r.to_material_id
     where r.from_material_id = m.id and r.relation_type in ('musterloesung', 'loesung')
       and sol.origin = 'ki'
-  ) as "aiSolutionCount"
+  ) as "aiSolutionCount",
+  (
+    select count(*)::int from material_relations r
+    where r.to_material_id = m.id and r.relation_type = 'gehoert_zu'
+  ) as "childCount"
 `
 
 /**
@@ -204,6 +213,21 @@ function buildConditions(filters: MaterialFilters): SQL[] {
 
   if (filters.materialTypes?.length) {
     conditions.push(sql`m.material_type = any(${pgArray(filters.materialTypes, 'material_type[]')})`)
+  }
+  if (filters.excludeMaterialTypes?.length) {
+    conditions.push(
+      sql`m.material_type <> all(${pgArray(filters.excludeMaterialTypes, 'material_type[]')})`,
+    )
+  }
+  if (filters.belongsToId) {
+    conditions.push(
+      sql`exists (
+        select 1 from material_relations r
+        where r.from_material_id = m.id
+          and r.to_material_id = ${filters.belongsToId}::uuid
+          and r.relation_type = 'gehoert_zu'
+      )`,
+    )
   }
   if (filters.schoolForms?.length) {
     conditions.push(sql`m.school_form = any(${pgArray(filters.schoolForms, 'school_form[]')})`)
@@ -590,4 +614,24 @@ export async function getMaterialFacets(
       })
       .filter((entry): entry is { value: GradeLevel; count: number } => entry !== null),
   }
+}
+
+export type LehrwerkInhaltItem = MaterialSummary & { relationId: string }
+
+/** Alle Materialien, die per `gehoert_zu` diesem Lehrwerk zugeordnet sind. */
+export async function listLehrwerkInhalt(
+  lehrwerkId: string,
+  db: Database = useDatabase(),
+): Promise<LehrwerkInhaltItem[]> {
+  const rows = await queryRows<LehrwerkInhaltItem>(
+    db,
+    sql`select ${summarySelection}, r.id as "relationId"
+      from materials m
+      join material_relations r
+        on r.from_material_id = m.id
+       and r.to_material_id = ${lehrwerkId}::uuid
+       and r.relation_type = 'gehoert_zu'
+      order by m.material_type, m.title`,
+  )
+  return (rows as unknown as LehrwerkInhaltItem[]).map(mapGradeLevels)
 }

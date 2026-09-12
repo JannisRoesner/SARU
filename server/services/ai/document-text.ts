@@ -29,11 +29,8 @@ export interface EnsuredTextResult {
 }
 
 export function visionExtractionAvailable(settings: AiSettings): boolean {
-  if (!settings.enabled) return false
-  const model = (settings.visionModel || settings.chatModel || '').trim()
-  if (!model) return false
-  // Vision-OCR braucht multimodale Eingabe; useVision steuert das in den Einstellungen.
-  return settings.useVision || Boolean(settings.visionModel?.trim())
+  if (!settings.enabled || !settings.useVision) return false
+  return Boolean((settings.visionModel || settings.chatModel || '').trim())
 }
 
 /**

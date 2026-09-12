@@ -7,8 +7,12 @@ import { parseOrThrow, readZodBody, uuidSchema } from '../../../utils/validation
 export default defineEventHandler(async (event) => {
   await requireEditor(event)
   const id = parseOrThrow(uuidSchema, getRouterParam(event, 'id'))
-  const { targetId, relationType, note } = await readZodBody(event, relationSchema)
+  const { targetId, relationType, note, direction } = await readZodBody(event, relationSchema)
 
-  await addRelation(id, targetId, relationType, note)
+  if (direction === 'eingehend') {
+    await addRelation(targetId, id, relationType, note)
+  } else {
+    await addRelation(id, targetId, relationType, note)
+  }
   return getMaterialDetail(id)
 })

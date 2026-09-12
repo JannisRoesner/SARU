@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { materialTypes, importStatuses } from '#shared/utils/labels'
 import {
+  bulkMaterialAcceptAttribute,
+  isBulkMaterialFileName,
+} from '#shared/utils/ai-material-formats'
+import {
   jahrgangsstufenOptionen,
   type GradeLevel,
 } from '#shared/utils/jahrgangsstufen'
@@ -27,13 +31,19 @@ interface BulkLauf {
   undoneAt: string | null
 }
 
+interface StapelDatei {
+  file: File
+  relativePath: string
+}
+
 const { data: laeufe, refresh } = await useFetch<BulkLauf[]>('/api/materials/bulk', {
   default: () => [],
 })
 
-const dateien = ref<File[]>([])
+const dateien = ref<StapelDatei[]>([])
 const ziehe = ref(false)
 const dateiInput = ref<HTMLInputElement | null>(null)
+const ordnerInput = ref<HTMLInputElement | null>(null)
 const fehler = ref<string | null>(null)
 
 const mapping = reactive({
@@ -43,20 +53,29 @@ const mapping = reactive({
   schoolForm: null as string | null,
   defaultMaterialType: 'arbeitsblatt' as string,
   linkDuplicates: true,
+  createLehrwerk: false,
+  lehrwerkTitle: '',
 })
+
+function relativPfad(file: File): string {
+  const webkit = (file as File & { webkitRelativePath?: string }).webkitRelativePath
+  return webkit?.replace(/\\/g, '/').replace(/^\/+/, '') || file.name
+}
 
 function dateienHinzufuegen(files: FileList | null | undefined) {
   if (!files?.length) return
-  const bestehende = new Set(dateien.value.map((f) => `${f.name}:${f.size}:${f.lastModified}`))
+  const bestehende = new Set(dateien.value.map((d) => `${d.relativePath}:${d.file.size}:${d.file.lastModified}`))
   for (const file of Array.from(files)) {
-    if (!/\.pdf$/i.test(file.name)) continue
-    const schluessel = `${file.name}:${file.size}:${file.lastModified}`
+    if (!isBulkMaterialFileName(file.name) && !isBulkMaterialFileName(relativPfad(file))) continue
+    const relativePath = relativPfad(file)
+    const schluessel = `${relativePath}:${file.size}:${file.lastModified}`
     if (!bestehende.has(schluessel)) {
-      dateien.value.push(file)
+      dateien.value.push({ file, relativePath })
       bestehende.add(schluessel)
     }
   }
   if (dateiInput.value) dateiInput.value.value = ''
+  if (ordnerInput.value) ordnerInput.value.value = ''
   fehler.value = null
 }
 
@@ -69,7 +88,8 @@ async function analysieren() {
   fehler.value = null
 
   const body = new FormData()
-  for (const file of dateien.value) body.append('files', file)
+  for (const eintrag of dateien.value) body.append('files', eintrag.file, eintrag.relativePath)
+  body.append('relativePaths', JSON.stringify(dateien.value.map((d) => d.relativePath)))
   body.append(
     'mapping',
     JSON.stringify({
@@ -79,6 +99,8 @@ async function analysieren() {
       schoolForm: mapping.schoolForm,
       defaultMaterialType: mapping.defaultMaterialType,
       linkDuplicates: mapping.linkDuplicates,
+      createLehrwerk: mapping.createLehrwerk,
+      lehrwerkTitle: mapping.lehrwerkTitle || undefined,
     }),
   )
 
@@ -103,10 +125,10 @@ async function analysieren() {
       zurueck-label="Wege zum Anlegen"
       kicker="Materialien"
       titel="Stapel-Upload"
-      untertitel="Mehrere PDFs hochladen, gemeinsame Einordnung setzen, KI-Vorschläge prüfen und einmal anlegen."
+      untertitel="PDF, Word und ZIP-Pakete. Text kommt aus der Datei oder per Vision/OCR, Titel und Beschreibung schlägt die eingestellte KI vor – du prüfst nur noch."
     />
 
-    <UiCard titel="PDFs hochladen" icon="cloud-arrow-up" class="mb-6">
+    <UiCard titel="Dateien oder Paket" icon="cloud-arrow-up" class="mb-6">
       <div
         class="rounded-xl border-2 border-dashed px-6 py-12 text-center transition-colors"
         :class="ziehe ? 'border-primary bg-primary-soft/40' : 'border-line bg-surface-sunken/40'"
@@ -114,35 +136,51 @@ async function analysieren() {
         @dragleave.prevent="ziehe = false"
         @drop.prevent="ziehe = false; dateienHinzufuegen(($event as DragEvent).dataTransfer?.files)"
       >
-        <UiIcon name="file-pdf" class="mb-3 text-3xl text-primary" />
-        <p class="font-medium text-ink">PDFs hier ablegen</p>
+        <UiIcon name="layer-group" class="mb-3 text-3xl text-primary" />
+        <p class="font-medium text-ink">Dateien, Ordner oder ZIP hier ablegen</p>
         <p class="mt-1 text-sm text-ink-muted">
-          Mehrere Dateien möglich – Analyse mit Metadaten-Vorschlägen, kein stiller Auto-Import
+          Arbeitsblätter und Lösungen mit gleichem Namen werden automatisch gepaart.
+          Gefährdungsbeurteilungen und Versuche bleiben eigene Materialien.
         </p>
-        <label class="mt-4 inline-flex cursor-pointer">
-          <input
-            ref="dateiInput"
-            type="file"
-            accept=".pdf,application/pdf"
-            multiple
-            class="sr-only"
-            @change="dateienHinzufuegen(($event.target as HTMLInputElement).files)"
-          >
-          <span class="inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-surface px-4 text-sm font-medium hover:bg-surface-hover">
-            <UiIcon name="folder-open" fest /> Dateien wählen
-          </span>
-        </label>
+        <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
+          <label class="inline-flex cursor-pointer">
+            <input
+              ref="dateiInput"
+              type="file"
+              :accept="bulkMaterialAcceptAttribute()"
+              multiple
+              class="sr-only"
+              @change="dateienHinzufuegen(($event.target as HTMLInputElement).files)"
+            >
+            <span class="inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-surface px-4 text-sm font-medium hover:bg-surface-hover">
+              <UiIcon name="folder-open" fest /> Dateien wählen
+            </span>
+          </label>
+          <label class="inline-flex cursor-pointer">
+            <input
+              ref="ordnerInput"
+              type="file"
+              webkitdirectory
+              multiple
+              class="sr-only"
+              @change="dateienHinzufuegen(($event.target as HTMLInputElement).files)"
+            >
+            <span class="inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-surface px-4 text-sm font-medium hover:bg-surface-hover">
+              <UiIcon name="folder-tree" fest /> Ordner wählen
+            </span>
+          </label>
+        </div>
       </div>
 
       <ul v-if="dateien.length" class="mt-4 space-y-1.5">
         <li
-          v-for="(datei, index) in dateien"
-          :key="`${datei.name}-${datei.size}-${datei.lastModified}`"
+          v-for="(eintrag, index) in dateien"
+          :key="`${eintrag.relativePath}-${eintrag.file.size}-${eintrag.file.lastModified}`"
           class="flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-sm"
         >
-          <UiIcon name="file-pdf" fest class="text-ink-subtle" />
-          <span class="min-w-0 flex-1 truncate font-medium text-ink">{{ datei.name }}</span>
-          <span class="text-xs text-ink-subtle">{{ formatBytes(datei.size) }}</span>
+          <UiIcon :name="dateiIcon(eintrag.file.name)" fest class="text-ink-subtle" />
+          <span class="min-w-0 flex-1 truncate font-medium text-ink">{{ eintrag.relativePath }}</span>
+          <span class="text-xs text-ink-subtle">{{ formatBytes(eintrag.file.size) }}</span>
           <UiButton
             type="button"
             variante="still"
@@ -158,7 +196,7 @@ async function analysieren() {
 
     <UiCard titel="Gemeinsame Zuordnung" icon="sliders" class="mb-6" einklappbar einklapp-id="stapel-zuordnung">
       <p class="mb-4 text-sm text-ink-muted">
-        Diese Angaben gelten für alle Dateien im Stapel. Titel, Typ und Schlagwörter kannst du danach je Datei prüfen.
+        Diese Angaben gelten für alle Bündel im Stapel. Titel, Typ und Rollen kannst du danach je Bündel prüfen.
       </p>
       <div class="grid gap-4 sm:grid-cols-2">
         <UiFachFeld
@@ -186,10 +224,17 @@ async function analysieren() {
             :optionen="materialTypes.options().map((o) => ({ value: o.value, label: o.label }))"
           />
         </UiField>
+        <UiField v-if="mapping.createLehrwerk" label="Lehrwerk-Titel" class="sm:col-span-2">
+          <UiInput v-model="mapping.lehrwerkTitle" platzhalter="z. B. Klett Biologie Oberstufe" />
+        </UiField>
       </div>
       <label class="mt-4 flex items-center gap-2 text-sm">
         <input v-model="mapping.linkDuplicates" type="checkbox" class="accent-[var(--color-primary)]">
         Erkannte Dubletten standardmäßig abwählen
+      </label>
+      <label class="mt-2 flex items-center gap-2 text-sm">
+        <input v-model="mapping.createLehrwerk" type="checkbox" class="accent-[var(--color-primary)]">
+        Alles einem Lehrwerk zuordnen
       </label>
     </UiCard>
 

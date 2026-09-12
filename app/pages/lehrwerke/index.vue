@@ -1,38 +1,29 @@
 <script setup lang="ts">
-import { materialTypes } from '#shared/utils/labels'
 import type { MaterialSummary, MaterialFacets } from '~~/server/repositories/material.repository'
 import type { Paginated } from '#shared/types/domain'
 
-useHead({ title: 'Materialien' })
+useHead({ title: 'Lehrwerke' })
 
 const route = useRoute()
 const router = useRouter()
-
-if (route.query.typ === 'lehrwerk') {
-  await navigateTo('/lehrwerke', { replace: true })
-}
 const { darfBearbeiten } = useSitzung()
-const { fachOptionen } = useTaxonomie()
 
 const suche = ref(String(route.query.q ?? ''))
-const sort = ref(String(route.query.sort ?? 'datum_neu'))
+const sort = ref(String(route.query.sort ?? 'titel'))
 const page = ref(Number(route.query.page ?? 1) || 1)
-const nurFavoriten = ref(route.query.favoriten === '1' || route.query.onlyFavorites === '1')
+const nurFavoriten = ref(route.query.favoriten === '1')
 const archiviert = ref(route.query.archiv === '1')
-const typ = ref<string | null>((route.query.typ as string) || null)
 const fachId = ref<string | null>((route.query.fach as string) || null)
-const hatDateien = ref(route.query.hatDateien === '1')
 
 const query = computed(() => ({
   q: suche.value.trim() || undefined,
-  sort: suche.value.trim() && sort.value === 'datum_neu' ? 'relevanz' : sort.value,
+  sort: suche.value.trim() && sort.value === 'titel' ? 'relevanz' : sort.value,
   page: page.value,
   pageSize: 24,
   onlyFavorites: nurFavoriten.value || undefined,
   includeArchived: archiviert.value || undefined,
-  materialTypes: typ.value || undefined,
-  excludeMaterialTypes: typ.value === 'lehrwerk' ? undefined : 'lehrwerk',
   subjectIds: fachId.value || undefined,
+  materialTypes: 'lehrwerk',
 }))
 
 const { data, status, error, refresh } = await useFetch<
@@ -41,25 +32,18 @@ const { data, status, error, refresh } = await useFetch<
 
 const { data: facetten } = await useFetch<MaterialFacets>('/api/materials/facets', {
   query: computed(() => ({
+    materialTypes: 'lehrwerk',
     onlyFavorites: nurFavoriten.value || undefined,
     includeArchived: archiviert.value || undefined,
-    excludeMaterialTypes: 'lehrwerk',
   })),
-})
-
-const eintraege = computed(() => {
-  const items = data.value?.items ?? []
-  return hatDateien.value ? items.filter((m) => m.assetCount > 0) : items
 })
 
 const { favoritSetzen } = useMaterialAktionen(() => refresh())
 
 const sortOptionen = [
+  { value: 'titel', label: 'Titel' },
   { value: 'datum_neu', label: 'Zuletzt bearbeitet' },
   { value: 'relevanz', label: 'Relevanz' },
-  { value: 'titel', label: 'Titel' },
-  { value: 'bewertung', label: 'Bewertung' },
-  { value: 'zuletzt_verwendet', label: 'Zuletzt verwendet' },
 ]
 
 let sucheTimer: ReturnType<typeof setTimeout> | undefined
@@ -71,7 +55,7 @@ watch(suche, () => {
   }, 250)
 })
 
-watch([sort, nurFavoriten, archiviert, typ, fachId, hatDateien], () => {
+watch([sort, nurFavoriten, archiviert, fachId], () => {
   page.value = 1
   syncQuery()
 })
@@ -82,63 +66,31 @@ function syncQuery() {
   void router.replace({
     query: {
       q: suche.value.trim() || undefined,
-      sort: sort.value !== 'datum_neu' ? sort.value : undefined,
+      sort: sort.value !== 'titel' ? sort.value : undefined,
       page: page.value > 1 ? String(page.value) : undefined,
       favoriten: nurFavoriten.value ? '1' : undefined,
       archiv: archiviert.value ? '1' : undefined,
-      typ: typ.value || undefined,
       fach: fachId.value || undefined,
-      hatDateien: hatDateien.value ? '1' : undefined,
     },
   })
 }
 
-const aktiveFilter = computed(() => {
-  const chips: { key: string; label: string; clear: () => void }[] = []
-  if (nurFavoriten.value) {
-    chips.push({ key: 'fav', label: 'Nur Favoriten', clear: () => (nurFavoriten.value = false) })
-  }
-  if (archiviert.value) {
-    chips.push({ key: 'arch', label: 'Archiviert anzeigen', clear: () => (archiviert.value = false) })
-  }
-  if (hatDateien.value) {
-    chips.push({ key: 'datei', label: 'Mit Anhängen', clear: () => (hatDateien.value = false) })
-  }
-  if (typ.value) {
-    chips.push({
-      key: 'typ',
-      label: materialTypes.label(typ.value as never),
-      clear: () => (typ.value = null),
-    })
-  }
-  if (fachId.value) {
-    const fach = fachOptionen.value.find((f) => f.value === fachId.value)
-    chips.push({
-      key: 'fach',
-      label: fach?.label ?? 'Fach',
-      clear: () => (fachId.value = null),
-    })
-  }
-  return chips
-})
+const fachChips = computed(() => (facetten.value?.subjects ?? []).slice(0, 8))
 </script>
 
 <template>
   <div>
     <LayoutSeitenkopf
       kicker="Sammlung"
-      titel="Materialien"
-      untertitel="Arbeitsblätter, Präsentationen und anderes Unterrichtsmaterial. Lehrwerke haben eine eigene Übersicht."
+      titel="Lehrwerke"
+      untertitel="Schulbücher als Einstieg: zum Buch gehören Lösungsheft, Serviceband, Kopiervorlagen und alles andere Zugeordnete."
     >
       <template v-if="darfBearbeiten" #aktionen>
         <UiButton to="/materialien/stapel" variante="sekundaer" icon="layer-group">
           Stapel-Upload
         </UiButton>
-        <UiButton to="/materialien/neu/moodle" variante="sekundaer" icon="graduation-cap">
-          Moodle-Kurs
-        </UiButton>
-        <UiButton to="/materialien/neu" variante="primaer" icon="plus">
-          Material anlegen
+        <UiButton to="/lehrwerke/neu" variante="primaer" icon="plus">
+          Lehrwerk anlegen
         </UiButton>
       </template>
     </LayoutSeitenkopf>
@@ -150,7 +102,7 @@ const aktiveFilter = computed(() => {
             v-model="suche"
             icon="magnifying-glass"
             placeholder="Liste eingrenzen …"
-            aria-label="Materialliste eingrenzen"
+            aria-label="Lehrwerke eingrenzen"
           />
         </UiField>
       </div>
@@ -179,65 +131,41 @@ const aktiveFilter = computed(() => {
         <UiIcon name="box-archive" fest /> Archiv
       </button>
       <button
+        v-for="fach in fachChips"
+        :key="fach.id"
         type="button"
         class="filter-chip"
-        :class="hatDateien && 'filter-chip-aktiv'"
-        @click="hatDateien = !hatDateien"
+        :class="fachId === fach.id && 'filter-chip-aktiv'"
+        @click="fachId = fachId === fach.id ? null : fach.id"
       >
-        <UiIcon name="paperclip" fest /> Mit Anhang
-      </button>
-      <button
-        v-for="eintrag in (facetten?.materialTypes ?? []).filter((t) => t.value !== 'lehrwerk').slice(0, 6)"
-        :key="eintrag.value"
-        type="button"
-        class="filter-chip"
-        :class="typ === eintrag.value && 'filter-chip-aktiv'"
-        @click="typ = typ === eintrag.value ? null : eintrag.value"
-      >
-        {{ materialTypes.label(eintrag.value as never) }}
-        <span class="text-ink-subtle">{{ eintrag.count }}</span>
-      </button>
-    </div>
-
-    <div v-if="aktiveFilter.length" class="mb-4 flex flex-wrap items-center gap-2">
-      <span class="text-xs text-ink-subtle">Aktiv:</span>
-      <button
-        v-for="chip in aktiveFilter"
-        :key="chip.key"
-        type="button"
-        class="filter-chip filter-chip-aktiv"
-        @click="chip.clear()"
-      >
-        {{ chip.label }}
-        <UiIcon name="xmark" fest />
+        {{ fach.name }}
+        <span class="text-ink-subtle">{{ fach.count }}</span>
       </button>
     </div>
 
     <UiFehlerzustand v-if="error" :text="toApiFehler(error).nachricht" @erneut="refresh()" />
 
     <template v-else>
-      <div class="mb-3 flex items-baseline justify-between gap-3 text-sm text-ink-muted">
-        <p>
-          <span class="font-medium text-ink">{{ formatZahl(data?.total ?? 0) }}</span>
-          {{ (data?.total ?? 0) === 1 ? 'Material' : 'Materialien' }}
-        </p>
-      </div>
+      <p class="mb-3 text-sm text-ink-muted">
+        <span class="font-medium text-ink">{{ formatZahl(data?.total ?? 0) }}</span>
+        {{ (data?.total ?? 0) === 1 ? 'Lehrwerk' : 'Lehrwerke' }}
+      </p>
 
-      <UiSkelett v-if="status === 'pending'" art="liste" :zeilen="6" />
+      <UiSkelett v-if="status === 'pending'" art="liste" :zeilen="5" />
       <UiLeerzustand
-        v-else-if="!eintraege.length"
-        icon="folder-open"
-        titel="Keine Materialien gefunden"
-        text="Lege ein neues Material an oder importiere einen Export aus dem Schulportal."
+        v-else-if="!(data?.items.length)"
+        icon="book"
+        titel="Noch keine Lehrwerke"
+        text="Lege ein Lehrwerk an oder ordne beim Stapel-Upload alles einem Buch zu."
       >
-        <UiButton v-if="darfBearbeiten" to="/materialien/neu" variante="primaer" icon="plus">
-          Material anlegen
+        <UiButton v-if="darfBearbeiten" to="/lehrwerke/neu" variante="primaer" icon="plus">
+          Lehrwerk anlegen
         </UiButton>
       </UiLeerzustand>
 
       <div v-else class="space-y-2">
         <MaterialKarte
-          v-for="material in eintraege"
+          v-for="material in data?.items"
           :key="material.id"
           :material="material"
           @favorit="favoritSetzen"

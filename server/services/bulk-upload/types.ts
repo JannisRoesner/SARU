@@ -1,12 +1,25 @@
 import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
 import type { MaterialType } from '#shared/types/domain'
+import type { BulkFileRole, BulkFolderRole } from '#shared/utils/bulk-upload'
+
+export type { BulkFileRole, BulkFolderRole }
 
 /** Kennung in `import_runs.adapter_id` – getrennt vom Schulportal-Import. */
 export const BULK_PDF_ADAPTER_ID = 'bulk-pdf-materials'
-export const BULK_PDF_ADAPTER_VERSION = '1'
-export const BULK_PDF_ADAPTER_LABEL = 'PDF-Stapel-Upload'
+export const BULK_PDF_ADAPTER_VERSION = '2'
+export const BULK_PDF_ADAPTER_LABEL = 'Stapel-Upload'
 
-export const MAX_BULK_FILES = 40
+/** Sicherheitsgrenze gegen ZIP-Bomben; die Paketgröße begrenzt zusätzlich. */
+export const MAX_BULK_FILES = 400
+
+/** Parallele Textextraktion inkl. Vision-OCR. */
+export const BULK_EXTRACT_CONCURRENCY = 4
+/** Parallele Metadaten-Vorschläge. */
+export const BULK_AI_CONCURRENCY = 3
+
+export type BulkClusterKind = 'paar' | 'einzeln' | 'unklar'
+
+export const BULK_FILE_ROLES = ['schueler', 'loesung', 'einzeln', 'anhaengsel'] as const
 
 export interface BulkUploadFileSuggestion {
   title: string
@@ -24,6 +37,8 @@ export interface BulkUploadFileSuggestion {
 export interface BulkUploadDetectedFile {
   sourceRef: string
   fileName: string
+  relativePath?: string | null
+  folderRole?: BulkFolderRole
   sizeBytes: number
   checksum: string
   stagingPath: string
@@ -35,12 +50,32 @@ export interface BulkUploadDetectedFile {
   /** Kurzer Ausschnitt für die UI (nicht der volle Extrakt). */
   textPreview: string | null
   duplicate: { materialId: string; title: string; reason: string } | null
+  suggestions?: BulkUploadFileSuggestion
+  warnings: string[]
+}
+
+export interface BulkProposedLink {
+  targetClusterId: string
+  relationType: 'musterloesung' | 'gehoert_zu' | 'zusatzmaterial'
+  reason: string
+  confidence: 'hoch' | 'mittel'
+}
+
+export interface BulkUploadDetectedCluster {
+  clusterId: string
+  kind: BulkClusterKind
+  folderRole: BulkFolderRole
+  stem: string
+  fileRefs: string[]
+  suggestedRoles: Record<string, BulkFileRole>
   suggestions: BulkUploadFileSuggestion
+  proposedLinks: BulkProposedLink[]
   warnings: string[]
 }
 
 export interface BulkUploadDetected {
   files: BulkUploadDetectedFile[]
+  clusters?: BulkUploadDetectedCluster[]
   aiEnabled: boolean
   aiErrors: number
 }
@@ -55,6 +90,9 @@ export interface BulkUploadRecordDecision {
   content?: string
   action?: 'erstellen' | 'ueberspringen'
   duplicateOfId?: string | null
+  fileRoles?: Record<string, BulkFileRole>
+  links?: Record<string, boolean>
+  solutionTitle?: string
 }
 
 export interface BulkUploadMapping {
@@ -64,12 +102,23 @@ export interface BulkUploadMapping {
   schoolForm?: string | null
   defaultMaterialType?: MaterialType
   linkDuplicates?: boolean
+  createLehrwerk?: boolean
+  lehrwerkTitle?: string
+  /** Nach dem Anlegen gesetzt, damit die Oberfläche zum Hub springen kann. */
+  lehrwerkId?: string
   records?: Record<string, BulkUploadRecordDecision>
+}
+
+export interface BulkUploadInputFile {
+  buffer: Buffer
+  fileName: string
+  relativePath?: string | null
 }
 
 export interface BulkUploadStats {
   materialien?: number
   dateien?: number
+  verknuepft?: number
   uebersprungen?: number
   fehlgeschlagen?: number
 }

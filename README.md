@@ -7,7 +7,7 @@ Selbst gehostetes Archiv für Unterrichtsreihen, Stunden und Materialien – mit
 ## Funktionen
 
 - Materialien mit Varianten, Dateianhängen (PDF, Office), Moodle-Kursarchiven (.mbz / .imscc), H5P-Paketen, Tags und Bewertungen
-- PDF-Stapel-Upload: mehrere Dateien gemeinsam hochladen, einordnen und optional mit KI-Vorschlägen prüfen
+- Stapel-Upload: PDF, Office und ZIP-Pakete gemeinsam hochladen, Paare (Arbeitsblatt + Lösung) prüfen und optional mit KI-Vorschlägen anlegen
 - Unterrichtsstunden und Reihen mit Phasen und Materialzuordnung
 - Hybride Suche (Volltext, Ähnlichkeitssuche, optional Vektorsuche)
 - Import von Schulportal-Kursmappen

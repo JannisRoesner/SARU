@@ -4,7 +4,7 @@ import type { MaterialSummary } from '~~/server/repositories/material.repository
 import type { LessonSummary } from '~~/server/repositories/lesson.repository'
 import type { SeriesSummary } from '~~/server/repositories/series.repository'
 
-useHead({ title: 'Suche' })
+useHead({ title: 'Suchergebnisse' })
 
 interface Treffer {
   entityType: 'material' | 'unterrichtsstunde' | 'reihe'
@@ -148,8 +148,8 @@ const { favoritSetzen } = useMaterialAktionen(() => refresh())
   <div>
     <LayoutSeitenkopf
       kicker="Finden"
-      titel="Suche"
-      untertitel="Materialien, Stunden und Reihen durchsuchen, auch Text in Anhängen."
+      titel="Suchergebnisse"
+      untertitel="Alle Treffer zur Suche in der Leiste – auch Text in Anhängen."
     >
       <template #aktionen>
         <UiButton
@@ -239,7 +239,7 @@ const { favoritSetzen } = useMaterialAktionen(() => refresh())
       <UiLeerzustand
         icon="magnifying-glass"
         titel="Wonach suchst du?"
-        text="Tippe einen Begriff oder öffne eine gespeicherte Suche. Mit Strg+K erreichst du die Schnellsuche überall."
+        text="Tippe hier einen Begriff. Dieselbe Suche erreichst du überall über die Leiste oben (Strg+K)."
       />
     </template>
 

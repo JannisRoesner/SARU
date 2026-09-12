@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { searchEntityTypes } from '#shared/utils/labels'
+import { materialPfad } from '#shared/utils/material-pfad'
 
 const offen = defineModel<boolean>({ required: true })
 
@@ -102,6 +103,10 @@ function oeffnen(index: number) {
   if (eintrag.art === 'treffer') {
     const t = eintrag.treffer
     offen.value = false
+    if (t.entityType === 'material') {
+      const typ = (t.datensatz as { materialType?: string } | undefined)?.materialType
+      return navigateTo(materialPfad({ id: t.entityId, materialType: typ }))
+    }
     return navigateTo(`${PFADE[t.entityType]}/${t.entityId}`)
   }
 

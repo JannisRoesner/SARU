@@ -65,8 +65,13 @@ watch(page, syncQuery)
     </LayoutSeitenkopf>
 
     <div class="mb-5 grid gap-3 sm:grid-cols-[1fr_14rem]">
-      <UiField label="Suche">
-        <UiInput v-model="suche" icon="magnifying-glass" placeholder="Titel, Beschreibung …" />
+      <UiField>
+        <UiInput
+          v-model="suche"
+          icon="magnifying-glass"
+          placeholder="Liste eingrenzen …"
+          aria-label="Reihenliste eingrenzen"
+        />
       </UiField>
       <UiField label="Sortierung">
         <UiSelect

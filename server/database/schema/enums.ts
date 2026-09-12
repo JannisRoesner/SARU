@@ -30,6 +30,7 @@ export const materialTypeEnum = pgEnum('material_type', [
   'aufgabe',
   'lernkontrolle',
   'klausur',
+  'gefaehrdungsbeurteilung',
   'zusatzmaterial',
   'differenzierung',
   'notiz',

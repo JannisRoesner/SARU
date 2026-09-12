@@ -54,3 +54,12 @@ export function aiMaterialAcceptAttribute(): string {
 export function aiMaterialFormatsLabel(): string {
   return 'PDF, Word (.doc/.docx), PowerPoint (.ppt/.pptx), Excel (.xls/.xlsx), OpenDocument (.odt/.odp/.ods) oder Text'
 }
+
+/** `accept`-Attribut für den Stapel-Upload inklusive ZIP-Pakete. */
+export function bulkMaterialAcceptAttribute(): string {
+  return `${aiMaterialAcceptAttribute()},.zip,application/zip`
+}
+
+export function isBulkMaterialFileName(fileName: string): boolean {
+  return isAiMaterialFileName(fileName) || /\.zip$/i.test(fileName)
+}

@@ -8,8 +8,15 @@ const props = withDefaults(
   defineProps<{
     titel?: string
     ausschliessen?: string[]
+    materialTypes?: string[]
+    excludeMaterialTypes?: string[]
   }>(),
-  { titel: 'Material hinzufügen', ausschliessen: () => [] },
+  {
+    titel: 'Material hinzufügen',
+    ausschliessen: () => [],
+    materialTypes: () => [],
+    excludeMaterialTypes: () => [],
+  },
 )
 
 const emit = defineEmits<{ ausgewaehlt: [material: MaterialSummary] }>()
@@ -22,6 +29,10 @@ const query = computed(() => ({
   page: page.value,
   pageSize: 12,
   sort: suche.value.trim() ? 'relevanz' : 'datum_neu',
+  materialTypes: props.materialTypes.length ? props.materialTypes.join(',') : undefined,
+  excludeMaterialTypes: props.excludeMaterialTypes.length
+    ? props.excludeMaterialTypes.join(',')
+    : undefined,
 }))
 
 const { data, status, refresh } = await useFetch<Paginated<MaterialSummary> & { query: string | null }>(
@@ -49,8 +60,13 @@ function waehlen(material: MaterialSummary) {
 
 <template>
   <UiModal v-model="offen" :titel="titel" icon="folder-open" breite="lg">
-    <UiField label="Suche">
-      <UiInput v-model="suche" icon="magnifying-glass" placeholder="Titel, Schlagwort …" />
+    <UiField>
+      <UiInput
+        v-model="suche"
+        icon="magnifying-glass"
+        placeholder="Liste eingrenzen …"
+        aria-label="Materialien eingrenzen"
+      />
     </UiField>
 
     <div class="mt-4 max-h-[50vh] space-y-2 overflow-y-auto">
@@ -60,7 +76,7 @@ function waehlen(material: MaterialSummary) {
         klein
         icon="folder-open"
         titel="Keine Materialien"
-        text="Passe die Suche an oder lege zuerst ein Material an."
+        text="Passe die Liste an oder lege zuerst ein Material an."
       />
       <button
         v-for="material in eintraege"

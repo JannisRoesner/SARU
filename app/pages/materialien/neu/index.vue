@@ -24,7 +24,7 @@ const wege = [
     to: '/materialien/stapel',
     icon: 'layer-group',
     titel: 'Stapel-Upload',
-    text: 'Mehrere PDFs auf einmal analysieren, Vorschläge prüfen und gemeinsam anlegen.',
+    text: 'Mehrere Dateien oder ein ZIP-Paket auf einmal analysieren, Paare prüfen und gemeinsam anlegen.',
   },
   {
     to: '/materialien/neu/moodle',
@@ -61,5 +61,12 @@ const wege = [
         <span class="mt-1 text-sm text-ink-muted">{{ weg.text }}</span>
       </NuxtLink>
     </div>
+
+    <p class="mt-6 text-sm text-ink-muted">
+      Ein Schulbuch als Sammlung?
+      <NuxtLink to="/lehrwerke/neu" class="font-medium text-primary hover:underline">
+        Lehrwerk anlegen
+      </NuxtLink>
+    </p>
   </div>
 </template>

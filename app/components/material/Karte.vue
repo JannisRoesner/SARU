@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { NuxtLink } from '#components'
 import { materialTypes, origins } from '#shared/utils/labels'
+import { materialPfad } from '#shared/utils/material-pfad'
 import { istKiMusterloesung, kiAutorAnzeige } from '#shared/utils/ki'
 import { materialVorschauIcon, materialZeigtIconVorschau } from '#shared/utils/moodle'
 import { isThumbnailCandidate } from '#shared/utils/thumbnail-candidate'
@@ -22,6 +23,7 @@ const emit = defineEmits<{
   auswahl: [id: string, wert: boolean]
 }>()
 
+const ziel = computed(() => materialPfad(props.material))
 const icon = computed(() => materialVorschauIcon(props.material.materialType, preview.value?.fileName))
 const zeigtIconVorschau = computed(() =>
   materialZeigtIconVorschau(props.material.materialType, preview.value?.fileName),
@@ -46,7 +48,7 @@ const zeigtMiniatur = computed(() => {
 <template>
   <component
     :is="auswaehlbar ? 'div' : NuxtLink"
-    :to="auswaehlbar ? undefined : `/materialien/${material.id}`"
+    :to="auswaehlbar ? undefined : ziel"
     class="karte group relative flex gap-3"
     :class="[
       !auswaehlbar && 'karte-klickbar',
@@ -93,7 +95,7 @@ const zeigtMiniatur = computed(() => {
       <div class="flex items-start gap-2">
         <NuxtLink
           v-if="auswaehlbar"
-          :to="`/materialien/${material.id}`"
+          :to="ziel"
           class="min-w-0 flex-1 font-medium text-ink hover:text-primary"
         >
           {{ material.title }}
@@ -167,6 +169,14 @@ const zeigtMiniatur = computed(() => {
 
       <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-subtle">
         <template v-if="!kompakt">
+          <span
+            v-if="material.materialType === 'lehrwerk' && material.childCount"
+            class="flex items-center gap-1"
+          >
+            <UiIcon name="layer-group" fest />
+            {{ material.childCount }}
+            {{ material.childCount === 1 ? 'Material' : 'Materialien' }}
+          </span>
           <span v-if="material.variantCount > 1" class="flex items-center gap-1">
             <UiIcon name="code-branch" fest />
             {{ material.variantCount }} Varianten

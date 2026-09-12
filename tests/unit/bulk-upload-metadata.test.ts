@@ -16,6 +16,8 @@ describe('bulk-upload metadata helpers', () => {
     expect(guessMaterialType('Klausur-2024.pdf')).toBe('klausur')
     expect(guessMaterialType('AB-Zellatmung_Loesung.pdf')).toBe('musterloesung')
     expect(guessMaterialType('Folien_Einfuehrung.pdf', 'arbeitsblatt')).toBe('praesentation')
+    expect(guessMaterialType('bio_zel_s2_ab_007.docx')).toBe('arbeitsblatt')
+    expect(guessMaterialType('wd01_049000_gfb_081_katalase.docx')).toBe('gefaehrdungsbeurteilung')
   })
 
   it('erzeugt Dateiname-basierte Vorschläge ohne KI', () => {

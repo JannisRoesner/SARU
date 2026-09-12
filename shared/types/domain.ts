@@ -35,6 +35,7 @@ export const MATERIAL_TYPES = [
   'aufgabe',
   'lernkontrolle',
   'klausur',
+  'gefaehrdungsbeurteilung',
   'zusatzmaterial',
   'differenzierung',
   'notiz',

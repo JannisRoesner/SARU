@@ -56,6 +56,11 @@ export const materialTypes = definitions<MaterialType>({
   aufgabe: { label: 'Aufgabe', icon: 'list-check', tone: 'primary' },
   lernkontrolle: { label: 'Lernkontrolle', icon: 'clipboard-question', tone: 'gelb' },
   klausur: { label: 'Klausur', icon: 'file-pen', tone: 'rot' },
+  gefaehrdungsbeurteilung: {
+    label: 'Gefährdungsbeurteilung',
+    icon: 'triangle-exclamation',
+    tone: 'gelb',
+  },
   zusatzmaterial: { label: 'Zusatzmaterial', icon: 'circle-plus', tone: 'neutral' },
   differenzierung: { label: 'Differenzierungsmaterial', icon: 'code-branch', tone: 'accent' },
   notiz: { label: 'Notiz', icon: 'note-sticky', tone: 'gelb' },
@@ -115,6 +120,15 @@ export const materialRelationTypes = definitions<MaterialRelationType>({
   nachfolger: { label: 'Folgt auf', icon: 'arrow-right' },
   quelle: { label: 'Quelle', icon: 'quote-left' },
 })
+
+/** Aus Sicht des geöffneten Materials: eingehendes „gehört zu“ bedeutet „enthält“. */
+export function relationAnzeigeLabel(
+  type: MaterialRelationType | string,
+  direction: 'ausgehend' | 'eingehend',
+): string {
+  if (type === 'gehoert_zu' && direction === 'eingehend') return 'Enthält'
+  return materialRelationTypes.label(type as MaterialRelationType)
+}
 
 export const lessonStatuses = definitions<LessonStatus>({
   entwurf: { label: 'Entwurf', icon: 'pencil', tone: 'neutral' },

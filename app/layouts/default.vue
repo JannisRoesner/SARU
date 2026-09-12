@@ -15,9 +15,9 @@ interface NavEintrag {
 const HAUPTNAVIGATION: NavEintrag[] = [
   { pfad: '/', label: 'Dashboard', icon: 'gauge-high' },
   { pfad: '/materialien', label: 'Materialien', icon: 'folder-open' },
+  { pfad: '/lehrwerke', label: 'Lehrwerke', icon: 'book' },
   { pfad: '/stunden', label: 'Unterrichtsstunden', icon: 'chalkboard-user' },
   { pfad: '/reihen', label: 'Unterrichtsreihen', icon: 'layer-group' },
-  { pfad: '/suche', label: 'Suche', icon: 'magnifying-glass' },
 ]
 
 const WERKZEUGE: NavEintrag[] = [

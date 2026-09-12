@@ -1,6 +1,9 @@
 import { readFile } from 'node:fs/promises'
 import { isError } from 'h3'
 import { oeffentlicheFehlermeldung } from '#shared/utils/public-error'
+import { guessMaterialType } from '#shared/utils/material-type-guess'
+import { materialTypes } from '#shared/utils/labels'
+import { chooseMaterialDescription } from '#shared/utils/material-description'
 import { normalizeGradeLevel } from '#shared/utils/jahrgangsstufen'
 import { desc, eq, sql } from 'drizzle-orm'
 import { useDatabase } from '../../database/client'
@@ -24,6 +27,7 @@ import { ensureExtractedText } from '../ai/document-text'
 import {
   MATERIAL_METADATA_PROMPT_VERSION,
   suggestMaterialMetadata,
+  suggestShortDescription,
 } from '../ai/suggest-material-metadata'
 import { isExtractable } from '../extraction.service'
 import { getAiSettings } from '../settings.service'
@@ -289,6 +293,25 @@ function buildSeriesTitle(parsed: ParsedExport): string {
   return parts.join(' · ')
 }
 
+function descriptionFromLesson(
+  lesson: { topic: string; content: string | null },
+  materialType: string,
+): string | null {
+  const content = lesson.content?.replace(/\s+/g, ' ').trim()
+  if (content && content.length >= 40) return content.slice(0, 400)
+  const topic = lesson.topic.trim()
+  if (!topic) return null
+  return `${materialTypes.label(materialType as never)} zur Stunde „${topic}“.`
+}
+
+function descriptionFromSeriesTopics(parsed: ParsedExport): string | null {
+  const topics = parsed.lessons.map((lesson) => lesson.topic.trim()).filter(Boolean)
+  if (!topics.length) return null
+  const preview = topics.slice(0, 8).join(', ')
+  const more = topics.length > 8 ? ` u. a.` : ''
+  return `${topics.length} Stunden: ${preview}${more}`
+}
+
 async function findExistingLearningGroupId(
   name: string | null,
   schoolYear: string | null,
@@ -422,10 +445,23 @@ export async function commitImport(
     await track('kurs:reihe', 'series', seriesId, 'verknuepft', 'Bestehende Reihe verwendet')
   } else if (mapping.seriesMode !== 'keine') {
     const dates = parsed.lessons.map((l) => l.date).filter((d): d is string => !!d).sort()
+    const seriesTitle = mapping.seriesTitle || buildSeriesTitle(parsed)
+    const seriesAiDescription = await suggestShortDescription({
+      title: seriesTitle,
+      context: [
+        parsed.course.rawName ? `Kurs: ${parsed.course.rawName}` : null,
+        mapping.subjectName ? `Fach: ${mapping.subjectName}` : null,
+        mapping.gradeLevel != null ? `Jahrgang: ${mapping.gradeLevel}` : null,
+        `Themen: ${parsed.lessons.map((l) => l.topic).filter(Boolean).join('; ')}`,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      settings: aiSettings,
+    })
     seriesId = await createSeries(
       {
-        title: mapping.seriesTitle || buildSeriesTitle(parsed),
-        description: `Aus dem Schulportal Hessen importiert (Kursmappe „${parsed.course.rawName}“).`,
+        title: seriesTitle,
+        description: chooseMaterialDescription(seriesAiDescription, descriptionFromSeriesTopics(parsed)),
         subjectId,
         learningGroupId,
         schoolYear: mapping.schoolYear ?? parsed.course.schoolYear,
@@ -525,7 +561,6 @@ export async function commitImport(
           if (!materialId) {
             const fallbackTitle = titleFromFileName(attachment.fileName)
             const fallbackType = guessMaterialType(attachment.fileName)
-            const fallbackDescription = `Aus dem Schulportal importiert (Termin ${lesson.date ?? 'ohne Datum'}).`
             const lessonContext = [
               lesson.topic ? `Thema: ${lesson.topic}` : null,
               lesson.content ? `Inhalt: ${lesson.content}` : null,
@@ -572,9 +607,10 @@ export async function commitImport(
             materialId = await createMaterial(
               {
                 title: suggestion.title || fallbackTitle,
-                description: suggestion.aiUsed && suggestion.description.trim()
-                  ? suggestion.description
-                  : fallbackDescription,
+                description: chooseMaterialDescription(
+                  suggestion.description,
+                  descriptionFromLesson(lesson, suggestion.materialType || fallbackType),
+                ),
                 content: suggestion.contentSummary?.trim() || null,
                 materialType: (suggestion.materialType || fallbackType) as never,
                 origin: 'import',
@@ -853,18 +889,4 @@ function titleFromFileName(fileName: string): string {
     .replace(/\s\d{4} \d{2} \d{2} \d{2} \d{2} \d{2}$/, '')
     .replace(/\s+/g, ' ')
     .trim()
-}
-
-/** Grobe Einordnung anhand des Dateinamens – vom Nutzer jederzeit änderbar. */
-function guessMaterialType(fileName: string): string {
-  const name = fileName.toLowerCase()
-  if (/(l(ö|oe)sung|-lsg|_lsg)/.test(name)) return 'musterloesung'
-  if (/(klausur|klassenarbeit)/.test(name)) return 'klausur'
-  if (/(lernkontrolle|test|quiz)/.test(name)) return 'lernkontrolle'
-  if (/(steckbrief|vorlage|^ab[-_ ]|arbeitsblatt)/.test(name)) return 'arbeitsblatt'
-  if (/\.(png|jpe?g|gif|webp|avif)$/.test(name)) return 'bild'
-  if (/\.(mp4|webm|mov)$/.test(name)) return 'video'
-  if (/\.(pptx?|odp)$/.test(name)) return 'praesentation'
-  if (/(elternbrief|brief|einverst(ä|ae)ndnis)/.test(name)) return 'sonstiges'
-  return 'arbeitsblatt'
 }

@@ -6,7 +6,9 @@ import { getMaterialDetail } from '../../../repositories/material.repository'
 import { appError } from '../../../utils/errors'
 import { addFileAsset, addRelation, createMaterial, deleteAsset, updateMaterial } from '../../material.service'
 import { deleteFile, resolveStoragePath, storeFile } from '../../storage.service'
+import { chooseMaterialDescription } from '#shared/utils/material-description'
 import { getAiSettings } from '../../settings.service'
+import { suggestShortDescription } from '../suggest-material-metadata'
 import { candidateBankFromWords } from '../solutions/candidate-bank'
 import {
   assessPdfLayoutPlan,
@@ -560,9 +562,25 @@ export async function publishSolutionDraft(
       editedBy: existingSolution ? userId : undefined,
     }
   const materialContent = `> **Von künstlicher Intelligenz erstellt und manuell freigegeben.**\n\n${content}`
+  const aiDescription = await suggestShortDescription({
+    title: `Musterlösung – ${material.title}`,
+    context: [
+      material.description,
+      material.subjects.map((subject) => subject.name).join(', '),
+      content,
+    ]
+      .filter(Boolean)
+      .join('\n\n'),
+    settings: await getAiSettings(),
+  })
+  const description = chooseMaterialDescription(
+    aiDescription,
+    existingSolution?.description,
+    material.description,
+  )
   const solutionMaterialId = existingSolution?.id ?? await createMaterial({
       title: `Musterlösung – ${material.title}`,
-      description: `Manuell geprüfter KI-Entwurf zum Material „${material.title}“.`,
+      description,
       content: materialContent,
       materialType: 'musterloesung',
       schoolForm: material.schoolForm,
@@ -579,7 +597,7 @@ export async function publishSolutionDraft(
     }, userId)
   if (existingSolution) {
     await updateMaterial(solutionMaterialId, {
-      description: `Manuell geprüfter KI-Entwurf zum Material „${material.title}“.`,
+      description,
       content: materialContent,
       author: `KI · ${row.job.model}`,
       aiMeta,
