@@ -970,7 +970,7 @@ function loesungKorrigieren() {
             icon="pen-to-square"
             einklappbar
             einklapp-id="material-angaben"
-            :standard-offen="true"
+            :standard-offen="false"
           >
             <div class="space-y-4">
               <UiField label="Titel" pflicht>
@@ -1083,7 +1083,7 @@ function loesungKorrigieren() {
             :icon="istMoodleKurs ? 'graduation-cap' : 'code-branch'"
             einklappbar
             einklapp-id="material-varianten"
-            :standard-offen="!data.variants.some((v) => v.assets.length)"
+            :standard-offen="true"
           >
             <template #kopf>
               <UiButton
@@ -1232,7 +1232,7 @@ function loesungKorrigieren() {
             icon="link"
             einklappbar
             einklapp-id="material-verknuepfungen"
-            :standard-offen="false"
+            :standard-offen="true"
           >
             <template #kopf>
               <UiButton

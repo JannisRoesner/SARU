@@ -11,6 +11,7 @@ const schema = z.object({
   role: z.enum(['admin', 'lehrkraft', 'leser']).optional(),
   isActive: z.boolean().optional(),
   password: z.string().min(1).optional(),
+  mustChangePassword: z.boolean().optional(),
 })
 
 export default defineEventHandler(async (event) => {

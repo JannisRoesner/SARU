@@ -60,7 +60,7 @@ async function schulformUmschalten(form: SchoolForm, sichtbar: boolean) {
 </script>
 
 <template>
-  <div class="mx-auto max-w-3xl">
+  <LayoutEinstellungsSeite>
     <LayoutSeitenkopf
       zurueck-to="/einstellungen"
       zurueck-label="Einstellungen"
@@ -69,7 +69,7 @@ async function schulformUmschalten(form: SchoolForm, sichtbar: boolean) {
       untertitel="Modus, Palette, Schulformen"
     />
 
-    <UiCard titel="Farbmodus" icon="circle-half-stroke" class="mb-5">
+    <UiCard titel="Farbmodus" icon="circle-half-stroke">
       <div class="grid gap-2 sm:grid-cols-3">
         <button
           v-for="m in modi"
@@ -85,7 +85,7 @@ async function schulformUmschalten(form: SchoolForm, sichtbar: boolean) {
       </div>
     </UiCard>
 
-    <UiCard titel="Farbdesign" icon="palette" class="mb-5">
+    <UiCard titel="Farbdesign" icon="palette">
       <div class="grid gap-3 sm:grid-cols-2">
         <button
           v-for="d in FARBDESIGNS"
@@ -104,7 +104,7 @@ async function schulformUmschalten(form: SchoolForm, sichtbar: boolean) {
       </div>
     </UiCard>
 
-    <UiCard titel="Schulformen" icon="school" class="mb-5">
+    <UiCard titel="Schulformen" icon="school">
       <p class="mb-4 text-sm text-ink-muted">
         Lege fest, welche Schulformen dir in Filtern, Formularen und bei der Jahrgangsstufen-Auswahl
         angeboten werden. Ausgeblendete Schulformen werden nicht gelöscht – bestehende Einträge
@@ -158,5 +158,5 @@ async function schulformUmschalten(form: SchoolForm, sichtbar: boolean) {
         </div>
       </div>
     </UiCard>
-  </div>
+  </LayoutEinstellungsSeite>
 </template>

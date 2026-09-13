@@ -140,7 +140,7 @@ async function testen() {
 </script>
 
 <template>
-  <div class="mx-auto max-w-3xl space-y-6">
+  <LayoutEinstellungsSeite>
     <LayoutSeitenkopf
       zurueck-to="/einstellungen"
       zurueck-label="Einstellungen"
@@ -240,5 +240,5 @@ async function testen() {
         </div>
       </div>
     </UiCard>
-  </div>
+  </LayoutEinstellungsSeite>
 </template>

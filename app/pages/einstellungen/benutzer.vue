@@ -31,6 +31,33 @@ const loeschenOffen = computed({
   },
 })
 
+const passwortZiel = ref<Benutzer | null>(null)
+const passwortOffen = computed({
+  get: () => passwortZiel.value !== null,
+  set: (wert: boolean) => {
+    if (!wert) passwortZiel.value = null
+  },
+})
+const passwort = reactive({
+  neu: '',
+  wiederholung: '',
+  mustChangePassword: true,
+})
+
+watch(passwortZiel, (ziel) => {
+  if (!ziel) return
+  passwort.neu = ''
+  passwort.wiederholung = ''
+  passwort.mustChangePassword = true
+})
+
+const passwortAbweichung = computed(
+  () => passwort.wiederholung.length > 0 && passwort.neu !== passwort.wiederholung,
+)
+const passwortAbsendbar = computed(
+  () => passwort.neu.length >= 10 && passwort.neu === passwort.wiederholung,
+)
+
 const neu = reactive({
   name: '',
   email: '',
@@ -72,6 +99,22 @@ async function aktivUmschalten(user: Benutzer) {
   await refresh()
 }
 
+async function passwortSetzen() {
+  if (!passwortZiel.value || !passwortAbsendbar.value) return
+  const ok = await aufruf(`/api/users/${passwortZiel.value.id}`, {
+    method: 'PATCH',
+    body: {
+      password: passwort.neu,
+      mustChangePassword: passwort.mustChangePassword,
+    },
+    erfolgsmeldung: 'Passwort gesetzt. Bestehende Anmeldungen wurden beendet.',
+  })
+  if (ok) {
+    passwortZiel.value = null
+    await refresh()
+  }
+}
+
 async function loeschen() {
   if (!loeschenZiel.value) return
   const ok = await aufruf(`/api/users/${loeschenZiel.value.id}`, {
@@ -84,13 +127,13 @@ async function loeschen() {
 </script>
 
 <template>
-  <div>
+  <LayoutEinstellungsSeite>
     <LayoutSeitenkopf
       zurueck-to="/einstellungen"
       zurueck-label="Einstellungen"
       kicker="Administration"
       titel="Benutzer"
-      untertitel="Zugänge und Rollen"
+      untertitel="Zugänge, Rollen, Passwörter"
     >
       <template #aktionen>
         <UiButton variante="primaer" icon="user-plus" @click="anlegenOffen = true">
@@ -99,8 +142,71 @@ async function loeschen() {
       </template>
     </LayoutSeitenkopf>
 
-    <div class="overflow-x-auto rounded-xl border border-line">
-      <table class="w-full min-w-[40rem] text-left text-sm">
+    <ul class="space-y-2 md:hidden">
+      <li
+        v-for="user in data?.items ?? []"
+        :key="user.id"
+        class="karte space-y-3 p-4"
+      >
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="font-medium text-ink">
+              {{ user.name }}
+              <span v-if="user.id === selbst?.id" class="text-xs font-normal text-ink-subtle">(du)</span>
+            </p>
+            <p class="truncate text-sm text-ink-muted">{{ user.email }}</p>
+          </div>
+          <div class="flex shrink-0">
+            <UiButton
+              v-if="user.id !== selbst?.id"
+              variante="still"
+              groesse="sm"
+              icon="key"
+              nur-icon
+              title="Passwort setzen"
+              @click="passwortZiel = user"
+            />
+            <UiButton
+              v-if="user.id !== selbst?.id"
+              variante="still"
+              groesse="sm"
+              :icon="user.isActive ? 'ban' : 'check'"
+              nur-icon
+              :title="user.isActive ? 'Deaktivieren' : 'Aktivieren'"
+              @click="aktivUmschalten(user)"
+            />
+            <UiButton
+              v-if="user.id !== selbst?.id"
+              variante="still"
+              groesse="sm"
+              icon="trash"
+              nur-icon
+              title="Löschen"
+              @click="loeschenZiel = user"
+            />
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <select
+            class="rounded-lg border border-line bg-surface px-2 py-1 text-sm"
+            :value="user.role"
+            :disabled="user.id === selbst?.id"
+            @change="rolleAendern(user.id, ($event.target as HTMLSelectElement).value as Role)"
+          >
+            <option v-for="r in roles.options()" :key="r.value" :value="r.value">
+              {{ r.label }}
+            </option>
+          </select>
+          <UiBadge :ton="user.isActive ? 'gruen' : 'neutral'">
+            {{ user.isActive ? 'Aktiv' : 'Gesperrt' }}
+          </UiBadge>
+          <UiBadge v-if="user.mustChangePassword" ton="gelb">Passwort</UiBadge>
+        </div>
+      </li>
+    </ul>
+
+    <div class="hidden overflow-x-auto rounded-xl border border-line md:block">
+      <table class="w-full text-left text-sm">
         <thead class="border-b border-line bg-surface-sunken text-xs tracking-wide text-ink-subtle uppercase">
           <tr>
             <th class="px-4 py-3 font-semibold">Name</th>
@@ -144,6 +250,15 @@ async function loeschen() {
                 v-if="user.id !== selbst?.id"
                 variante="still"
                 groesse="sm"
+                icon="key"
+                nur-icon
+                title="Passwort setzen"
+                @click="passwortZiel = user"
+              />
+              <UiButton
+                v-if="user.id !== selbst?.id"
+                variante="still"
+                groesse="sm"
                 :icon="user.isActive ? 'ban' : 'check'"
                 nur-icon
                 :title="user.isActive ? 'Deaktivieren' : 'Aktivieren'"
@@ -172,7 +287,7 @@ async function loeschen() {
         <UiField label="E-Mail" pflicht>
           <UiInput v-model="neu.email" type="email" />
         </UiField>
-        <UiField label="Startpasswort" pflicht>
+        <UiField label="Startpasswort" pflicht hinweis="Mindestens 10 Zeichen, drei Zeichenarten.">
           <UiInput v-model="neu.password" type="password" autocomplete="new-password" />
         </UiField>
         <UiField label="Rolle">
@@ -199,6 +314,51 @@ async function loeschen() {
       </template>
     </UiModal>
 
+    <UiModal
+      v-model="passwortOffen"
+      titel="Passwort setzen"
+      icon="key"
+      :beschreibung="passwortZiel ? `Neues Passwort für ${passwortZiel.name}.` : undefined"
+    >
+      <div class="space-y-4">
+        <UiField label="Neues Passwort" pflicht hinweis="Mindestens 10 Zeichen, drei Zeichenarten.">
+          <UiInput
+            v-model="passwort.neu"
+            type="password"
+            autocomplete="new-password"
+            data-autofokus
+          />
+        </UiField>
+        <UiField
+          label="Passwort wiederholen"
+          pflicht
+          :fehler="passwortAbweichung ? 'Die Passwörter stimmen nicht überein.' : undefined"
+        >
+          <UiInput
+            v-model="passwort.wiederholung"
+            type="password"
+            autocomplete="new-password"
+            :fehlerhaft="passwortAbweichung"
+          />
+        </UiField>
+        <label class="flex items-center gap-2 text-sm">
+          <input v-model="passwort.mustChangePassword" type="checkbox" class="accent-[var(--color-primary)]">
+          Wechsel beim nächsten Login erzwingen
+        </label>
+      </div>
+      <template #aktionen>
+        <UiButton variante="sekundaer" @click="passwortOffen = false">Abbrechen</UiButton>
+        <UiButton
+          variante="primaer"
+          :laedt="laeuft"
+          :disabled="!passwortAbsendbar"
+          @click="passwortSetzen"
+        >
+          Passwort setzen
+        </UiButton>
+      </template>
+    </UiModal>
+
     <UiConfirm
       v-model="loeschenOffen"
       gefahr
@@ -207,5 +367,5 @@ async function loeschen() {
       bestaetigen="Löschen"
       @bestaetigt="loeschen"
     />
-  </div>
+  </LayoutEinstellungsSeite>
 </template>

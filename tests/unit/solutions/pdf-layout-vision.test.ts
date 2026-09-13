@@ -5,6 +5,7 @@ import {
   buildPdfLayoutVisionPrompt,
   mergeDiagramTargetsFromVision,
   parsePdfLayoutVisionResponse,
+  visionLayoutConflictReason,
 } from '../../../server/services/ai/solutions/repair/pdf-layout-vision'
 import type { AnswerTarget, TaskBlock } from '../../../server/services/ai/solutions/types'
 import { applyFreeTextTaskMeta } from '../../../server/services/ai/solutions/solvers/free-text-solver'
@@ -252,6 +253,54 @@ describe('parsePdfLayoutVisionResponse', () => {
   })
 })
 
+describe('visionLayoutConflictReason', () => {
+  it('bestätigt einen Anhangsplan, wenn Vision keine Schreibfelder findet', () => {
+    expect(
+      visionLayoutConflictReason(
+        { verdict: 'no_targets', tasks: [], rawTaskCount: 0 },
+        [task()],
+      ),
+    ).toBeNull()
+  })
+
+  it('bestätigt einen Anhangsplan bei verdict=confirm', () => {
+    expect(
+      visionLayoutConflictReason(
+        { verdict: 'confirm', tasks: [task()], rawTaskCount: 1 },
+        [task()],
+      ),
+    ).toBeNull()
+  })
+
+  it('meldet Konflikt, wenn Overlay-Ziele existieren und Vision nichts findet', () => {
+    const overlay = task({
+      kind: 'free_text_inplace',
+      renderMode: 'overlay',
+      targets: [
+        {
+          id: 'line-1',
+          kind: 'answer_line',
+          page: 1,
+          bbox: { x: 0.1, y: 0.4, w: 0.8, h: 0.2 },
+          source: 'native',
+        },
+      ],
+    })
+    expect(
+      visionLayoutConflictReason(
+        { verdict: 'no_targets', tasks: [], rawTaskCount: 0 },
+        [overlay],
+      ),
+    ).toBe('vision layout conflict: visual check returned no tasks')
+  })
+
+  it('meldet fehlende Vision-Antwort als Konflikt', () => {
+    expect(visionLayoutConflictReason(null, [task()])).toBe(
+      'vision layout conflict: no usable response',
+    )
+  })
+})
+
 describe('buildPdfLayoutVisionPrompt', () => {
   it('begrenzt Vision auf Layoutprüfung und Linienblöcke', () => {
     const assessment = assessPdfLayoutPlan({
@@ -267,6 +316,7 @@ describe('buildPdfLayoutVisionPrompt', () => {
     expect(prompt).toContain('nicht seine Lösungen')
     expect(prompt).toContain('als EINEN line_block zusammenfassen')
     expect(prompt).toContain('Keine Antworttexte erzeugen')
+    expect(prompt).toContain('verdict=confirm und die Aufgabe mit leeren answerRegions')
   })
 
   it('fordert bei Bildbeschriftungen exakt lokalisierte Diagrammziele', () => {

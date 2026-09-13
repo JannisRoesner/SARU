@@ -48,12 +48,17 @@ const zeigtMiniatur = computed(() => {
   return isThumbnailCandidate(p.mimeType, p.fileName)
 })
 
+const istLehrwerk = computed(() => props.material.materialType === 'lehrwerk')
+
 const kannOeffnen = computed(() => {
+  if (istLehrwerk.value) return false
   const p = preview.value
   if (!p) return false
   return p.kind === 'link' ? Boolean(p.url) : Boolean(p.assetId)
 })
-const kannHerunterladen = computed(() => preview.value?.kind === 'datei' && Boolean(preview.value.assetId))
+const kannHerunterladen = computed(() =>
+  !istLehrwerk.value && preview.value?.kind === 'datei' && Boolean(preview.value.assetId),
+)
 
 const vorschauOffen = ref(false)
 
@@ -159,38 +164,16 @@ function beiMiniaturKlick(event: Event) {
           {{ material.title }}
         </h3>
 
-        <div class="flex shrink-0 items-center" @click.stop.prevent>
-          <button
-            v-if="kompakt && kannOeffnen"
-            type="button"
-            class="rounded-md p-1 text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
-            title="Vorschau öffnen"
-            :aria-label="`Vorschau von ${material.title}`"
-            @click="oeffnen"
-          >
-            <UiIcon name="eye" fest />
-          </button>
-          <button
-            v-if="kompakt && kannHerunterladen"
-            type="button"
-            class="rounded-md p-1 text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
-            title="Herunterladen"
-            :aria-label="`${material.title} herunterladen`"
-            @click="herunterladen"
-          >
-            <UiIcon name="download" fest />
-          </button>
-          <button
-            type="button"
-            class="rounded-md p-1 text-ink-subtle transition-colors hover:bg-surface-hover hover:text-warning"
-            :class="material.isFavorite && 'text-warning'"
-            :aria-label="material.isFavorite ? 'Favorit entfernen' : 'Als Favorit merken'"
-            :aria-pressed="material.isFavorite"
-            @click="emit('favorit', material.id, !material.isFavorite)"
-          >
-            <UiIcon name="star" :stil="material.isFavorite ? 'fas' : 'far'" fest />
-          </button>
-        </div>
+        <button
+          type="button"
+          class="shrink-0 rounded-md p-1 text-ink-subtle transition-colors hover:bg-surface-hover hover:text-warning"
+          :class="material.isFavorite && 'text-warning'"
+          :aria-label="material.isFavorite ? 'Favorit entfernen' : 'Als Favorit merken'"
+          :aria-pressed="material.isFavorite"
+          @click.stop.prevent="emit('favorit', material.id, !material.isFavorite)"
+        >
+          <UiIcon name="star" :stil="material.isFavorite ? 'fas' : 'far'" fest />
+        </button>
       </div>
 
       <p
@@ -280,31 +263,24 @@ function beiMiniaturKlick(event: Event) {
           <UiIcon name="clock-rotate-left" fest />
           {{ formatRelativ(material.updatedAt, '–', jetzt) }}
         </span>
-      </div>
-
-      <div
-        v-if="!kompakt && (kannOeffnen || kannHerunterladen)"
-        class="mt-3 flex flex-wrap gap-2"
-        @click.stop.prevent
-      >
-        <UiButton
+        <button
           v-if="kannOeffnen"
-          variante="sekundaer"
-          groesse="sm"
-          icon="eye"
-          @click="oeffnen"
+          type="button"
+          class="flex items-center gap-1 hover:text-ink"
+          @click.stop.prevent="oeffnen"
         >
+          <UiIcon name="eye" fest />
           Vorschau
-        </UiButton>
-        <UiButton
+        </button>
+        <button
           v-if="kannHerunterladen"
-          variante="sekundaer"
-          groesse="sm"
-          icon="download"
-          @click="herunterladen"
+          type="button"
+          class="flex items-center gap-1 hover:text-ink"
+          @click.stop.prevent="herunterladen"
         >
+          <UiIcon name="download" fest />
           Herunterladen
-        </UiButton>
+        </button>
       </div>
     </div>
 

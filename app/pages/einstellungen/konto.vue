@@ -65,18 +65,18 @@ async function speichern() {
 </script>
 
 <template>
-  <div class="mx-auto max-w-2xl space-y-6">
-    <div v-if="!erzwungen" class="mb-2">
-      <NuxtLink to="/einstellungen" class="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-primary">
-        <UiIcon name="arrow-left" fest /> Einstellungen
-      </NuxtLink>
-    </div>
-
-    <header>
+  <LayoutEinstellungsSeite>
+    <LayoutSeitenkopf
+      v-if="!erzwungen"
+      zurueck-to="/einstellungen"
+      zurueck-label="Einstellungen"
+      kicker="Persönlich"
+      titel="Mein Konto"
+      untertitel="Zugang und Profil"
+    />
+    <header v-else>
       <h1 class="text-2xl font-semibold text-ink">Mein Konto</h1>
-      <p class="mt-1 text-sm text-ink-muted">
-        Zugang und Profil
-      </p>
+      <p class="mt-1 text-sm text-ink-muted">Zugang und Profil</p>
     </header>
 
     <div
@@ -189,5 +189,5 @@ async function speichern() {
         </UiButton>
       </div>
     </UiCard>
-  </div>
+  </LayoutEinstellungsSeite>
 </template>

@@ -134,7 +134,8 @@ export function buildPdfLayoutVisionPrompt(args: {
     '- Native Ziele aus dem bisherigen Plan bestätigen, sofern sie sichtbar korrekt sind',
     '- Keine Antworttexte erzeugen und keine unsichtbaren Bereiche erfinden',
     '- no_response nur für Aufgaben ohne vorgesehenen Eintrag im Original',
-    '- Wenn wirklich keine nutzbaren Antwortbereiche sichtbar sind: verdict=no_targets',
+    '- Offene Aufgaben ohne Schreiblinien, Kästen oder Ankreuzfelder: verdict=confirm und die Aufgabe mit leeren answerRegions',
+    '- verdict=no_targets nur, wenn weder Aufgaben noch beschreibbare Antwortbereiche sichtbar sind',
     ...(diagramFocus
       ? [
           '',
@@ -159,6 +160,31 @@ export function buildPdfLayoutVisionPrompt(args: {
         ]
       : []),
   ].join('\n')
+}
+
+function hatAutoritativeOverlayZiele(tasks: TaskBlock[]): boolean {
+  return tasks.some((task) =>
+    (task.renderMode === 'overlay' || task.renderMode === 'native') &&
+    task.targets.some((target) => target.source !== 'vision' && Boolean(target.bbox || target.nativeRef)),
+  )
+}
+
+/**
+ * Vision `no_targets` bestätigt einen Anhangsplan (offene Aufgabe ohne Schreibfelder).
+ * Erst wenn der native Plan Overlay-Ziele hat oder Vision reparieren will, ist das ein Konflikt.
+ */
+export function visionLayoutConflictReason(
+  visual: PdfVisionLayoutResult | null,
+  tasks: TaskBlock[],
+): string | null {
+  if (tasks.length === 0) return null
+  if (!visual) return 'vision layout conflict: no usable response'
+  if (visual.verdict === 'confirm') return null
+  if (visual.verdict === 'no_targets' && !hatAutoritativeOverlayZiele(tasks)) return null
+  if (visual.verdict !== 'repair' && visual.verdict !== 'no_targets') return null
+  return visual.tasks.length === 0
+    ? 'vision layout conflict: visual check returned no tasks'
+    : 'vision layout conflict: visual plan disagrees with native plan'
 }
 
 /**

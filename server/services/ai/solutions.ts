@@ -63,6 +63,7 @@ import {
   assessPdfLayoutPlan,
   mergeDiagramTargetsFromVision,
   repairPdfLayoutViaVision,
+  visionLayoutConflictReason,
 } from './solutions/repair/pdf-layout-vision'
 import {
   verifyPdfSolutionViaVision,
@@ -517,15 +518,8 @@ export async function generateSolution(
             answerTargets: visualTargetCount,
           })
         } else {
-          if (
-            tasks.length > 0 &&
-            (!visual || visual.verdict === 'repair' || visual.verdict === 'no_targets')
-          ) {
-            const reason = !visual
-              ? 'vision layout conflict: no usable response'
-              : visual.tasks.length === 0
-                ? 'vision layout conflict: visual check returned no tasks'
-                : 'vision layout conflict: visual plan disagrees with native plan'
+          const reason = visionLayoutConflictReason(visual, tasks)
+          if (reason) {
             tasks = tasks.map((task) => {
               const hasAuthoritativeTargets = task.targets.some((target) =>
                 target.source !== 'vision' && Boolean(target.bbox || target.nativeRef),

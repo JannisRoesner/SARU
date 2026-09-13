@@ -44,7 +44,7 @@ const eintraege = computed(() =>
       to: '/einstellungen/benutzer',
       icon: 'users',
       titel: 'Benutzer',
-      text: 'Zugänge anlegen, Rollen vergeben, Konten sperren.',
+      text: 'Zugänge, Rollen und Passwörter.',
       sichtbar: istAdmin.value,
     },
   ].filter((e) => e.sichtbar),
@@ -52,7 +52,7 @@ const eintraege = computed(() =>
 </script>
 
 <template>
-  <div>
+  <LayoutEinstellungsSeite>
     <LayoutSeitenkopf
       kicker="Verwaltung"
       titel="Einstellungen"
@@ -79,5 +79,5 @@ const eintraege = computed(() =>
     <p v-if="!darfBearbeiten" class="mt-6 text-sm text-ink-subtle">
       Mit Leserecht kannst du Darstellung und Konto anpassen; Inhalte bleiben schreibgeschützt.
     </p>
-  </div>
+  </LayoutEinstellungsSeite>
 </template>

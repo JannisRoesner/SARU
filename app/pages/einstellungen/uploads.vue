@@ -21,9 +21,11 @@ const { data, refresh } = await useFetch<{
   }
 }>('/api/settings')
 
+const MEBIBYTE = 1024 * 1024
+
 const uploads = reactive({
-  maxBytes: 256 * 1024 * 1024,
-  maxImportBytes: 500 * 1024 * 1024,
+  maxMb: 256,
+  maxImportMb: 512,
   allowedExtensions: '' as string,
   scanArchives: true,
 })
@@ -39,8 +41,8 @@ watch(
   data,
   (wert) => {
     if (!wert) return
-    uploads.maxBytes = wert.uploads.maxBytes
-    uploads.maxImportBytes = wert.uploads.maxImportBytes
+    uploads.maxMb = Math.max(1, Math.round(wert.uploads.maxBytes / MEBIBYTE))
+    uploads.maxImportMb = Math.max(1, Math.round(wert.uploads.maxImportBytes / MEBIBYTE))
     uploads.allowedExtensions = wert.uploads.allowedExtensions.join(', ')
     uploads.scanArchives = wert.uploads.scanArchives
     Object.assign(privacy, wert.privacy)
@@ -52,8 +54,8 @@ async function uploadsSpeichern() {
   await aufruf('/api/settings/uploads', {
     method: 'PATCH',
     body: {
-      maxBytes: Number(uploads.maxBytes),
-      maxImportBytes: Number(uploads.maxImportBytes),
+      maxBytes: Math.round(Number(uploads.maxMb)) * MEBIBYTE,
+      maxImportBytes: Math.round(Number(uploads.maxImportMb)) * MEBIBYTE,
       allowedExtensions: uploads.allowedExtensions
         .split(/[,;\s]+/)
         .map((e) => e.replace(/^\./, '').toLowerCase())
@@ -76,7 +78,7 @@ async function privacySpeichern() {
 </script>
 
 <template>
-  <div class="mx-auto max-w-3xl space-y-5">
+  <LayoutEinstellungsSeite>
     <LayoutSeitenkopf
       zurueck-to="/einstellungen"
       zurueck-label="Einstellungen"
@@ -87,13 +89,11 @@ async function privacySpeichern() {
 
     <UiCard titel="Uploads" icon="cloud-arrow-up">
       <div class="grid gap-4 sm:grid-cols-2">
-        <UiField label="Max. Dateigröße (Bytes)">
-          <UiInput v-model="uploads.maxBytes" type="number" />
-          <p class="mt-1 text-xs text-ink-subtle">≈ {{ formatBytes(Number(uploads.maxBytes)) }}</p>
+        <UiField label="Max. Dateigröße (MB)">
+          <UiInput v-model="uploads.maxMb" type="number" min="1" max="2048" step="1" />
         </UiField>
-        <UiField label="Max. Importgröße (Bytes)">
-          <UiInput v-model="uploads.maxImportBytes" type="number" />
-          <p class="mt-1 text-xs text-ink-subtle">≈ {{ formatBytes(Number(uploads.maxImportBytes)) }}</p>
+        <UiField label="Max. Importgröße (MB)">
+          <UiInput v-model="uploads.maxImportMb" type="number" min="1" max="4096" step="1" />
         </UiField>
         <UiField label="Erlaubte Endungen" class="sm:col-span-2" hinweis="Kommagetrennt, ohne Punkt">
           <UiInput v-model="uploads.allowedExtensions" />
@@ -132,5 +132,5 @@ async function privacySpeichern() {
         </UiButton>
       </div>
     </UiCard>
-  </div>
+  </LayoutEinstellungsSeite>
 </template>

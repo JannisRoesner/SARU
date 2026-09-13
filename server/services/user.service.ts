@@ -91,6 +91,7 @@ export interface UpdateUserInput {
   role?: Role
   isActive?: boolean
   password?: string
+  mustChangePassword?: boolean
 }
 
 export async function updateUser(id: string, input: UpdateUserInput): Promise<SafeUser> {
@@ -124,7 +125,9 @@ export async function updateUser(id: string, input: UpdateUserInput): Promise<Sa
   if (input.password !== undefined) {
     assertPasswordStrength(input.password)
     patch.passwordHash = await hashPassword(input.password)
-    patch.mustChangePassword = false
+    patch.mustChangePassword = input.mustChangePassword ?? true
+  } else if (input.mustChangePassword !== undefined) {
+    patch.mustChangePassword = input.mustChangePassword
   }
 
   const [updated] = await db.update(users).set(patch).where(eq(users.id, id)).returning()
