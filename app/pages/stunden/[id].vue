@@ -369,7 +369,7 @@ function phaseGeaendert(phase: LessonPhaseDetail) {
               klein
               icon="list-ol"
               titel="Noch keine Phasen"
-              text="Baue den Stundenverlauf aus Einstieg, Erarbeitung und Sicherung auf."
+              text="Keine Phasen."
             />
 
             <div ref="phasenBehaelter" class="space-y-3">
@@ -526,7 +526,7 @@ function phaseGeaendert(phase: LessonPhaseDetail) {
               klein
               icon="folder-open"
               titel="Keine Materialien"
-              text="Ordne Arbeitsblätter und Medien dieser Stunde zu."
+              text="Keine Materialien."
             />
             <div ref="materialBehaelter" class="space-y-1.5">
               <div

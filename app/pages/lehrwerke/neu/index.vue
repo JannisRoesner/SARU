@@ -12,13 +12,13 @@ const wege = [
     to: '/lehrwerke/neu/klassisch',
     icon: 'book',
     titel: 'Klassisch',
-    text: 'Titel, Verlag und Einordnung selbst ausfüllen – die Buchdatei optional anhängen.',
+    text: 'Angaben selbst setzen.',
   },
   {
     to: '/lehrwerke/neu/ki',
     icon: 'wand-magic-sparkles',
     titel: 'Mit KI',
-    text: 'Buchdatei hochladen – Titel, Beschreibung, Fach und Schlagwörter werden vorgeschlagen.',
+    text: 'Metadaten aus der Buchdatei.',
   },
 ] as const
 </script>
@@ -30,7 +30,7 @@ const wege = [
       zurueck-label="Alle Lehrwerke"
       kicker="Lehrwerke"
       titel="Lehrwerk anlegen"
-      untertitel="Wähle den passenden Weg – alle Vorschläge kannst du vor dem Speichern anpassen."
+      untertitel="Klassisch oder KI"
     />
 
     <div class="grid gap-4 sm:grid-cols-2">
@@ -51,7 +51,7 @@ const wege = [
     </div>
 
     <p class="mt-6 text-sm text-ink-muted">
-      Einzelne Kopiervorlagen oder Arbeitsblätter?
+      Einzelmaterial?
       <NuxtLink to="/materialien/neu" class="font-medium text-primary hover:underline">
         Material anlegen
       </NuxtLink>

@@ -75,7 +75,7 @@ async function speichern() {
     <header>
       <h1 class="text-2xl font-semibold text-ink">Mein Konto</h1>
       <p class="mt-1 text-sm text-ink-muted">
-        Zugangsdaten und persönliche Angaben.
+        Zugang und Profil
       </p>
     </header>
 

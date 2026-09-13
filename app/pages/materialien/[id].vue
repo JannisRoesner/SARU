@@ -8,7 +8,7 @@ import {
   differentiationLevels,
   differenzierungProfile,
 } from '#shared/utils/labels'
-import { materialPfad } from '#shared/utils/material-pfad'
+import { materialPfad, materialZurueckZiel } from '#shared/utils/material-pfad'
 import { istKiMusterloesung, kiAutorAnzeige } from '#shared/utils/ki'
 import { solutionEditorMode, type SolutionEditorMode } from '#shared/utils/solution-editor'
 import { istMoodleKursMaterial, istH5pMaterial, kursarchivErweiterung } from '#shared/utils/moodle'
@@ -647,6 +647,21 @@ const hauptVorschau = computed(() => {
 
 const kiLoesungAktiv = computed(() => (data.value ? istKiMusterloesung(data.value) : false))
 
+const istLehrwerk = computed(() => data.value?.materialType === 'lehrwerk')
+
+const zurueck = computed(() =>
+  materialZurueckZiel({
+    materialType: data.value?.materialType,
+    relations: data.value?.relations,
+    queryLehrwerkId: route.query.lehrwerk,
+  }),
+)
+
+const zugehoerigesLehrwerkId = computed(() => {
+  const treffer = zurueck.value.to.match(/^\/lehrwerke\/([^/?#]+)$/)
+  return treffer?.[1] ?? null
+})
+
 const istMoodleKurs = computed(() =>
   data.value ? istMoodleKursMaterial(data.value.materialType) : false,
 )
@@ -700,11 +715,11 @@ function loesungKorrigieren() {
     <template v-else>
       <div class="mb-2">
         <NuxtLink
-          :to="data.materialType === 'lehrwerk' ? '/lehrwerke' : '/materialien'"
+          :to="zurueck.to"
           class="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-primary"
         >
           <UiIcon name="arrow-left" fest />
-          {{ data.materialType === 'lehrwerk' ? 'Lehrwerke' : 'Materialien' }}
+          {{ zurueck.label }}
         </NuxtLink>
       </div>
 
@@ -767,7 +782,7 @@ function loesungKorrigieren() {
             @click="favoritSetzen(data.id, !data.isFavorite)"
           />
           <UiButton
-            v-if="darfBearbeiten && !kiLoesungAktiv && !istMoodleKurs"
+            v-if="darfBearbeiten && !kiLoesungAktiv && !istMoodleKurs && !istLehrwerk"
             variante="sekundaer"
             icon="wand-magic-sparkles"
             title="Musterlösung erstellen"
@@ -799,7 +814,7 @@ function loesungKorrigieren() {
             <span class="hidden sm:inline">Antworten korrigieren</span>
           </UiButton>
           <UiButton
-            v-if="darfBearbeiten"
+            v-if="darfBearbeiten && !istLehrwerk"
             variante="sekundaer"
             icon="copy"
             @click="duplizieren(data.id)"
@@ -807,7 +822,7 @@ function loesungKorrigieren() {
             Duplizieren
           </UiButton>
           <UiButton
-            v-if="darfBearbeiten"
+            v-if="darfBearbeiten && !istLehrwerk"
             variante="sekundaer"
             :icon="data.isArchived ? 'box-open' : 'box-archive'"
             @click="archivieren(data.id, !data.isArchived)"
@@ -815,7 +830,7 @@ function loesungKorrigieren() {
             {{ data.isArchived ? 'Wiederherstellen' : 'Archivieren' }}
           </UiButton>
           <UiButton
-            v-if="darfBearbeiten"
+            v-if="darfBearbeiten && !istLehrwerk"
             variante="gefahr"
             icon="trash"
             nur-icon
@@ -1236,7 +1251,7 @@ function loesungKorrigieren() {
               klein
               icon="link"
               titel="Keine Verknüpfungen"
-              text="Verbinde Lösungen, Zusatzmaterial oder verwandte Materialien."
+              text="Keine Verknüpfungen."
             />
             <ul v-else class="space-y-2">
               <li
@@ -1248,7 +1263,7 @@ function loesungKorrigieren() {
                   {{ relationAnzeigeLabel(rel.relationType, rel.direction) }}
                 </UiBadge>
                 <NuxtLink
-                  :to="materialPfad(rel.material)"
+                  :to="materialPfad(rel.material, { lehrwerkId: zugehoerigesLehrwerkId })"
                   class="min-w-0 flex-1 truncate font-medium hover:text-primary"
                 >
                   {{ rel.material.title }}
@@ -1282,7 +1297,7 @@ function loesungKorrigieren() {
                 klein
                 icon="link-slash"
                 titel="Noch nicht verwendet"
-                text="Dieses Material ist noch keiner Stunde oder Reihe zugeordnet."
+                text="Keine Stunde oder Reihe."
               />
               <ul v-else class="space-y-2">
                 <li v-for="(u, i) in data.usages" :key="`${u.kind}-${u.id}-${i}`">

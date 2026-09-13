@@ -43,7 +43,7 @@ describe('PDF-Stapel-Upload', () => {
         userId,
         {
           subjectName: 'Biologie',
-          gradeLevel: 9,
+          gradeLevels: [9],
           defaultMaterialType: 'arbeitsblatt',
         },
       )
@@ -63,14 +63,14 @@ describe('PDF-Stapel-Upload', () => {
       const { runId } = await analyzeBulkPdfUpload(
         [{ buffer: pdf, fileName: 'AB_Zellatmung.pdf' }],
         userId,
-        { subjectName: 'Biologie', gradeLevel: 10 },
+        { subjectName: 'Biologie', gradeLevels: [10] },
       )
 
       const overview = await getBulkRunOverview(runId)
       const sourceRef = overview.files[0]!.sourceRef
       await updateBulkMapping(runId, {
         subjectName: 'Biologie',
-        gradeLevel: 10,
+        gradeLevels: [10],
         records: {
           [sourceRef]: {
             include: true,
@@ -95,6 +95,7 @@ describe('PDF-Stapel-Upload', () => {
       const detail = await getMaterialDetail(commit.materialIds[0]!)
       expect(detail?.variants[0]?.assets.length).toBeGreaterThan(0)
       expect(detail?.subjects.some((s) => s.name === 'Biologie')).toBe(true)
+      expect(detail?.gradeLevels).toEqual([10])
     })
   })
 

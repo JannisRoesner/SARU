@@ -57,7 +57,7 @@ watch(page, syncQuery)
     <LayoutSeitenkopf
       kicker="Struktur"
       titel="Unterrichtsreihen"
-      untertitel="Mehrere Stunden zu einer Reihe bündeln."
+      untertitel="Geplant, aktiv, abgeschlossen"
     >
       <template v-if="darfBearbeiten" #aktionen>
         <UiButton to="/reihen/neu" variante="primaer" icon="plus">Reihe starten</UiButton>
@@ -105,7 +105,7 @@ watch(page, syncQuery)
         v-else-if="!(data?.items.length)"
         icon="layer-group"
         titel="Keine Reihen"
-        text="Bündele zusammengehörige Stunden zu einer Unterrichtsreihe."
+        text="Noch keine vorhanden."
       >
         <UiButton v-if="darfBearbeiten" to="/reihen/neu" variante="primaer" icon="plus">
           Reihe starten

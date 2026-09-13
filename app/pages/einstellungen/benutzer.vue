@@ -90,7 +90,7 @@ async function loeschen() {
       zurueck-label="Einstellungen"
       kicker="Administration"
       titel="Benutzer"
-      untertitel="Zugänge verwalten und Rollen zuweisen."
+      untertitel="Zugänge und Rollen"
     >
       <template #aktionen>
         <UiButton variante="primaer" icon="user-plus" @click="anlegenOffen = true">

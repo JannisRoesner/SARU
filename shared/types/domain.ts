@@ -27,6 +27,7 @@ export const MATERIAL_TYPES = [
   'lehrwerk',
   'lehrbuchseite',
   'loesungsbuch',
+  'serviceband',
   'unterrichtsentwurf',
   'praesentation',
   'bild',

@@ -82,7 +82,7 @@ async function privacySpeichern() {
       zurueck-label="Einstellungen"
       kicker="System"
       titel="Uploads & Datenschutz"
-      untertitel="Grenzen für Dateien und Aufbewahrungsfristen."
+      untertitel="Größe, Typen, Fristen"
     />
 
     <UiCard titel="Uploads" icon="cloud-arrow-up">

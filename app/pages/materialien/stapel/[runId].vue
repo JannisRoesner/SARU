@@ -1,14 +1,11 @@
 <script setup lang="ts">
 import { materialTypes, importStatuses } from '#shared/utils/labels'
-import {
-  jahrgangsstufenOptionen,
-  normalizeGradeLevel,
-  type GradeLevel,
-} from '#shared/utils/jahrgangsstufen'
+import { type GradeLevel } from '#shared/utils/jahrgangsstufen'
 import type { MaterialType } from '#shared/types/domain'
 import {
   BULK_FILE_ROLE_LABELS,
   BULK_FOLDER_ROLE_LABELS,
+  resolveBulkGradeLevels,
   type BulkFileRole,
   type BulkFolderRole,
 } from '#shared/utils/bulk-upload'
@@ -19,8 +16,6 @@ const { darfBearbeiten } = useSitzung()
 const { aufruf, laeuft } = useApi()
 const { schlagwortNamen } = useTaxonomie()
 const { optionen: schulformOptionen } = useSchulformen()
-
-const jahrgangOptionen = jahrgangsstufenOptionen()
 
 if (!darfBearbeiten.value) await navigateTo('/materialien')
 
@@ -77,6 +72,7 @@ interface RunOverview {
   mapping: {
     subjectId?: string | null
     subjectName?: string
+    gradeLevels?: GradeLevel[]
     gradeLevel?: GradeLevel | null
     schoolForm?: string | null
     defaultMaterialType?: MaterialType
@@ -119,7 +115,7 @@ useHead({ title: () => (data.value ? `Stapel · ${data.value.sourceFileName}` : 
 const mapping = reactive({
   subjectId: null as string | null,
   subjectName: '',
-  gradeLevel: null as GradeLevel | null,
+  gradeLevels: [] as GradeLevel[],
   schoolForm: null as string | null,
   defaultMaterialType: 'arbeitsblatt' as MaterialType,
   linkDuplicates: true,
@@ -168,7 +164,7 @@ watch(
     const m = wert.mapping
     mapping.subjectId = m.subjectId ?? null
     mapping.subjectName = m.subjectName ?? ''
-    mapping.gradeLevel = normalizeGradeLevel(m.gradeLevel) ?? null
+    mapping.gradeLevels = resolveBulkGradeLevels(m)
     mapping.schoolForm = m.schoolForm ?? null
     mapping.defaultMaterialType = m.defaultMaterialType ?? 'arbeitsblatt'
     mapping.linkDuplicates = m.linkDuplicates ?? true
@@ -211,10 +207,9 @@ watch(
 const autosave = useAutosave(mapping, {
   gueltig: () => geladen.value && Boolean(data.value?.canCommit),
   speichern: async (daten) => {
-    const gradeLevel = normalizeGradeLevel(daten.gradeLevel)
     await $fetch(`/api/materials/bulk/${runId.value}/mapping`, {
       method: 'PATCH',
-      body: { ...daten, gradeLevel },
+      body: { ...daten, gradeLevels: daten.gradeLevels },
     })
   },
 })
@@ -233,7 +228,9 @@ function clusterMaterialzahl(clusterId: string): number {
   const record = mapping.records[clusterId]
   if (!record?.include) return 0
   const roles = Object.values(record.fileRoles)
-  const hatPrimaer = roles.some((role) => role === 'schueler' || role === 'einzeln')
+  const hatPrimaer = roles.some(
+    (role) => role === 'schueler' || role === 'einzeln' || role === 'abbildung',
+  )
   const hatLoesung = roles.includes('loesung')
   return (hatPrimaer ? 1 : 0) + (hatLoesung ? 1 : 0)
 }
@@ -464,12 +461,8 @@ function hatLoesung(clusterId: string): boolean {
                 v-model:subject-name="mapping.subjectName"
                 class="sm:col-span-2"
               />
-              <UiField label="Jahrgang">
-                <UiSelect
-                  v-model="mapping.gradeLevel"
-                  platzhalter="Keiner"
-                  :optionen="jahrgangOptionen.map((o) => ({ value: o.value, label: o.label }))"
-                />
+              <UiField label="Jahrgangsstufen" class="sm:col-span-2">
+                <UiJahrgangsstufenAuswahl v-model="mapping.gradeLevels" />
               </UiField>
               <UiField label="Schulform">
                 <UiSelect

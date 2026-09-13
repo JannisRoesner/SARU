@@ -56,7 +56,7 @@ const eintraege = computed(() =>
     <LayoutSeitenkopf
       kicker="Verwaltung"
       titel="Einstellungen"
-      untertitel="Konto, Darstellung und Systemeinstellungen."
+      untertitel="Konto, Darstellung, System"
     />
 
     <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

@@ -47,7 +47,7 @@ async function anlegen() {
       zurueck-label="Alle Reihen"
       kicker="Reihen"
       titel="Reihe starten"
-      untertitel="Bündele zusammengehörige Stunden zu einer Unterrichtsreihe."
+      untertitel="Stunden und Zeitraum"
     />
 
     <form class="space-y-5" @submit.prevent="anlegen">

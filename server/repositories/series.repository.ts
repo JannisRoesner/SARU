@@ -148,7 +148,7 @@ function orderClauseAlias(sort: SeriesSort): string {
       return `(s."progress"->>'percent')::int desc`
     case 'datum_neu':
     default:
-      return 's."startDate" desc nulls last, s."updatedAt" desc'
+      return 's."updatedAt" desc'
   }
 }
 
@@ -243,14 +243,15 @@ export async function getSeriesSummaries(
   return rows as unknown as SeriesSummary[]
 }
 
-export async function getActiveSeries(
-  limit = 5,
+export async function getRecentSeries(
+  limit = 6,
   db: Database = useDatabase(),
 ): Promise<SeriesSummary[]> {
   const rows = await queryRows<SeriesSummary>(db, 
     sql`select ${summarySelection} from series r
-      where r.status = 'aktiv'
-      order by r.updated_at desc limit ${limit}`,
+      where r.status <> 'archiviert'
+      order by r.updated_at desc
+      limit ${limit}`,
   )
   return rows as unknown as SeriesSummary[]
 }

@@ -1,10 +1,19 @@
 import { describe, expect, it } from 'vitest'
+import { resolveBulkGradeLevels } from '../../shared/utils/bulk-upload'
 import { guessMaterialType } from '../../shared/utils/material-type-guess'
 import {
   clusterBulkFiles,
   clusterTitleFromStem,
   detectFolderRole,
 } from '../../server/services/bulk-upload/pairing'
+
+describe('resolveBulkGradeLevels', () => {
+  it('nimmt mehrere Stufen und fällt auf ein einzelnes gradeLevel zurück', () => {
+    expect(resolveBulkGradeLevels({ gradeLevels: ['E1', 'E2'] })).toEqual(['E1', 'E2'])
+    expect(resolveBulkGradeLevels({ gradeLevel: 9 })).toEqual([9])
+    expect(resolveBulkGradeLevels({ gradeLevels: [], gradeLevel: 9 })).toEqual([])
+  })
+})
 
 describe('guessMaterialType für Verlagsdateien', () => {
   it('erkennt Arbeitsblatt, Klausur, GFB und Abbildungen', () => {
@@ -31,6 +40,21 @@ describe('Stapel-Paarung', () => {
     )
     expect(detectFolderRole(null, 'versuch_polyp.pdf')).toBe('versuche')
     expect(detectFolderRole('Abbildungen/AbbSB_Kap1.docx', 'AbbSB_Kap1.docx')).toBe('abbildungen')
+  })
+
+  it('setzt bei Abbildungen die Dateirolle Abbildung', () => {
+    const clusters = clusterBulkFiles([
+      {
+        sourceRef: 'abb',
+        fileName: 'wd01_ECF55018UAA99_AbbSB_Kap4_3_Entstehung_Leben.docx',
+        relativePath: 'klett-Dateien/Abbildungen/wd01_ECF55018UAA99_AbbSB_Kap4_3_Entstehung_Leben.docx',
+        extension: 'docx',
+      },
+    ])
+    expect(clusters).toHaveLength(1)
+    expect(clusters[0]!.folderRole).toBe('abbildungen')
+    expect(clusters[0]!.suggestions.materialType).toBe('bild')
+    expect(clusters[0]!.suggestedRoles.abb).toBe('abbildung')
   })
 
   it('macht aus Verlagsstämmen lesbare Titel', () => {

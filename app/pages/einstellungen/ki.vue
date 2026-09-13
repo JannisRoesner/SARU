@@ -146,7 +146,7 @@ async function testen() {
       zurueck-label="Einstellungen"
       kicker="System"
       titel="KI-Anbindung"
-      untertitel="Musterlösungen und Differenzierungsfassungen erzeugen, multimodale Modelle anbinden. API-Schlüssel werden serverseitig verschlüsselt gespeichert."
+      untertitel="Modelle und Funktionen"
     />
 
     <UiCard titel="Anbieter" icon="wand-magic-sparkles">

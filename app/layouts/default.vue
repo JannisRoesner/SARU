@@ -14,10 +14,10 @@ interface NavEintrag {
 
 const HAUPTNAVIGATION: NavEintrag[] = [
   { pfad: '/', label: 'Dashboard', icon: 'gauge-high' },
-  { pfad: '/materialien', label: 'Materialien', icon: 'folder-open' },
   { pfad: '/lehrwerke', label: 'Lehrwerke', icon: 'book' },
-  { pfad: '/stunden', label: 'Unterrichtsstunden', icon: 'chalkboard-user' },
+  { pfad: '/materialien', label: 'Materialien', icon: 'folder-open' },
   { pfad: '/reihen', label: 'Unterrichtsreihen', icon: 'layer-group' },
+  { pfad: '/stunden', label: 'Unterrichtsstunden', icon: 'chalkboard-user' },
 ]
 
 const WERKZEUGE: NavEintrag[] = [

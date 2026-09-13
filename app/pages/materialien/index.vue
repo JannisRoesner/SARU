@@ -128,7 +128,7 @@ const aktiveFilter = computed(() => {
     <LayoutSeitenkopf
       kicker="Sammlung"
       titel="Materialien"
-      untertitel="Arbeitsblätter, Präsentationen und anderes Unterrichtsmaterial. Lehrwerke haben eine eigene Übersicht."
+      untertitel="Arbeitsblätter, Kurse, Medien"
     >
       <template v-if="darfBearbeiten" #aktionen>
         <UiButton to="/materialien/stapel" variante="sekundaer" icon="layer-group">
@@ -228,7 +228,7 @@ const aktiveFilter = computed(() => {
         v-else-if="!eintraege.length"
         icon="folder-open"
         titel="Keine Materialien gefunden"
-        text="Lege ein neues Material an oder importiere einen Export aus dem Schulportal."
+        text="Keine Einträge."
       >
         <UiButton v-if="darfBearbeiten" to="/materialien/neu" variante="primaer" icon="plus">
           Material anlegen

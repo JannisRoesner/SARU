@@ -339,6 +339,7 @@ export const importMappingSchema = z.object({
 export const bulkUploadMappingSchema = z.object({
   subjectId: uuidSchema.nullish(),
   subjectName: z.string().max(120).optional(),
+  gradeLevels: z.array(gradeLevelSchema).max(16).optional(),
   gradeLevel: gradeLevelSchema.nullish(),
   schoolForm: z.enum(SCHOOL_FORMS).nullish(),
   defaultMaterialType: z.enum(MATERIAL_TYPES).default('arbeitsblatt'),
@@ -360,7 +361,7 @@ export const bulkUploadMappingSchema = z.object({
         action: z.enum(['erstellen', 'ueberspringen']).default('erstellen'),
         duplicateOfId: uuidSchema.nullish(),
         fileRoles: z
-          .record(z.string(), z.enum(['schueler', 'loesung', 'einzeln', 'anhaengsel']))
+          .record(z.string(), z.enum(['schueler', 'loesung', 'einzeln', 'abbildung', 'anhaengsel']))
           .optional(),
         links: z.record(z.string(), z.boolean()).optional(),
         solutionTitle: z.string().max(300).optional(),
@@ -383,6 +384,7 @@ export const aiMaterialCreateCommitSchema = z.object({
   learningObjectives: objectives,
   source: nullableText(2000),
   author: nullableText(300),
+  belongsToId: uuidSchema.nullish(),
 })
 
 // --------------------------------------------------------------- Einstellungen

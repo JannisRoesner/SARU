@@ -31,7 +31,17 @@ import { wakeDifferentiationWorker } from './worker'
 
 const log = createLogger('ai:differenzierung')
 
-const BLOCKED_TYPES = new Set(['lehrwerk', 'moodle_kurs', 'h5p', 'video', 'link', 'bild'])
+const BLOCKED_TYPES = new Set([
+  'lehrwerk',
+  'serviceband',
+  'loesungsbuch',
+  'lehrbuchseite',
+  'moodle_kurs',
+  'h5p',
+  'video',
+  'link',
+  'bild',
+])
 
 export interface DifferentiationEnqueueOptions {
   profile: string

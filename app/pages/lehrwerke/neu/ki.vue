@@ -156,7 +156,7 @@ async function zuruecksetzen() {
       zurueck-label="Wege zum Anlegen"
       kicker="Lehrwerke"
       titel="Mit KI anlegen"
-      untertitel="Buchdatei hochladen – Vorschläge prüfen und nach Bedarf anpassen. Scans werden per Vision/OCR lesbar."
+      untertitel="Aus der Buchdatei"
     />
 
     <form class="space-y-5" @submit.prevent="anlegen">

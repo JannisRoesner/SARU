@@ -50,7 +50,7 @@ async function speichern() {
       zurueck-label="Einstellungen"
       kicker="System"
       titel="Office-Editor"
-      untertitel="Collabora Online zum Anzeigen und Bearbeiten von Word-, Excel- und PowerPoint-Dokumenten."
+      untertitel="Collabora Online"
     />
 
     <UiCard titel="Collabora Online" icon="file-word">

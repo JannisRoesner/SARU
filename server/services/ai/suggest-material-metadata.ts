@@ -12,7 +12,11 @@ import {
   normalizeGradeLevels,
   type GradeLevel,
 } from '#shared/utils/jahrgangsstufen'
-import { guessMaterialType } from '#shared/utils/material-type-guess'
+import {
+  guessMaterialType,
+  isBookLikeMaterialType,
+  refineMaterialTypeForDocument,
+} from '#shared/utils/material-type-guess'
 import { materialTypes, schoolForms } from '#shared/utils/labels'
 import {
   normalizeSchulfach,
@@ -29,7 +33,7 @@ const log = createLogger('ai:suggest-metadata')
 const MATERIAL_TYPE_SET = new Set<string>(MATERIAL_TYPES)
 const SCHOOL_FORM_SET = new Set<string>(SCHOOL_FORMS)
 
-export const MATERIAL_METADATA_PROMPT_VERSION = 'material-metadata-v6'
+export const MATERIAL_METADATA_PROMPT_VERSION = 'material-metadata-v7'
 
 export interface MaterialMetadataSuggestion {
   title: string
@@ -56,6 +60,7 @@ export interface SuggestMaterialMetadataOptions {
     gradeLevel?: number | string | null
     schoolForm?: string | null
     defaultMaterialType?: MaterialType
+    pageCount?: number | null
     /** Zusätzlicher Freitext, z. B. Schulportal-Thema/Inhalt der Stunde */
     lessonContext?: string | null
   }
@@ -102,7 +107,7 @@ export async function suggestMaterialMetadata(
   )
 
   if (!options.settings.enabled || !options.settings.chatModel) {
-    return fallback
+    return applyTypeRefinement(fallback, options)
   }
 
   const text = options.extractedText.trim()
@@ -124,23 +129,38 @@ export async function suggestMaterialMetadata(
   const excerpt = text
     ? text.slice(0, 8000)
     : '(kein Dokumenttext – Titel, Dateiname und Kontext nutzen)'
-  const istLehrwerk = ctx.defaultMaterialType === 'lehrwerk' || fallback.materialType === 'lehrwerk'
-  const prompt = istLehrwerk
-    ? buildLehrwerkMetadataPrompt({
-        fileName: options.fileName,
-        contextParts,
-        schoolList,
-        fachListe,
-        excerpt,
-      })
-    : buildMaterialMetadataPrompt({
-        fileName: options.fileName,
-        contextParts,
-        typeList,
-        schoolList,
-        fachListe,
-        excerpt,
-      })
+  const buchArt =
+    ctx.defaultMaterialType && isBookLikeMaterialType(ctx.defaultMaterialType)
+      ? ctx.defaultMaterialType
+      : isBookLikeMaterialType(fallback.materialType)
+        ? fallback.materialType
+        : null
+  const prompt =
+    buchArt === 'lehrwerk'
+      ? buildLehrwerkMetadataPrompt({
+          fileName: options.fileName,
+          contextParts,
+          schoolList,
+          fachListe,
+          excerpt,
+        })
+      : buchArt
+        ? buildBegleitbandMetadataPrompt({
+            fileName: options.fileName,
+            contextParts,
+            schoolList,
+            fachListe,
+            excerpt,
+            materialType: buchArt,
+          })
+        : buildMaterialMetadataPrompt({
+            fileName: options.fileName,
+            contextParts,
+            typeList,
+            schoolList,
+            fachListe,
+            excerpt,
+          })
 
   const maxTokens = Math.min(Math.max(options.settings.maxOutputTokens || 800, 400), 800)
 
@@ -202,11 +222,11 @@ export async function suggestMaterialMetadata(
         ctx.subjectLabel,
       )
 
-      return {
+      return applyTypeRefinement({
         title,
         materialType:
-          ctx.defaultMaterialType === 'lehrwerk'
-            ? 'lehrwerk'
+          ctx.defaultMaterialType && isBookLikeMaterialType(ctx.defaultMaterialType)
+            ? ctx.defaultMaterialType
             : normalizeMaterialType(parsed.materialType, fallback.materialType),
         schoolForm: normalizeSchoolForm(parsed.schoolForm, ctx.schoolForm),
         subjectNames,
@@ -227,7 +247,7 @@ export async function suggestMaterialMetadata(
           [title, typeof parsed.description === 'string' ? parsed.description : ''].join(' '),
         ),
         aiUsed: true,
-      }
+      }, options)
     } catch (error) {
       lastError = error
       if (attempt === 0) {
@@ -248,7 +268,23 @@ export async function suggestMaterialMetadata(
     outputTokens: lastOutputTokens,
     antwortVorschau: lastRawResponse.slice(0, 600),
   })
-  return fallback
+  return applyTypeRefinement(fallback, options)
+}
+
+function applyTypeRefinement(
+  suggestion: MaterialMetadataSuggestion,
+  options: SuggestMaterialMetadataOptions,
+): MaterialMetadataSuggestion {
+  return {
+    ...suggestion,
+    materialType: refineMaterialTypeForDocument({
+      fileName: options.fileName,
+      current: suggestion.materialType,
+      pageCount: options.context?.pageCount,
+      excerpt: options.extractedText,
+      defaultMaterialType: options.context?.defaultMaterialType,
+    }),
+  }
 }
 
 /**
@@ -361,6 +397,13 @@ Regeln für title und description:
 - description: 1–2 Sätze zum fachlichen Inhalt.
 - Keine Herkunfts- oder Prozessfloskeln (nicht: importiert, Schulportal, KI-Entwurf, automatisch erstellt, manuell geprüft).
 
+Regeln für materialType bei Büchern vs. Arbeitsblättern:
+- arbeitsblatt / kopiervorlage: wenige Seiten, einzelne Aufgaben, oft „AB“, „Kopiervorlage“.
+- lehrwerk: Schülerbuch / Schulbuch (Schülerband) – Einband, Impressum, Inhaltsverzeichnis.
+- serviceband: Serviceband, Lehrerband, Lehrerhandbuch, Handreichungen zum Lehrwerk – Hinweise für die Lehrkraft, kein Schülerarbeitsblatt.
+- loesungsbuch: Lösungsheft oder Lösungsbuch zum Schülerbuch.
+- Ein dickes Verlags-PDF mit Einband und Inhaltsverzeichnis ist kein Arbeitsblatt.
+
 ${GRADE_LEVEL_RULES}
 
 Auszug aus dem Dokument:
@@ -436,6 +479,67 @@ Antworte ausschließlich mit einem JSON-Objekt (kein Markdown):
   "tagNames": ["max. 5 Schlagwörter zur Reihe oder zu großen Themenblöcken"],
   "learningObjectives": [],
   "description": "1–2 Sätze über das Schulbuch als Ganzes",
+  "contentSummary": "Markdown-Stichpunkte der Hauptkapitel aus dem Inhaltsverzeichnis",
+  "gradeLevels": []
+}`
+}
+
+function buildBegleitbandMetadataPrompt(input: {
+  fileName: string
+  contextParts: string[]
+  schoolList: string
+  fachListe: string
+  excerpt: string
+  materialType: 'serviceband' | 'loesungsbuch'
+}): string {
+  const art =
+    input.materialType === 'serviceband'
+      ? 'Serviceband / Lehrerband / Lehrerhandreichung zum Lehrwerk – kein Schülerbuch und kein Arbeitsblatt'
+      : 'Lösungsheft / Lösungsbuch zum Schülerbuch – keine einzelne Musterlösung eines Arbeitsblatts'
+  return `Du hilfst einer Lehrkraft in Hessen, ein Verlagsbuch zu katalogisieren (${art}).
+
+Dateiname: ${input.fileName}
+${input.contextParts.length ? `Kontext: ${input.contextParts.join(' · ')}` : ''}
+
+materialType muss genau "${input.materialType}" sein.
+Erlaubte schoolForm-Werte (einen oder null): ${input.schoolList}
+
+Schulfächer (nur aus dieser Liste wählen):
+${input.fachListe}
+
+Typisch stehen vorn Einband / Titelseite, Impressum und Inhaltsverzeichnis.
+
+Regeln für title:
+- Nimm den Werktitel vom Einband (Reihe + Band + „Serviceband“ bzw. „Lösungsheft“, falls auf dem Einband).
+- Kein Kapitel- oder Lektionstitel.
+- Keine Dateiendung, kein Scan-Zusatz.
+
+Regeln für description und contentSummary:
+- description: 1–2 Sätze über das Buch als Ganzes.
+- contentSummary: Überblick aus dem Inhaltsverzeichnis als kurze Markdown-Stichpunkte.
+- Keine Herkunfts- oder Prozessfloskeln.
+
+Regeln für subjectNames, tagNames, learningObjectives:
+- subjectNames: nur das Schulfach (meist 1).
+- tagNames: Reihe, Stufe oder grobe Themenblöcke.
+- learningObjectives: leer lassen.
+
+${GRADE_LEVEL_RULES}
+
+Auszug aus dem vorderen Teil des Buchs:
+"""
+${input.excerpt}
+"""
+
+Antworte ausschließlich mit einem JSON-Objekt (kein Markdown):
+{
+  "title": "Werktitel vom Einband",
+  "materialType": "${input.materialType}",
+  "schoolForm": "einer der erlaubten Werte oder null",
+  "subjectNames": ["max. 2 exakte Namen aus der Schulfächer-Liste"],
+  "tagNames": ["max. 5 Schlagwörter zur Reihe oder zu großen Themenblöcken"],
+  "learningObjectives": [],
+  "description": "1–2 Sätze über das Buch als Ganzes",
   "contentSummary": "Markdown-Stichpunkte der Hauptkapitel aus dem Inhaltsverzeichnis",
   "gradeLevels": []
 }`

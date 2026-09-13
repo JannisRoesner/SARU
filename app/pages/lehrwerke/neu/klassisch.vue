@@ -82,7 +82,7 @@ async function anlegen() {
       zurueck-label="Wege zum Anlegen"
       kicker="Lehrwerke"
       titel="Klassisch anlegen"
-      untertitel="Titel genügt zum Start. Die Buch-PDF und zugeordnete Materialien kannst du danach ergänzen."
+      untertitel="Angaben und Buchdatei"
     />
 
     <form class="space-y-5" @submit.prevent="anlegen">
@@ -121,7 +121,7 @@ async function anlegen() {
 
       <UiCard
         titel="Buchdatei"
-        untertitel="Optional – genau eine PDF des Schülerbuchs. Serviceband und Lösungsheft ordnest du danach als eigene Materialien zu."
+        untertitel="PDF des Schülerbuchs"
         icon="book"
       >
         <div

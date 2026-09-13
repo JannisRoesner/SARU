@@ -19,7 +19,7 @@ export const BULK_AI_CONCURRENCY = 3
 
 export type BulkClusterKind = 'paar' | 'einzeln' | 'unklar'
 
-export const BULK_FILE_ROLES = ['schueler', 'loesung', 'einzeln', 'anhaengsel'] as const
+export const BULK_FILE_ROLES = ['schueler', 'loesung', 'einzeln', 'abbildung', 'anhaengsel'] as const
 
 export interface BulkUploadFileSuggestion {
   title: string
@@ -102,6 +102,8 @@ export interface BulkUploadRecordDecision {
 export interface BulkUploadMapping {
   subjectId?: string | null
   subjectName?: string
+  gradeLevels?: GradeLevel[]
+  /** @deprecated Nutze `gradeLevels`. Bleibt für bereits gestartete Läufe lesbar. */
   gradeLevel?: GradeLevel | null
   schoolForm?: string | null
   defaultMaterialType?: MaterialType

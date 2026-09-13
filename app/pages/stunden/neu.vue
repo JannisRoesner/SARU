@@ -54,7 +54,7 @@ async function anlegen() {
       zurueck-label="Alle Stunden"
       kicker="Stunden"
       titel="Stunde planen"
-      untertitel="Rahmen festlegen. Phasen und Materialien ergänzt du im Editor."
+      untertitel="Datum, Fach, Lerngruppe"
     />
 
     <form class="space-y-5" @submit.prevent="anlegen">

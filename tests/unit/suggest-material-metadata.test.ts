@@ -6,6 +6,7 @@ import {
   suggestMaterialMetadata,
   titleFromFileName,
 } from '../../server/services/ai/suggest-material-metadata'
+import { refineMaterialTypeForDocument } from '../../shared/utils/material-type-guess'
 import {
   filenameBasedSuggestion,
   suggestFileMetadata,
@@ -25,6 +26,27 @@ describe('suggest-material-metadata helpers', () => {
     expect(guessMaterialType('Klett_Biologie_Schulbuch.pdf')).toBe('lehrwerk')
     expect(guessMaterialType('Schuelerbuch_Band2.pdf')).toBe('lehrwerk')
     expect(guessMaterialType('Schulbuch_Loesung.pdf')).toBe('musterloesung')
+    expect(guessMaterialType('Natura_Serviceband_EF.pdf')).toBe('serviceband')
+    expect(guessMaterialType('Lehrerband_Biologie_8.pdf')).toBe('serviceband')
+    expect(guessMaterialType('Loesungsheft_Natura.pdf')).toBe('loesungsbuch')
+  })
+
+  it('korrigiert lange PDFs ohne AB-Kennung nicht als Arbeitsblatt', () => {
+    expect(
+      refineMaterialTypeForDocument({
+        fileName: 'Natura_Oberstufe_Begleitmaterial.pdf',
+        current: 'arbeitsblatt',
+        pageCount: 180,
+        excerpt: 'Serviceband Natura Biologie\nInhaltsverzeichnis',
+      }),
+    ).toBe('serviceband')
+    expect(
+      refineMaterialTypeForDocument({
+        fileName: 'AB_Zellatmung.pdf',
+        current: 'arbeitsblatt',
+        pageCount: 4,
+      }),
+    ).toBe('arbeitsblatt')
   })
 
   it('erzeugt Dateiname-basierte Vorschläge ohne KI', () => {
@@ -175,6 +197,38 @@ describe('suggestMaterialMetadata Jahrgangsstufen', () => {
     expect(prompt).not.toMatch(/Unterrichtsmaterial vorzuschlagen/)
     expect(result.materialType).toBe('lehrwerk')
     expect(result.title).toBe('Natura Oberstufe Einführungsphase')
+  })
+
+  it('nutzt für Servicebände den Begleitband-Prompt', async () => {
+    const spy = vi.spyOn(aiClient, 'chatCompletion').mockResolvedValue({
+      text: JSON.stringify({
+        title: 'Natura Serviceband Einführungsphase',
+        materialType: 'arbeitsblatt',
+        schoolForm: 'oberstufe',
+        subjectNames: ['Biologie'],
+        tagNames: ['Natura'],
+        learningObjectives: [],
+        description: 'Serviceband zur Reihe Natura.',
+        contentSummary: '- Hinweise zum Unterricht',
+        gradeLevels: ['E1', 'E2'],
+      }),
+      model: 'test',
+      finishReason: 'stop',
+      outputTokens: 40,
+    })
+
+    const result = await suggestMaterialMetadata({
+      fileName: 'Natura_Serviceband.pdf',
+      extractedText: 'Einband: Natura Serviceband\nInhaltsverzeichnis',
+      settings: enabledSettings,
+      context: { defaultMaterialType: 'serviceband' },
+    })
+
+    const nachrichten = spy.mock.calls[0]![1] as Array<{ parts: Array<{ text?: string }> }>
+    const prompt = nachrichten[1]?.parts[0]?.text ?? ''
+    expect(prompt).toContain('Serviceband')
+    expect(prompt).toContain('Einband')
+    expect(result.materialType).toBe('serviceband')
   })
 
   it('setzt bei Einführungsphase E1 und E2, wenn das Halbjahr fehlt', async () => {

@@ -6,6 +6,8 @@ import {
   suggestMaterialMetadata,
   titleFromFileName as sharedTitleFromFileName,
 } from '../ai/suggest-material-metadata'
+import { formatJahrgaenge } from '#shared/utils/jahrgangsstufen'
+import { resolveBulkGradeLevels } from '#shared/utils/bulk-upload'
 import type { BulkUploadFileSuggestion, BulkUploadMapping } from './types'
 
 export const titleFromFileName = sharedTitleFromFileName
@@ -27,19 +29,20 @@ export async function suggestFileMetadata(options: {
   extractedText: string
   mapping: Pick<
     BulkUploadMapping,
-    'defaultMaterialType' | 'subjectName' | 'gradeLevel' | 'schoolForm'
+    'defaultMaterialType' | 'subjectName' | 'gradeLevel' | 'gradeLevels' | 'schoolForm'
   >
   subjectLabel?: string | null
   extraContext?: string | null
   settings: AiSettings
 }): Promise<BulkUploadFileSuggestion> {
+  const gradeLevels = resolveBulkGradeLevels(options.mapping)
   const result = await suggestMaterialMetadata({
     fileName: options.fileName,
     extractedText: options.extractedText,
     settings: options.settings,
     context: {
       subjectLabel: options.subjectLabel || options.mapping.subjectName,
-      gradeLevel: options.mapping.gradeLevel,
+      gradeLevel: gradeLevels.length ? formatJahrgaenge(gradeLevels) : null,
       schoolForm: options.mapping.schoolForm,
       defaultMaterialType: options.mapping.defaultMaterialType ?? 'arbeitsblatt',
       lessonContext: options.extraContext,

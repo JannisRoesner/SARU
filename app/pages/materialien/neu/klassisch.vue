@@ -13,6 +13,9 @@ const { schlagwortNamen } = useTaxonomie()
 const { optionen: schulformOptionen } = useSchulformen()
 const route = useRoute()
 const startTyp = String(route.query.typ ?? '')
+const lehrwerkId = /^[0-9a-f-]{36}$/i.test(String(route.query.lehrwerk ?? ''))
+  ? String(route.query.lehrwerk)
+  : null
 
 if (!darfBearbeiten.value) {
   await navigateTo('/materialien')
@@ -83,7 +86,15 @@ async function anlegen() {
     }
   }
 
-  await navigateTo(materialPfad(ergebnis))
+  if (lehrwerkId) {
+    await aufruf(`/api/materials/${ergebnis.id}/relations`, {
+      method: 'POST',
+      body: { targetId: lehrwerkId, relationType: 'gehoert_zu' },
+      stumm: true,
+    })
+  }
+
+  await navigateTo(lehrwerkId ? `/lehrwerke/${lehrwerkId}` : materialPfad(ergebnis))
 }
 </script>
 
@@ -94,7 +105,7 @@ async function anlegen() {
       zurueck-label="Wege zum Anlegen"
       kicker="Materialien"
       titel="Klassisch anlegen"
-      untertitel="Titel und Typ genügen zum Start. Dateien kannst du direkt hier anhängen."
+      untertitel="Angaben und Datei"
     />
 
     <form class="space-y-5" @submit.prevent="anlegen">
@@ -131,7 +142,7 @@ async function anlegen() {
 
       <UiCard
         titel="Dateien"
-        untertitel="Optional – Anhänge werden nach dem Anlegen zur Standardfassung hochgeladen."
+        untertitel="Optional"
         icon="cloud-arrow-up"
       >
         <div

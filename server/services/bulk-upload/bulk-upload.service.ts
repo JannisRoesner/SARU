@@ -2,7 +2,6 @@ import { readFile } from 'node:fs/promises'
 import { and, desc, eq, ne, sql } from 'drizzle-orm'
 import { oeffentlicheFehlermeldung } from '#shared/utils/public-error'
 import { isAiMaterialFileName } from '#shared/utils/ai-material-formats'
-import { normalizeGradeLevel } from '#shared/utils/jahrgangsstufen'
 import type { MaterialType } from '#shared/types/domain'
 import { useDatabase } from '../../database/client'
 import {
@@ -36,7 +35,7 @@ import { getMaterialDetail } from '../../repositories/material.repository'
 import { getOrCreateSubject, resolveSubjectIds } from '../taxonomy.service'
 import { waitForIndex } from '../search/indexer'
 import { mapLimit } from '../../utils/async'
-import { BULK_FOLDER_ROLE_LABELS } from '#shared/utils/bulk-upload'
+import { BULK_FOLDER_ROLE_LABELS, resolveBulkGradeLevels } from '#shared/utils/bulk-upload'
 import { suggestFileMetadata, titleFromFileName } from './suggest-metadata'
 import { AI_CREATE_ADAPTER_ID } from '../ai/material-create'
 import { clusterBulkFiles, detectFolderRole, filesAsSingletonClusters } from './pairing'
@@ -123,7 +122,7 @@ function buildBulkMapping(mappingInput: BulkUploadMapping): BulkUploadMapping {
   return {
     subjectId: mappingInput.subjectId ?? null,
     subjectName: mappingInput.subjectName ?? '',
-    gradeLevel: normalizeGradeLevel(mappingInput.gradeLevel) ?? null,
+    gradeLevels: resolveBulkGradeLevels(mappingInput),
     schoolForm: mappingInput.schoolForm ?? null,
     defaultMaterialType: mappingInput.defaultMaterialType ?? 'arbeitsblatt',
     linkDuplicates: mappingInput.linkDuplicates ?? true,
@@ -538,7 +537,9 @@ export async function updateBulkMapping(runId: string, mapping: BulkUploadMappin
   const merged: BulkUploadMapping = {
     ...previous,
     ...mapping,
-    gradeLevel: normalizeGradeLevel(mapping.gradeLevel ?? previous.gradeLevel) ?? null,
+    gradeLevels: resolveBulkGradeLevels(
+      mapping.gradeLevels !== undefined ? mapping : { ...previous, ...mapping },
+    ),
   }
 
   const [updated] = await useDatabase()
@@ -629,7 +630,7 @@ export async function commitBulkUpload(
     subjectId = await getOrCreateSubject(mapping.subjectName.trim())
   }
 
-  const gradeLevel = normalizeGradeLevel(mapping.gradeLevel)
+  const gradeLevels = resolveBulkGradeLevels(mapping)
   const stats: BulkUploadStats = {
     materialien: 0,
     dateien: 0,
@@ -684,7 +685,7 @@ export async function commitBulkUpload(
         origin: 'manuell',
         schoolForm: input.schoolForm,
         subjectIds: input.subjectIds,
-        gradeLevels: gradeLevel ? [gradeLevel] : [],
+        gradeLevels,
         tagNames: input.tagNames,
         learningObjectives: input.learningObjectives,
         aiMeta: input.aiUsed
@@ -733,7 +734,7 @@ export async function commitBulkUpload(
           origin: 'manuell',
           schoolForm: mapping.schoolForm ?? null,
           subjectIds: subjectId ? [subjectId] : [],
-          gradeLevels: gradeLevel ? [gradeLevel] : [],
+          gradeLevels,
         },
         userId,
       )
@@ -780,9 +781,10 @@ export async function commitBulkUpload(
       .map((ref) => filesByRef.get(ref))
       .filter((file): file is BulkUploadDetectedFile => Boolean(file))
 
-    const schueler = clusterFiles.filter(
-      (file) => roles[file.sourceRef] === 'schueler' || roles[file.sourceRef] === 'einzeln',
-    )
+    const schueler = clusterFiles.filter((file) => {
+      const role = roles[file.sourceRef]
+      return role === 'schueler' || role === 'einzeln' || role === 'abbildung'
+    })
     const loesungen = clusterFiles.filter((file) => roles[file.sourceRef] === 'loesung')
     const anhaenge = clusterFiles.filter((file) => roles[file.sourceRef] === 'anhaengsel')
     let primaryFiles = schueler

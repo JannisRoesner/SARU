@@ -12,25 +12,25 @@ const wege = [
     to: '/materialien/neu/klassisch',
     icon: 'file-lines',
     titel: 'Klassisch',
-    text: 'Titel, Typ und Einordnung selbst ausfüllen – Dateien optional anhängen.',
+    text: 'Angaben selbst setzen.',
   },
   {
     to: '/materialien/neu/ki',
     icon: 'wand-magic-sparkles',
     titel: 'Mit KI',
-    text: 'Datei hochladen – Titel, Beschreibung, Inhalt, Schlagwörter und Lernziele werden vorgeschlagen.',
+    text: 'Metadaten aus der Datei.',
   },
   {
     to: '/materialien/stapel',
     icon: 'layer-group',
     titel: 'Stapel-Upload',
-    text: 'Mehrere Dateien oder ein ZIP-Paket auf einmal analysieren, Paare prüfen und gemeinsam anlegen.',
+    text: 'Mehrere Dateien auf einmal.',
   },
   {
     to: '/materialien/neu/moodle',
     icon: 'graduation-cap',
     titel: 'Moodle-Kurs',
-    text: 'Kursarchiv (.mbz / .imscc) hochladen und als Moodle-Kursmaterial speichern.',
+    text: 'MBZ- oder IMSCC-Archiv.',
   },
 ] as const
 </script>
@@ -42,7 +42,7 @@ const wege = [
       zurueck-label="Alle Materialien"
       kicker="Materialien"
       titel="Material anlegen"
-      untertitel="Wähle den passenden Weg – alle Vorschläge kannst du vor dem Speichern anpassen."
+      untertitel="Klassisch, KI oder Stapel"
     />
 
     <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -63,7 +63,7 @@ const wege = [
     </div>
 
     <p class="mt-6 text-sm text-ink-muted">
-      Ein Schulbuch als Sammlung?
+      Schulbuch?
       <NuxtLink to="/lehrwerke/neu" class="font-medium text-primary hover:underline">
         Lehrwerk anlegen
       </NuxtLink>

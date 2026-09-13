@@ -5,18 +5,42 @@ export interface LehrwerkGruppe {
   label: string
   icon: string
   types: MaterialType[]
+  /** Zusätzlich zum Typ: Titel kann das Material in diese Gruppe holen. */
+  titleMatch?: RegExp
+}
+
+export type LehrwerkGruppierbar = {
+  materialType: string
+  title?: string | null
 }
 
 /**
  * Feste Reihenfolge für die Lehrwerk-Ansicht.
- * Typen, die in keiner Gruppe stehen, landen in „Weiteres“.
+ * Ein Material darf in mehreren Gruppen stehen (Typ und/oder Titel).
+ * Was nirgends passt, landet in „Weiteres“.
+ * Serviceband bleibt bewusst ganz oben.
  */
 export const LEHRWERK_GRUPPEN: LehrwerkGruppe[] = [
   {
-    id: 'lehrerband',
-    label: 'Lehrerband, Serviceband & Lösungen',
+    id: 'serviceband',
+    label: 'Serviceband',
+    icon: 'chalkboard-user',
+    types: ['serviceband'],
+    titleMatch: /serviceband|lehrerband|lehrerhandbuch|lehrerhandreichung|begleitband|kommentarband/i,
+  },
+  {
+    id: 'loesungen',
+    label: 'Lösungen',
     icon: 'book-bookmark',
-    types: ['loesungsbuch', 'musterloesung', 'loesung', 'zusatzmaterial'],
+    types: ['loesungsbuch', 'musterloesung', 'loesung'],
+    titleMatch: /l[oö]sungsheft|l[oö]sungsbuch|musterl[oö]sung/i,
+  },
+  {
+    id: 'versuche',
+    label: 'Versuche',
+    icon: 'flask',
+    types: ['zusatzmaterial'],
+    titleMatch: /\bversuche?\b/i,
   },
   {
     id: 'seiten',
@@ -38,7 +62,7 @@ export const LEHRWERK_GRUPPEN: LehrwerkGruppe[] = [
   },
   {
     id: 'labor',
-    label: 'Versuche & Sicherheit',
+    label: 'Sicherheit',
     icon: 'triangle-exclamation',
     types: ['gefaehrdungsbeurteilung', 'unterrichtsentwurf'],
   },
@@ -62,16 +86,33 @@ export const LEHRWERK_GRUPPEN: LehrwerkGruppe[] = [
   },
 ]
 
-const gruppierteTypen = new Set<string>(LEHRWERK_GRUPPEN.flatMap((gruppe) => gruppe.types))
+const kerngruppen = LEHRWERK_GRUPPEN.filter((gruppe) => gruppe.id !== 'weiteres')
+const weiteresGruppe = LEHRWERK_GRUPPEN.find((gruppe) => gruppe.id === 'weiteres')!
 
-export function gruppiereLehrwerkInhalt<T extends { materialType: string }>(
+export function gehoertZuLehrwerkGruppe(
+  item: LehrwerkGruppierbar,
+  gruppe: LehrwerkGruppe,
+): boolean {
+  if (gruppe.id === 'weiteres') return false
+  if (gruppe.types.includes(item.materialType as MaterialType)) return true
+  const titel = item.title?.trim() ?? ''
+  return Boolean(titel && gruppe.titleMatch?.test(titel))
+}
+
+export function gruppiereLehrwerkInhalt<T extends LehrwerkGruppierbar>(
   items: T[],
 ): Array<LehrwerkGruppe & { eintraege: T[] }> {
-  return LEHRWERK_GRUPPEN.map((gruppe) => ({
+  const gruppen = kerngruppen.map((gruppe) => ({
     ...gruppe,
-    eintraege:
-      gruppe.id === 'weiteres'
-        ? items.filter((item) => !gruppierteTypen.has(item.materialType))
-        : items.filter((item) => gruppe.types.includes(item.materialType as MaterialType)),
-  })).filter((gruppe) => gruppe.eintraege.length > 0)
+    eintraege: items.filter((item) => gehoertZuLehrwerkGruppe(item, gruppe)),
+  }))
+
+  const weiteres = items.filter(
+    (item) => !kerngruppen.some((gruppe) => gehoertZuLehrwerkGruppe(item, gruppe)),
+  )
+  if (weiteres.length) {
+    gruppen.push({ ...weiteresGruppe, eintraege: weiteres })
+  }
+
+  return gruppen.filter((gruppe) => gruppe.eintraege.length > 0)
 }

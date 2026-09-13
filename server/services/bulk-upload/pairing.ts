@@ -149,10 +149,12 @@ function materialTypeForCluster(
 function defaultRoles(
   files: PairingInputFile[],
   kind: BulkClusterKind,
+  folderRole: BulkFolderRole,
 ): Record<string, BulkFileRole> {
   const roles: Record<string, BulkFileRole> = {}
   if (kind !== 'paar') {
-    for (const file of files) roles[file.sourceRef] = 'einzeln'
+    const einzel = folderRole === 'abbildungen' ? 'abbildung' : 'einzeln'
+    for (const file of files) roles[file.sourceRef] = einzel
     return roles
   }
 
@@ -263,7 +265,7 @@ export function clusterBulkFiles(
       folderRole,
       stem,
       fileRefs,
-      suggestedRoles: defaultRoles(group, kind),
+      suggestedRoles: defaultRoles(group, kind, folderRole),
       suggestions: {
         title: clusterTitleFromStem(stem, folderRole),
         materialType,
@@ -300,7 +302,12 @@ export function filesAsSingletonClusters(
     folderRole: detectFolderRole(file.relativePath, file.fileName),
     stem: stemOf(file.fileName),
     fileRefs: [file.sourceRef],
-    suggestedRoles: { [file.sourceRef]: 'einzeln' as const },
+    suggestedRoles: {
+      [file.sourceRef]:
+        detectFolderRole(file.relativePath, file.fileName) === 'abbildungen'
+          ? ('abbildung' as const)
+          : ('einzeln' as const),
+    },
     suggestions: file.suggestions ?? {
       title: clusterTitleFromStem(stemOf(file.fileName), 'sonstiges'),
       materialType: guessMaterialType(file.fileName),

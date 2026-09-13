@@ -83,7 +83,7 @@ const fachChips = computed(() => (facetten.value?.subjects ?? []).slice(0, 8))
     <LayoutSeitenkopf
       kicker="Sammlung"
       titel="Lehrwerke"
-      untertitel="Schulbücher als Einstieg: zum Buch gehören Lösungsheft, Serviceband, Kopiervorlagen und alles andere Zugeordnete."
+      untertitel="Schulbücher und Zuordnungen"
     >
       <template v-if="darfBearbeiten" #aktionen>
         <UiButton to="/materialien/stapel" variante="sekundaer" icon="layer-group">
@@ -156,7 +156,7 @@ const fachChips = computed(() => (facetten.value?.subjects ?? []).slice(0, 8))
         v-else-if="!(data?.items.length)"
         icon="book"
         titel="Noch keine Lehrwerke"
-        text="Lege ein Lehrwerk an oder ordne beim Stapel-Upload alles einem Buch zu."
+        text="Noch keines vorhanden."
       >
         <UiButton v-if="darfBearbeiten" to="/lehrwerke/neu" variante="primaer" icon="plus">
           Lehrwerk anlegen

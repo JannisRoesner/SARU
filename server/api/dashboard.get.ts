@@ -1,20 +1,36 @@
 import { sql } from 'drizzle-orm'
-import { useDatabase } from '../database/client'
-import { getUpcomingLessons } from '../repositories/lesson.repository'
+import { queryRows, useDatabase, type Database } from '../database/client'
 import { listMaterials } from '../repositories/material.repository'
-import { getActiveSeries } from '../repositories/series.repository'
+import { getRecentSeries } from '../repositories/series.repository'
 import { requireUser } from '../utils/auth'
+
+export type DashboardFach = {
+  id: string
+  name: string
+  color: string
+  materialien: number
+  lehrwerke: number
+  reihen: number
+}
 
 /** Alles, was die Startseite braucht, in einem Aufruf. */
 export default defineEventHandler(async (event) => {
   await requireUser(event)
   const db = useDatabase()
 
-  const [recent, favorites, upcoming, activeSeries, counts] = await Promise.all([
-    listMaterials({ sort: 'datum_neu', pageSize: 2 }),
-    listMaterials({ filters: { onlyFavorites: true }, sort: 'zuletzt_verwendet', pageSize: 6 }),
-    getUpcomingLessons(6),
-    getActiveSeries(4),
+  const [faecher, lehrwerke, materialien, reihen, counts] = await Promise.all([
+    listDashboardFaecher(db),
+    listMaterials({
+      filters: { materialTypes: ['lehrwerk'] },
+      sort: 'datum_neu',
+      pageSize: 6,
+    }),
+    listMaterials({
+      filters: { excludeMaterialTypes: ['lehrwerk'] },
+      sort: 'datum_neu',
+      pageSize: 6,
+    }),
+    getRecentSeries(4),
     db.execute<{
       materialien: number
       lehrwerke: number
@@ -32,10 +48,10 @@ export default defineEventHandler(async (event) => {
   ])
 
   return {
-    zuletztBearbeitet: recent.items,
-    favoriten: favorites.items,
-    naechsteStunden: upcoming,
-    aktiveReihen: activeSeries,
+    faecher,
+    lehrwerke: lehrwerke.items,
+    materialien: materialien.items,
+    reihen,
     kennzahlen: counts[0] ?? {
       materialien: 0,
       lehrwerke: 0,
@@ -46,3 +62,36 @@ export default defineEventHandler(async (event) => {
     },
   }
 })
+
+async function listDashboardFaecher(db: Database): Promise<DashboardFach[]> {
+  const rows = await queryRows<DashboardFach>(
+    db,
+    sql`select s.id, s.name, s.color,
+      (
+        select count(*)::int
+        from material_subjects ms
+        join materials m on m.id = ms.material_id
+        where ms.subject_id = s.id
+          and not m.is_archived
+          and m.material_type <> 'lehrwerk'
+      ) as materialien,
+      (
+        select count(*)::int
+        from material_subjects ms
+        join materials m on m.id = ms.material_id
+        where ms.subject_id = s.id
+          and not m.is_archived
+          and m.material_type = 'lehrwerk'
+      ) as lehrwerke,
+      (
+        select count(*)::int
+        from series r
+        where r.subject_id = s.id
+          and r.status <> 'archiviert'
+      ) as reihen
+    from subjects s
+    order by s.sort_order, s.name`,
+  )
+
+  return rows.filter((fach) => fach.materialien + fach.lehrwerke + fach.reihen > 0)
+}

@@ -5,6 +5,7 @@ import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
 import { materialPfad } from '#shared/utils/material-pfad'
 import type { MaterialDetail } from '~~/server/repositories/material.repository'
 import type { MaterialType } from '#shared/types/domain'
+import { isBookLikeMaterialType } from '#shared/utils/material-type-guess'
 
 definePageMeta({ middleware: [] })
 useHead({ title: 'Material mit KI anlegen' })
@@ -17,6 +18,21 @@ const { optionen: schulformOptionen } = useSchulformen()
 if (!darfBearbeiten.value) {
   await navigateTo('/materialien')
 }
+
+const route = useRoute()
+const vorgabeTyp = computed(() => {
+  const typ = String(route.query.typ ?? '')
+  return typ && typ in materialTypes.map ? (typ as MaterialType) : null
+})
+const lehrwerkId = computed(() => {
+  const id = String(route.query.lehrwerk ?? '')
+  return /^[0-9a-f-]{36}$/i.test(id) ? id : null
+})
+const buchVorgabe = computed(() =>
+  vorgabeTyp.value === 'serviceband'
+  || vorgabeTyp.value === 'loesungsbuch'
+  || vorgabeTyp.value === 'lehrwerk',
+)
 
 interface AnalyseErgebnis {
   analyzeId: string
@@ -62,7 +78,7 @@ const formular = reactive({
   title: '',
   description: '',
   content: '',
-  materialType: 'arbeitsblatt' as MaterialType,
+  materialType: (vorgabeTyp.value ?? 'arbeitsblatt') as MaterialType,
   schoolForm: null as string | null,
   subjectNames: [] as string[],
   gradeLevels: [] as GradeLevel[],
@@ -91,7 +107,10 @@ async function dateiAnalysieren(files: FileList | null | undefined) {
   analyseDateiname.value = file.name
 
   try {
-    const ergebnis = await analysiereKiMaterial(file)
+    const ergebnis = await analysiereKiMaterial(
+      file,
+      vorgabeTyp.value ? { defaultMaterialType: vorgabeTyp.value } : undefined,
+    )
     analyse.value = ergebnis
     formular.title = ergebnis.suggestions.title
     formular.description = ergebnis.suggestions.description
@@ -133,13 +152,16 @@ async function anlegen() {
         gradeLevels: formular.gradeLevels,
         tagNames: formular.tagNames,
         learningObjectives: formular.learningObjectives,
+        belongsToId: lehrwerkId.value,
       },
-      erfolgsmeldung: 'Material mit KI-Vorschlägen angelegt.',
+      erfolgsmeldung: lehrwerkId.value
+        ? 'Material angelegt und dem Lehrwerk zugeordnet.'
+        : 'Material mit KI-Vorschlägen angelegt.',
     },
   )
   if (!ergebnis) return
   analyse.value = null
-  await navigateTo(materialPfad(ergebnis))
+  await navigateTo(lehrwerkId.value ? `/lehrwerke/${lehrwerkId.value}` : materialPfad(ergebnis))
 }
 
 async function zuruecksetzen() {
@@ -155,7 +177,7 @@ async function zuruecksetzen() {
   formular.title = ''
   formular.description = ''
   formular.content = ''
-  formular.materialType = 'arbeitsblatt'
+  formular.materialType = vorgabeTyp.value ?? 'arbeitsblatt'
   formular.schoolForm = null
   formular.subjectNames = []
   formular.gradeLevels = []
@@ -171,7 +193,7 @@ async function zuruecksetzen() {
       zurueck-label="Wege zum Anlegen"
       kicker="Materialien"
       titel="Mit KI anlegen"
-      untertitel="Datei hochladen – Vorschläge prüfen und nach Bedarf anpassen. Scans werden per Vision/OCR lesbar."
+      :untertitel="buchVorgabe ? 'Verlagsbuch' : 'Datei analysieren'"
     />
 
     <form class="space-y-5" @submit.prevent="anlegen">
@@ -258,6 +280,29 @@ async function zuruecksetzen() {
               {{ hinweis }}
             </li>
           </ul>
+          <div
+            v-if="lehrwerkId && buchVorgabe"
+            class="rounded-lg border border-primary/25 bg-primary-soft/40 px-3 py-2 text-sm text-ink"
+          >
+            Wird als {{ materialTypes.label(vorgabeTyp) }} angelegt und dem geöffneten Lehrwerk zugeordnet.
+          </div>
+          <div
+            v-else-if="formular.materialType === 'lehrwerk' && !lehrwerkId"
+            class="rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-sm text-ink"
+          >
+            Das wirkt wie ein Schülerbuch.
+            <NuxtLink to="/lehrwerke/neu/ki" class="font-medium text-primary hover:underline">
+              Besser über Lehrwerke anlegen
+            </NuxtLink>
+            — Serviceband und Lösungsheft bleiben hier eigene Materialien.
+          </div>
+          <div
+            v-else-if="isBookLikeMaterialType(formular.materialType) && !buchVorgabe"
+            class="rounded-lg border border-primary/25 bg-primary-soft/40 px-3 py-2 text-sm text-ink"
+          >
+            Als {{ materialTypes.label(formular.materialType) }} erkannt, nicht als Arbeitsblatt.
+            Dem passenden Lehrwerk kannst du es danach zuordnen.
+          </div>
         </div>
 
         <p v-if="fehler" class="mt-3 text-sm text-danger">{{ fehler }}</p>

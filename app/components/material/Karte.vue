@@ -14,6 +14,8 @@ const props = withDefaults(
     kompakt?: boolean
     auswaehlbar?: boolean
     ausgewaehlt?: boolean
+    /** Kommt man vom Lehrwerk-Hub, bleibt der Rückweg dorthin erhalten. */
+    lehrwerkId?: string | null
   }>(),
   { kompakt: false, auswaehlbar: false, ausgewaehlt: false },
 )
@@ -23,7 +25,7 @@ const emit = defineEmits<{
   auswahl: [id: string, wert: boolean]
 }>()
 
-const ziel = computed(() => materialPfad(props.material))
+const ziel = computed(() => materialPfad(props.material, { lehrwerkId: props.lehrwerkId }))
 const icon = computed(() => materialVorschauIcon(props.material.materialType, preview.value?.fileName))
 const zeigtIconVorschau = computed(() =>
   materialZeigtIconVorschau(props.material.materialType, preview.value?.fileName),

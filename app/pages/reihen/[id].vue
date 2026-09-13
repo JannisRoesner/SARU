@@ -287,7 +287,7 @@ async function reiheLoeschen() {
               klein
               icon="chalkboard-user"
               titel="Noch keine Stunden"
-              text="Ordne bestehende Stunden zu oder lege neue an und verknüpfe sie hier."
+              text="Keine Stunden."
             />
 
             <div ref="stundenBehaelter" class="space-y-2">
@@ -353,7 +353,7 @@ async function reiheLoeschen() {
               klein
               icon="folder-open"
               titel="Keine Materialien"
-              text="Ordne übergreifende Materialien der Reihe zu."
+              text="Keine Materialien."
             />
             <ul v-else class="space-y-1.5">
               <li

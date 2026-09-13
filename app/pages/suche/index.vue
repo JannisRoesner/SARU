@@ -149,7 +149,7 @@ const { favoritSetzen } = useMaterialAktionen(() => refresh())
     <LayoutSeitenkopf
       kicker="Finden"
       titel="Suchergebnisse"
-      untertitel="Alle Treffer zur Suche in der Leiste – auch Text in Anhängen."
+      untertitel="Titel, Notizen, Anhänge"
     >
       <template #aktionen>
         <UiButton
@@ -238,8 +238,8 @@ const { favoritSetzen } = useMaterialAktionen(() => refresh())
     <template v-else-if="!suche.trim()">
       <UiLeerzustand
         icon="magnifying-glass"
-        titel="Wonach suchst du?"
-        text="Tippe hier einen Begriff. Dieselbe Suche erreichst du überall über die Leiste oben (Strg+K)."
+        titel="Suche"
+        text="Begriff eingeben oder Strg+K."
       />
     </template>
 

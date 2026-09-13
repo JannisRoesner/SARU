@@ -66,7 +66,7 @@ async function analysieren() {
     <LayoutSeitenkopf
       kicker="Werkzeuge"
       titel="Import"
-      untertitel="Kursmappen aus dem Schulportal importieren."
+      untertitel="Schulportal-Kursmappen"
     />
 
     <UiCard titel="Neue Datei hochladen" icon="file-import" class="mb-8" einklappbar einklapp-id="import-upload">
@@ -122,7 +122,7 @@ async function analysieren() {
         klein
         icon="clock-rotate-left"
         titel="Noch keine Importe"
-        text="Hochgeladene Exporte erscheinen hier mit Status und Verlauf."
+        text="Noch keine Einträge."
       />
       <ul v-else class="space-y-2">
         <li v-for="lauf in laeufe" :key="lauf.id">

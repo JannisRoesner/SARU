@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { eq, sql } from 'drizzle-orm'
 import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
 import type { MaterialType, SchoolForm } from '#shared/types/domain'
+import { isBookLikeMaterialType } from '#shared/utils/material-type-guess'
 import { oeffentlicheFehlermeldung } from '#shared/utils/public-error'
 import { useDatabase } from '../../database/client'
 import { importRuns } from '../../database/schema'
@@ -21,7 +22,7 @@ import {
   type MaterialMetadataSuggestion,
 } from './suggest-material-metadata'
 import { isExtractable } from '../extraction.service'
-import { addFileAsset, createMaterial } from '../material.service'
+import { addFileAsset, addRelation, createMaterial } from '../material.service'
 import { getAiSettings } from '../settings.service'
 import {
   deleteFile,
@@ -31,6 +32,7 @@ import {
   storeStagingFile,
   validateUpload,
 } from '../storage.service'
+import { getMaterialDetail } from '../../repositories/material.repository'
 import { getOrCreateSubject, resolveSubjectIds } from '../taxonomy.service'
 import { waitForIndex } from '../search/indexer'
 import {
@@ -111,6 +113,7 @@ export interface AiCreateCommitInput {
   learningObjectives?: string[]
   source?: string | null
   author?: string | null
+  belongsToId?: string | null
 }
 
 /**
@@ -200,18 +203,18 @@ export async function processAiMaterialAnalyze(analyzeId: string): Promise<void>
     let extractedText = ''
 
     if (isExtractable(fileName)) {
-      const istLehrwerk = mapping.defaultMaterialType === 'lehrwerk'
+      const istBuch = isBookLikeMaterialType(mapping.defaultMaterialType)
       const ensured = await ensureExtractedText(buffer, fileName, settings, {
-        maxPages: istLehrwerk ? AI_CREATE_LEHRWERK_PREVIEW_PAGES : AI_CREATE_PREVIEW_PAGES,
-        maxOutputTokens: istLehrwerk
+        maxPages: istBuch ? AI_CREATE_LEHRWERK_PREVIEW_PAGES : AI_CREATE_PREVIEW_PAGES,
+        maxOutputTokens: istBuch
           ? AI_CREATE_LEHRWERK_VISION_MAX_TOKENS
           : AI_CREATE_VISION_MAX_TOKENS,
-        ocrHint: istLehrwerk ? 'lehrwerk' : 'material',
+        ocrHint: istBuch ? 'lehrwerk' : 'material',
       })
       extractedText = ensured.text
       extractionMethod = ensured.method
       pageCount = ensured.pageCount ?? null
-      const previewPages = istLehrwerk ? AI_CREATE_LEHRWERK_PREVIEW_PAGES : AI_CREATE_PREVIEW_PAGES
+      const previewPages = istBuch ? AI_CREATE_LEHRWERK_PREVIEW_PAGES : AI_CREATE_PREVIEW_PAGES
       const pagesUsed = ensured.pagesUsed ?? (extractedText.trim() ? previewPages : 0)
       if (pageCount && pageCount > previewPages) {
         warnings.push(
@@ -253,6 +256,7 @@ export async function processAiMaterialAnalyze(analyzeId: string): Promise<void>
         gradeLevel: mapping.gradeLevel,
         schoolForm: mapping.schoolForm,
         defaultMaterialType: mapping.defaultMaterialType ?? 'arbeitsblatt',
+        pageCount,
       },
     })
 
@@ -421,6 +425,13 @@ export async function commitAiMaterialCreate(
   const buffer = await readFile(resolveStoragePath(detected.stagingPath))
   const seededText = await readExtractedTextSidecar(detected.extractedTextKey)
 
+  if (input.belongsToId) {
+    const target = await getMaterialDetail(input.belongsToId)
+    if (!target || target.materialType !== 'lehrwerk') {
+      throw invalidInput('Das gewählte Lehrwerk wurde nicht gefunden.')
+    }
+  }
+
   const materialId = await createMaterial(
     {
       title,
@@ -470,6 +481,10 @@ export async function commitAiMaterialCreate(
       skipContentAutofill: true,
     },
   )
+
+  if (input.belongsToId) {
+    await addRelation(materialId, input.belongsToId, 'gehoert_zu', 'Beim Anlegen zugeordnet')
+  }
 
   await deleteFile(detected.stagingPath)
   if (detected.extractedTextKey) await deleteFile(detected.extractedTextKey)

@@ -69,7 +69,7 @@ watch(page, syncQuery)
     <LayoutSeitenkopf
       kicker="Planung"
       titel="Unterrichtsstunden"
-      untertitel="Verlaufspläne mit Phasen, Methoden und zugeordneten Materialien."
+      untertitel="Verlaufspläne"
     >
       <template v-if="darfBearbeiten" #aktionen>
         <UiButton to="/stunden/neu" variante="primaer" icon="calendar-plus">
@@ -124,7 +124,7 @@ watch(page, syncQuery)
         v-else-if="!(data?.items.length)"
         icon="chalkboard-user"
         titel="Keine Stunden"
-        text="Plane deine erste Unterrichtsstunde oder importiere einen Kurs aus dem Schulportal."
+        text="Noch keine vorhanden."
       >
         <UiButton v-if="darfBearbeiten" to="/stunden/neu" variante="primaer" icon="plus">
           Stunde planen

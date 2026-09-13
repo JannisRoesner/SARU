@@ -66,7 +66,7 @@ async function schulformUmschalten(form: SchoolForm, sichtbar: boolean) {
       zurueck-label="Einstellungen"
       kicker="Persönlich"
       titel="Darstellung"
-      untertitel="Farbmodus, Palette und sichtbare Schulformen – alles geräteübergreifend über dein Konto."
+      untertitel="Modus, Palette, Schulformen"
     />
 
     <UiCard titel="Farbmodus" icon="circle-half-stroke" class="mb-5">

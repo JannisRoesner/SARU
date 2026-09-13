@@ -53,19 +53,37 @@ const materialienMock = [
 
 const lehrwerkInhaltMock = [
   {
-    label: 'Lehrerband, Serviceband & Lösungen',
-    icon: 'book-bookmark',
+    label: 'Serviceband',
+    icon: 'chalkboard-user',
     items: [
       {
         t: 'Serviceband Biologie 8',
         b: 'Serviceband',
-        materialType: 'zusatzmaterial' as const,
+        materialType: 'serviceband' as const,
         ext: 'PDF',
       },
+    ],
+  },
+  {
+    label: 'Lösungen',
+    icon: 'book-bookmark',
+    items: [
       {
         t: 'Lösungsheft Biologie 8',
         b: 'Lösungsbuch',
         materialType: 'loesungsbuch' as const,
+        ext: 'PDF',
+      },
+    ],
+  },
+  {
+    label: 'Versuche',
+    icon: 'flask',
+    items: [
+      {
+        t: 'Versuch Katalase',
+        b: 'Zusatzmaterial',
+        materialType: 'zusatzmaterial' as const,
         ext: 'PDF',
       },
     ],
@@ -104,7 +122,7 @@ const features = [
     icon: 'book',
     fensterTitel: 'Lehrwerk',
     titel: 'Lehrwerke führen',
-    text: 'Schulbuch, Serviceband, Lösungsheft und Kopiervorlagen an einem Ort. Zugeordnete Materialien erscheinen in Gruppen — vom Lehrerband bis zu den Arbeitsblättern. Beim Stapel-Upload kannst du alles automatisch dem Lehrwerk zuordnen.',
+    text: 'Schulbuch, Serviceband, Lösungsheft und Kopiervorlagen an einem Ort. Zugeordnete Materialien erscheinen in Gruppen — vom Serviceband über Versuche bis zu den Arbeitsblättern. Beim Stapel-Upload kannst du alles automatisch dem Lehrwerk zuordnen.',
     seite: 'links' as const,
   },
   {

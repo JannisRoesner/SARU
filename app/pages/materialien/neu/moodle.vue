@@ -129,7 +129,7 @@ async function anlegen() {
       zurueck-label="Wege zum Anlegen"
       kicker="Materialien"
       titel="Moodle-Kurs anlegen"
-      untertitel="Lade ein fertiges Kursarchiv (.mbz oder .imscc) hoch, verknüpfe es mit einer Reihe und stelle es später im SchulMoodle wieder her."
+      untertitel="MBZ- oder IMSCC-Archiv"
     />
 
     <form class="space-y-5" @submit.prevent="anlegen">

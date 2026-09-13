@@ -4,10 +4,7 @@ import {
   bulkMaterialAcceptAttribute,
   isBulkMaterialFileName,
 } from '#shared/utils/ai-material-formats'
-import {
-  jahrgangsstufenOptionen,
-  type GradeLevel,
-} from '#shared/utils/jahrgangsstufen'
+import { type GradeLevel } from '#shared/utils/jahrgangsstufen'
 
 useHead({ title: 'Stapel-Upload' })
 
@@ -16,8 +13,6 @@ if (!darfBearbeiten.value) await navigateTo('/materialien')
 
 const { aufruf, laeuft } = useApi()
 const { optionen: schulformOptionen } = useSchulformen()
-
-const jahrgangOptionen = jahrgangsstufenOptionen()
 
 interface BulkLauf {
   id: string
@@ -49,7 +44,7 @@ const fehler = ref<string | null>(null)
 const mapping = reactive({
   subjectId: null as string | null,
   subjectName: '',
-  gradeLevel: null as GradeLevel | null,
+  gradeLevels: [] as GradeLevel[],
   schoolForm: null as string | null,
   defaultMaterialType: 'arbeitsblatt' as string,
   linkDuplicates: true,
@@ -96,7 +91,7 @@ async function analysieren() {
     JSON.stringify({
       subjectId: mapping.subjectId,
       subjectName: mapping.subjectName || undefined,
-      gradeLevel: mapping.gradeLevel,
+      gradeLevels: mapping.gradeLevels,
       schoolForm: mapping.schoolForm,
       defaultMaterialType: mapping.defaultMaterialType,
       linkDuplicates: mapping.linkDuplicates,
@@ -127,7 +122,7 @@ async function analysieren() {
       zurueck-label="Wege zum Anlegen"
       kicker="Materialien"
       titel="Stapel-Upload"
-      untertitel="PDF, Word und ZIP-Pakete. Text kommt aus der Datei oder per Vision/OCR, Titel und Beschreibung schlägt die eingestellte KI vor – du prüfst nur noch."
+      untertitel="Mehrere Dateien"
     />
 
     <UiCard titel="Dateien oder Paket" icon="cloud-arrow-up" class="mb-6">
@@ -206,12 +201,8 @@ async function analysieren() {
           v-model:subject-name="mapping.subjectName"
           class="sm:col-span-2"
         />
-        <UiField label="Jahrgang">
-          <UiSelect
-            v-model="mapping.gradeLevel"
-            platzhalter="Keiner"
-            :optionen="jahrgangOptionen.map((o) => ({ value: o.value, label: o.label }))"
-          />
+        <UiField label="Jahrgangsstufen" class="sm:col-span-2">
+          <UiJahrgangsstufenAuswahl v-model="mapping.gradeLevels" />
         </UiField>
         <UiField label="Schulform">
           <UiSelect
@@ -259,7 +250,7 @@ async function analysieren() {
         klein
         icon="layer-group"
         titel="Noch keine Stapel-Uploads"
-        text="Abgeschlossene und offene Stapel erscheinen hier."
+        text="Noch keine Einträge."
       />
       <ul v-else class="space-y-2">
         <li v-for="lauf in laeufe" :key="lauf.id">

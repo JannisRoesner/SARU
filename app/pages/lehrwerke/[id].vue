@@ -41,6 +41,7 @@ const {
 } = useMaterialAktionen(() => Promise.all([refresh(), inhaltLaden()]))
 
 const loeschenOffen = ref(false)
+const bearbeiten = ref(false)
 
 async function lehrwerkLoeschen() {
   const ok = await loeschen(id.value, 'Lehrwerk gelöscht.')
@@ -233,6 +234,11 @@ async function zuordnungLoesen(relationId: string) {
         </div>
 
         <LayoutAktionen class="sm:ml-auto sm:justify-end">
+          <UiToggle
+            v-if="darfBearbeiten"
+            v-model="bearbeiten"
+            label="Bearbeiten"
+          />
           <UiButton
             variante="still"
             :icon="data.isFavorite ? 'star' : 'star'"
@@ -252,11 +258,11 @@ async function zuordnungLoesen(relationId: string) {
             Angaben
           </UiButton>
           <UiButton
-            v-if="darfBearbeiten"
+            v-if="darfBearbeiten && bearbeiten"
             variante="gefahr"
             icon="trash"
             nur-icon
-            title="Löschen"
+            title="Lehrwerk löschen"
             @click="loeschenOffen = true"
           />
         </LayoutAktionen>
@@ -265,7 +271,7 @@ async function zuordnungLoesen(relationId: string) {
       <div class="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
         <UiCard
           titel="Schulbuch"
-          untertitel="Genau eine Buchdatei. Lösungsheft, Serviceband und Arbeitsblätter liegen als zugeordnete Materialien daneben."
+          untertitel="Buchdatei"
           icon="book"
         >
           <div v-if="hauptVorschau" class="space-y-4">
@@ -297,9 +303,9 @@ async function zuordnungLoesen(relationId: string) {
                     icon="download"
                     @click="assetHerunterladen(hauptVorschau.id)"
                   >
-                    Laden
+                    Herunterladen
                   </UiButton>
-                  <template v-if="darfBearbeiten">
+                  <template v-if="darfBearbeiten && bearbeiten">
                     <input
                       ref="ersetzenInput"
                       type="file"
@@ -340,7 +346,7 @@ async function zuordnungLoesen(relationId: string) {
                   {{ asset.title || asset.fileName || 'Datei' }}
                 </button>
                 <UiButton
-                  v-if="darfBearbeiten"
+                  v-if="darfBearbeiten && bearbeiten"
                   variante="still"
                   groesse="sm"
                   icon="trash"
@@ -357,7 +363,7 @@ async function zuordnungLoesen(relationId: string) {
             klein
             icon="book"
             titel="Noch keine Buchdatei"
-            text="Lade die PDF des Schülerbuchs hier hoch."
+            text="Keine Buchdatei."
           />
 
           <label
@@ -399,13 +405,29 @@ async function zuordnungLoesen(relationId: string) {
             >
               Zuordnen
             </UiButton>
+            <UiButton
+              v-if="darfBearbeiten"
+              variante="sekundaer"
+              icon="chalkboard-user"
+              :to="`/materialien/neu/ki?typ=serviceband&lehrwerk=${data.id}`"
+            >
+              Serviceband
+            </UiButton>
+            <UiButton
+              v-if="darfBearbeiten"
+              variante="sekundaer"
+              icon="book-bookmark"
+              :to="`/materialien/neu/ki?typ=loesungsbuch&lehrwerk=${data.id}`"
+            >
+              Lösungsheft
+            </UiButton>
           </div>
 
           <UiLeerzustand
             v-if="!inhalt.length"
             icon="layer-group"
             titel="Noch nichts zugeordnet"
-            text="Ordne Lösungsheft, Serviceband, Kopiervorlagen und andere Materialien diesem Lehrwerk zu. Beim Stapel-Upload geht das automatisch."
+            text="Noch keine Zuordnungen."
           >
             <UiButton
               v-if="darfBearbeiten"
@@ -440,10 +462,11 @@ async function zuordnungLoesen(relationId: string) {
                 <MaterialKarte
                   class="min-w-0 flex-1"
                   :material="item"
+                  :lehrwerk-id="data.id"
                   @favorit="favoritSetzen"
                 />
                 <UiButton
-                  v-if="darfBearbeiten"
+                  v-if="darfBearbeiten && bearbeiten"
                   class="self-center"
                   variante="still"
                   groesse="sm"
