@@ -25,6 +25,8 @@ const emit = defineEmits<{
   auswahl: [id: string, wert: boolean]
 }>()
 
+const { alsVerwendetMerken } = useMaterialAktionen()
+
 const ziel = computed(() => materialPfad(props.material, { lehrwerkId: props.lehrwerkId }))
 const icon = computed(() => materialVorschauIcon(props.material.materialType, preview.value?.fileName))
 const zeigtIconVorschau = computed(() =>
@@ -45,6 +47,40 @@ const zeigtMiniatur = computed(() => {
   if (!p || p.kind !== 'datei') return false
   return isThumbnailCandidate(p.mimeType, p.fileName)
 })
+
+const kannOeffnen = computed(() => {
+  const p = preview.value
+  if (!p) return false
+  return p.kind === 'link' ? Boolean(p.url) : Boolean(p.assetId)
+})
+const kannHerunterladen = computed(() => preview.value?.kind === 'datei' && Boolean(preview.value.assetId))
+
+const vorschauOffen = ref(false)
+
+function oeffnen() {
+  const p = preview.value
+  if (!p) return
+  void alsVerwendetMerken(props.material.id)
+  if (p.kind === 'link' && p.url) {
+    window.open(p.url, '_blank', 'noopener')
+    return
+  }
+  if (p.assetId) vorschauOffen.value = true
+}
+
+function herunterladen() {
+  const p = preview.value
+  if (!p?.assetId || p.kind !== 'datei') return
+  void alsVerwendetMerken(props.material.id)
+  window.open(`/api/assets/${p.assetId}/download`, '_blank')
+}
+
+function beiMiniaturKlick(event: Event) {
+  if (!kannOeffnen.value) return
+  event.preventDefault()
+  event.stopPropagation()
+  oeffnen()
+}
 </script>
 
 <template>
@@ -80,7 +116,24 @@ const zeigtMiniatur = computed(() => {
       :mime-type="preview?.mimeType"
       :material-type="material.materialType"
       :groesse="kompakt ? 'sm' : 'md'"
+      :klickbar="kannOeffnen"
+      @click="beiMiniaturKlick"
     />
+    <button
+      v-else-if="kannOeffnen"
+      type="button"
+      class="flex shrink-0 items-center justify-center rounded-xl"
+      :class="kompakt ? 'size-10 text-base' : 'size-12 text-lg'"
+      :style="!zeigtIconVorschau && fachfarbe
+        ? { backgroundColor: `${fachfarbe}22`, color: fachfarbe }
+        : undefined"
+      :data-standard="!zeigtIconVorschau && !fachfarbe ? '' : undefined"
+      title="Vorschau öffnen"
+      :aria-label="`Vorschau von ${material.title}`"
+      @click.stop.prevent="oeffnen"
+    >
+      <UiIcon :name="icon" fest class="group-data-[standard]:text-primary" />
+    </button>
     <span
       v-else
       class="flex shrink-0 items-center justify-center rounded-xl"
@@ -106,16 +159,38 @@ const zeigtMiniatur = computed(() => {
           {{ material.title }}
         </h3>
 
-        <button
-          type="button"
-          class="shrink-0 rounded-md p-1 text-ink-subtle transition-colors hover:bg-surface-hover hover:text-warning"
-          :class="material.isFavorite && 'text-warning'"
-          :aria-label="material.isFavorite ? 'Favorit entfernen' : 'Als Favorit merken'"
-          :aria-pressed="material.isFavorite"
-          @click.stop.prevent="emit('favorit', material.id, !material.isFavorite)"
-        >
-          <UiIcon name="star" :stil="material.isFavorite ? 'fas' : 'far'" fest />
-        </button>
+        <div class="flex shrink-0 items-center" @click.stop.prevent>
+          <button
+            v-if="kompakt && kannOeffnen"
+            type="button"
+            class="rounded-md p-1 text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
+            title="Vorschau öffnen"
+            :aria-label="`Vorschau von ${material.title}`"
+            @click="oeffnen"
+          >
+            <UiIcon name="eye" fest />
+          </button>
+          <button
+            v-if="kompakt && kannHerunterladen"
+            type="button"
+            class="rounded-md p-1 text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
+            title="Herunterladen"
+            :aria-label="`${material.title} herunterladen`"
+            @click="herunterladen"
+          >
+            <UiIcon name="download" fest />
+          </button>
+          <button
+            type="button"
+            class="rounded-md p-1 text-ink-subtle transition-colors hover:bg-surface-hover hover:text-warning"
+            :class="material.isFavorite && 'text-warning'"
+            :aria-label="material.isFavorite ? 'Favorit entfernen' : 'Als Favorit merken'"
+            :aria-pressed="material.isFavorite"
+            @click="emit('favorit', material.id, !material.isFavorite)"
+          >
+            <UiIcon name="star" :stil="material.isFavorite ? 'fas' : 'far'" fest />
+          </button>
+        </div>
       </div>
 
       <p
@@ -206,12 +281,47 @@ const zeigtMiniatur = computed(() => {
           {{ formatRelativ(material.updatedAt, '–', jetzt) }}
         </span>
       </div>
+
+      <div
+        v-if="!kompakt && (kannOeffnen || kannHerunterladen)"
+        class="mt-3 flex flex-wrap gap-2"
+        @click.stop.prevent
+      >
+        <UiButton
+          v-if="kannOeffnen"
+          variante="sekundaer"
+          groesse="sm"
+          icon="eye"
+          @click="oeffnen"
+        >
+          Vorschau
+        </UiButton>
+        <UiButton
+          v-if="kannHerunterladen"
+          variante="sekundaer"
+          groesse="sm"
+          icon="download"
+          @click="herunterladen"
+        >
+          Herunterladen
+        </UiButton>
+      </div>
     </div>
+
   </component>
+
+  <MaterialVorschauModal
+    v-if="vorschauOffen && preview?.kind === 'datei' && preview.assetId"
+    v-model="vorschauOffen"
+    :asset-id="preview.assetId"
+    :titel="material.title"
+    @herunterladen="alsVerwendetMerken(material.id)"
+  />
 </template>
 
 <style scoped>
-span[data-standard] {
+span[data-standard],
+button[data-standard] {
   background: var(--surface-sunken);
   color: var(--ink-subtle);
 }

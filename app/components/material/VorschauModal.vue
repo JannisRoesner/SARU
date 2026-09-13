@@ -183,14 +183,18 @@ async function strukturInitialisieren() {
   }
 }
 
-watch(offen, (istOffen) => {
-  if (istOffen) {
-    pdfSeite.value = 1
-    pdfSeitenFehler.value = false
-    void laden()
-    void strukturInitialisieren()
-  }
-})
+watch(
+  offen,
+  (istOffen) => {
+    if (istOffen) {
+      pdfSeite.value = 1
+      pdfSeitenFehler.value = false
+      void laden()
+      void strukturInitialisieren()
+    }
+  },
+  { immediate: true },
+)
 
 watch(
   () => props.assetId,
