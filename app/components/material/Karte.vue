@@ -56,9 +56,12 @@ const kannOeffnen = computed(() => {
   if (!p) return false
   return p.kind === 'link' ? Boolean(p.url) : Boolean(p.assetId)
 })
-const kannHerunterladen = computed(() =>
-  !istLehrwerk.value && preview.value?.kind === 'datei' && Boolean(preview.value.assetId),
-)
+const kannHerunterladen = computed(() => {
+  if (istLehrwerk.value) return false
+  if (preview.value?.kind === 'datei' && preview.value.assetId) return true
+  if (preview.value?.kind === 'link' && preview.value.url) return true
+  return props.material.assetCount > 0
+})
 
 const vorschauOffen = ref(false)
 
@@ -75,9 +78,16 @@ function oeffnen() {
 
 function herunterladen() {
   const p = preview.value
-  if (!p?.assetId || p.kind !== 'datei') return
   void alsVerwendetMerken(props.material.id)
-  window.open(`/api/assets/${p.assetId}/download`, '_blank')
+  if (p?.kind === 'datei' && p.assetId) {
+    window.open(`/api/assets/${p.assetId}/download`, '_blank')
+    return
+  }
+  if (p?.kind === 'link' && p.url) {
+    window.open(p.url, '_blank', 'noopener')
+    return
+  }
+  window.open(`/api/materials/${props.material.id}/download`, '_blank')
 }
 
 function beiMiniaturKlick(event: Event) {
@@ -164,16 +174,38 @@ function beiMiniaturKlick(event: Event) {
           {{ material.title }}
         </h3>
 
-        <button
-          type="button"
-          class="shrink-0 rounded-md p-1 text-ink-subtle transition-colors hover:bg-surface-hover hover:text-warning"
-          :class="material.isFavorite && 'text-warning'"
-          :aria-label="material.isFavorite ? 'Favorit entfernen' : 'Als Favorit merken'"
-          :aria-pressed="material.isFavorite"
-          @click.stop.prevent="emit('favorit', material.id, !material.isFavorite)"
-        >
-          <UiIcon name="star" :stil="material.isFavorite ? 'fas' : 'far'" fest />
-        </button>
+        <div class="flex shrink-0 items-center" @click.stop.prevent>
+          <button
+            v-if="kompakt && kannOeffnen"
+            type="button"
+            class="rounded-md p-1 text-ink-subtle hover:bg-surface-hover hover:text-ink"
+            title="Vorschau"
+            :aria-label="`Vorschau von ${material.title}`"
+            @click="oeffnen"
+          >
+            <UiIcon name="eye" fest />
+          </button>
+          <button
+            v-if="kompakt && kannHerunterladen"
+            type="button"
+            class="rounded-md p-1 text-ink-subtle hover:bg-surface-hover hover:text-ink"
+            title="Herunterladen"
+            :aria-label="`${material.title} herunterladen`"
+            @click="herunterladen"
+          >
+            <UiIcon name="download" fest />
+          </button>
+          <button
+            type="button"
+            class="rounded-md p-1 text-ink-subtle transition-colors hover:bg-surface-hover hover:text-warning"
+            :class="material.isFavorite && 'text-warning'"
+            :aria-label="material.isFavorite ? 'Favorit entfernen' : 'Als Favorit merken'"
+            :aria-pressed="material.isFavorite"
+            @click="emit('favorit', material.id, !material.isFavorite)"
+          >
+            <UiIcon name="star" :stil="material.isFavorite ? 'fas' : 'far'" fest />
+          </button>
+        </div>
       </div>
 
       <p
@@ -263,10 +295,16 @@ function beiMiniaturKlick(event: Event) {
           <UiIcon name="clock-rotate-left" fest />
           {{ formatRelativ(material.updatedAt, '–', jetzt) }}
         </span>
+      </div>
+
+      <div
+        v-if="!kompakt && (kannOeffnen || kannHerunterladen)"
+        class="mt-3 flex flex-nowrap items-center gap-5 text-sm font-medium text-primary"
+      >
         <button
           v-if="kannOeffnen"
           type="button"
-          class="flex items-center gap-1 hover:text-ink"
+          class="inline-flex items-center gap-1.5 hover:underline"
           @click.stop.prevent="oeffnen"
         >
           <UiIcon name="eye" fest />
@@ -275,7 +313,7 @@ function beiMiniaturKlick(event: Event) {
         <button
           v-if="kannHerunterladen"
           type="button"
-          class="flex items-center gap-1 hover:text-ink"
+          class="inline-flex items-center gap-1.5 hover:underline"
           @click.stop.prevent="herunterladen"
         >
           <UiIcon name="download" fest />
