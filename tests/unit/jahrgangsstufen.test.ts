@@ -3,7 +3,10 @@ import {
   formatJahrgaenge,
   gradeLevelFromStorage,
   gradeLevelToStorage,
+  gradeLevelsFromOberstufeHint,
+  guessGradeLevelsFromFileName,
   jahrgangsstufeLabel,
+  mapLegacyOberstufeToCurrent,
   normalizeGradeLevel,
   normalizeGradeLevels,
   sortGradeLevels,
@@ -55,5 +58,34 @@ describe('jahrgangsstufen', () => {
 
   it('normalisiert Arrays dedupliziert', () => {
     expect(normalizeGradeLevels(['E1', 'e1', 5, 5, 'Q4'])).toEqual([5, 'E1', 'Q4'])
+  })
+
+  it('erkennt Jahrgangsstufen im Dateinamen', () => {
+    expect(guessGradeLevelsFromFileName('Biologie_8_Schuelerbuch.pdf')).toEqual([8])
+    expect(guessGradeLevelsFromFileName('Klasse 9 Bio.pdf')).toEqual([9])
+    expect(guessGradeLevelsFromFileName('8. Klasse Photosynthese.pdf')).toEqual([8])
+    expect(guessGradeLevelsFromFileName('Bio-E1-Klausur.pdf')).toEqual(['E1'])
+    expect(guessGradeLevelsFromFileName('Q2 Arbeitsblatt.docx')).toEqual(['Q2'])
+    expect(guessGradeLevelsFromFileName('Klasse 08 Natura.pdf')).toEqual([8])
+    expect(guessGradeLevelsFromFileName('Klasse 11 Bio.pdf')).toEqual(['E1', 'E2'])
+    expect(guessGradeLevelsFromFileName('Bio_Einfuehrungsphase.pdf')).toEqual(['E1', 'E2'])
+    expect(guessGradeLevelsFromFileName('LK Qualifikationsphase.pdf')).toEqual(['Q1', 'Q2', 'Q3', 'Q4'])
+    expect(guessGradeLevelsFromFileName('E-Phase Klausur.pdf')).toEqual(['E1', 'E2'])
+  })
+
+  it('mappt Phasenbegriffe und Legacy-Oberstufe', () => {
+    expect(gradeLevelsFromOberstufeHint('Klausur Einführungsphase')).toEqual(['E1', 'E2'])
+    expect(gradeLevelsFromOberstufeHint('Material zur Q-Phase')).toEqual(['Q1', 'Q2', 'Q3', 'Q4'])
+    expect(mapLegacyOberstufeToCurrent('11')).toEqual(['E1', 'E2'])
+    expect(mapLegacyOberstufeToCurrent('12')).toEqual(['Q1', 'Q2'])
+    expect(mapLegacyOberstufeToCurrent('13')).toEqual(['Q3', 'Q4'])
+    expect(mapLegacyOberstufeToCurrent(8)).toEqual([8])
+  })
+
+  it('verwirrt Kapitel- und Jahreszahlen nicht mit der Jahrgangsstufe', () => {
+    expect(guessGradeLevelsFromFileName('AB_Photosynthese-09.pdf')).toEqual([])
+    expect(guessGradeLevelsFromFileName('AB_Mitose.pdf')).toEqual([])
+    expect(guessGradeLevelsFromFileName('Klausur-2024.pdf')).toEqual([])
+    expect(guessGradeLevelsFromFileName('Schuelerbuch_Band2.pdf')).toEqual([])
   })
 })

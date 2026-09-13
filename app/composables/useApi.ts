@@ -54,12 +54,23 @@ export function toApiFehler(error: unknown): ApiFehler {
   const code =
     payload?.data?.code ?? (istFehlercode(statusMessage) ? statusMessage : undefined) ?? 'UNBEKANNT'
 
+  const rawMessage = fetchError?.message
+  const payloadMessage = payload?.message
+  const payloadStatus = payload?.statusMessage
+  const status = fetchError?.statusCode ?? 0
+  const gatewayNachricht =
+    status === 504
+      ? 'Die Anfrage ist am Zeitlimit des Servers hängengeblieben (Gateway Timeout). Große oder gescannte Dateien brauchen oft mehrere Minuten.'
+      : status === 502 || status === 503
+        ? 'Der Server oder die KI-Anbindung ist gerade nicht erreichbar. Bitte kurz warten und erneut versuchen.'
+        : undefined
   const nachricht =
-    lesbareNachricht(payload?.message) ??
-    lesbareNachricht(payload?.statusMessage) ??
-    lesbareNachricht(fetchError?.message) ??
+    lesbareNachricht(payloadMessage) ??
+    lesbareNachricht(payloadStatus) ??
+    lesbareNachricht(rawMessage) ??
+    gatewayNachricht ??
     MELDUNG_NACH_CODE[code] ??
-    (fetchError?.message?.toLowerCase().includes('fetch')
+    (rawMessage?.toLowerCase().includes('fetch')
       ? 'Der Server ist nicht erreichbar.'
       : 'Es ist ein unerwarteter Fehler aufgetreten.')
 

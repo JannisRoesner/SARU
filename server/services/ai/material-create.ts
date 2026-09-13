@@ -2,11 +2,13 @@ import { readFile } from 'node:fs/promises'
 import { eq, sql } from 'drizzle-orm'
 import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
 import type { MaterialType, SchoolForm } from '#shared/types/domain'
+import { oeffentlicheFehlermeldung } from '#shared/utils/public-error'
 import { useDatabase } from '../../database/client'
 import { importRuns } from '../../database/schema'
 import { appError, invalidInput, notFound } from '../../utils/errors'
 import { sha256 } from '../../utils/crypto'
 import { createLogger } from '../../utils/logger'
+import { recordAudit } from '../audit.service'
 import {
   ensureExtractedText,
   readExtractedTextSidecar,
@@ -45,6 +47,25 @@ const LEGACY_OFFICE = new Set(['doc', 'ppt', 'xls'])
 
 /** Titel, Fach, Jahrgang und Kurzinhalt stehen typischerweise vorn. */
 export const AI_CREATE_PREVIEW_PAGES = 6
+/** Vision-OCR für die Vorschau: genug für den 8k-Auszug, ohne 70s-4000-Token-Läufe. */
+const AI_CREATE_VISION_MAX_TOKENS = 1600
+
+export type AiCreateContext = {
+  subjectId?: string | null
+  subjectName?: string | null
+  gradeLevel?: GradeLevel | null
+  schoolForm?: string | null
+  defaultMaterialType?: MaterialType
+}
+
+export interface AiCreateAnalyzeStand {
+  analyzeId: string
+  status: 'laeuft' | 'vorschau' | 'fehlgeschlagen'
+  fileName: string
+  sizeBytes: number
+  errorMessage: string | null
+  result: AiCreateAnalyzeResult | null
+}
 
 export interface AiCreateAnalyzeResult {
   analyzeId: string
@@ -90,20 +111,14 @@ export interface AiCreateCommitInput {
 }
 
 /**
- * Analysiert eine einzelne Datei für den KI-Assistenten beim Material-Anlegen.
- * Extrahiert Text einmal (Textebene oder Vision) und schlägt Metadaten vor.
+ * Nimmt die Datei entgegen und startet die Analyse im Hintergrund.
+ * Der HTTP-Request darf nicht auf Vision/Ollama warten – sonst 504 am Reverse-Proxy.
  */
-export async function analyzeAiMaterialCreate(
+export async function startAiMaterialAnalyze(
   file: { buffer: Buffer; fileName: string },
   userId: string | null,
-  context: {
-    subjectId?: string | null
-    subjectName?: string | null
-    gradeLevel?: GradeLevel | null
-    schoolForm?: string | null
-    defaultMaterialType?: MaterialType
-  } = {},
-): Promise<AiCreateAnalyzeResult> {
+  context: AiCreateContext = {},
+): Promise<{ analyzeId: string }> {
   const fileName = sanitizeFileName(file.fileName)
   const ext = extensionOf(fileName)
   if (!isAiMaterialFileExtension(ext)) {
@@ -113,18 +128,78 @@ export async function analyzeAiMaterialCreate(
   }
   await validateUpload(file.buffer, fileName)
 
-  const settings = await getAiSettings()
+  const checksum = sha256(file.buffer)
   const stagingPath = await storeStagingFile(file.buffer, fileName)
-  const warnings: string[] = []
+  try {
+    const [run] = await useDatabase()
+      .insert(importRuns)
+      .values({
+        userId,
+        sourceFileName: fileName,
+        sourceSizeBytes: file.buffer.length,
+        sourceChecksum: checksum,
+        adapterId: AI_CREATE_ADAPTER_ID,
+        adapterVersion: AI_CREATE_ADAPTER_VERSION,
+        status: 'laeuft',
+        detected: {
+          fileName,
+          sizeBytes: file.buffer.length,
+          checksum,
+          stagingPath,
+          extractedTextKey: null,
+          extractionMethod: 'none',
+          pageCount: null,
+          hasText: false,
+          textPreview: null,
+          warnings: [],
+        } as never,
+        mapping: {
+          subjectId: context.subjectId ?? null,
+          subjectName: context.subjectName ?? '',
+          gradeLevel: context.gradeLevel ?? null,
+          schoolForm: context.schoolForm ?? null,
+          defaultMaterialType: context.defaultMaterialType ?? 'arbeitsblatt',
+        } as never,
+        stagingPath,
+      })
+      .returning({ id: importRuns.id })
+
+    log.info('KI-Materialanalyse gestartet', {
+      analyzeId: run!.id,
+      fileName,
+      sizeBytes: file.buffer.length,
+    })
+    return { analyzeId: run!.id }
+  } catch (error) {
+    await deleteFile(stagingPath)
+    throw error
+  }
+}
+
+export async function processAiMaterialAnalyze(analyzeId: string): Promise<void> {
+  const db = useDatabase()
+  const [run] = await db.select().from(importRuns).where(eq(importRuns.id, analyzeId)).limit(1)
+  if (!run || run.adapterId !== AI_CREATE_ADAPTER_ID) return
+  if (run.status !== 'laeuft' || !run.stagingPath) return
+
+  const mapping = (run.mapping ?? {}) as AiCreateContext
+  const fileName = run.sourceFileName
+  const ext = extensionOf(fileName)
+  const started = Date.now()
+  let extractedTextKey: string | null = null
 
   try {
+    const buffer = await readFile(resolveStoragePath(run.stagingPath))
+    const settings = await getAiSettings()
+    const warnings: string[] = []
     let extractionMethod: ExtractionMethod = 'none'
     let pageCount: number | null = null
     let extractedText = ''
 
     if (isExtractable(fileName)) {
-      const ensured = await ensureExtractedText(file.buffer, fileName, settings, {
+      const ensured = await ensureExtractedText(buffer, fileName, settings, {
         maxPages: AI_CREATE_PREVIEW_PAGES,
+        maxOutputTokens: AI_CREATE_VISION_MAX_TOKENS,
       })
       extractedText = ensured.text
       extractionMethod = ensured.method
@@ -137,9 +212,8 @@ export async function analyzeAiMaterialCreate(
       }
     }
 
-    let extractedTextKey: string | null = null
     if (extractedText.trim()) {
-      extractedTextKey = await storeExtractedTextSidecar(stagingPath, extractedText)
+      extractedTextKey = await storeExtractedTextSidecar(run.stagingPath, extractedText)
     }
 
     if (!extractedText.trim()) {
@@ -157,9 +231,9 @@ export async function analyzeAiMaterialCreate(
       warnings.push('Text per Vision/OCR aus Scan ermittelt.')
     }
 
-    let subjectLabel = context.subjectName?.trim() || null
-    if (!subjectLabel && context.subjectId) {
-      subjectLabel = await resolveSubjectName(context.subjectId)
+    let subjectLabel = mapping.subjectName?.trim() || null
+    if (!subjectLabel && mapping.subjectId) {
+      subjectLabel = await resolveSubjectName(mapping.subjectId)
     }
 
     const suggestions = await suggestMaterialMetadata({
@@ -168,9 +242,9 @@ export async function analyzeAiMaterialCreate(
       settings,
       context: {
         subjectLabel,
-        gradeLevel: context.gradeLevel,
-        schoolForm: context.schoolForm,
-        defaultMaterialType: context.defaultMaterialType ?? 'arbeitsblatt',
+        gradeLevel: mapping.gradeLevel,
+        schoolForm: mapping.schoolForm,
+        defaultMaterialType: mapping.defaultMaterialType ?? 'arbeitsblatt',
       },
     })
 
@@ -185,12 +259,11 @@ export async function analyzeAiMaterialCreate(
       )
     }
 
-    const checksum = sha256(file.buffer)
     const detected: AiCreateDetected = {
       fileName,
-      sizeBytes: file.buffer.length,
-      checksum,
-      stagingPath,
+      sizeBytes: run.sourceSizeBytes ?? buffer.length,
+      checksum: run.sourceChecksum ?? sha256(buffer),
+      stagingPath: run.stagingPath,
       extractedTextKey,
       extractionMethod,
       pageCount,
@@ -200,49 +273,110 @@ export async function analyzeAiMaterialCreate(
       warnings,
     }
 
-    const [run] = await useDatabase()
-      .insert(importRuns)
-      .values({
-        userId,
-        sourceFileName: fileName,
-        sourceSizeBytes: file.buffer.length,
-        sourceChecksum: checksum,
-        adapterId: AI_CREATE_ADAPTER_ID,
-        adapterVersion: AI_CREATE_ADAPTER_VERSION,
+    await db
+      .update(importRuns)
+      .set({
         status: 'vorschau',
         detected: detected as never,
-        mapping: {
-          subjectId: context.subjectId ?? null,
-          subjectName: context.subjectName ?? '',
-          gradeLevel: context.gradeLevel ?? null,
-          schoolForm: context.schoolForm ?? null,
-          defaultMaterialType: context.defaultMaterialType ?? 'arbeitsblatt',
-        } as never,
-        stagingPath,
+        errorMessage: null,
       })
-      .returning({ id: importRuns.id })
+      .where(eq(importRuns.id, analyzeId))
 
     log.info('KI-Materialanalyse abgeschlossen', {
-      analyzeId: run!.id,
+      analyzeId,
       extractionMethod,
       aiUsed: suggestions.aiUsed,
+      dauerMs: Date.now() - started,
     })
 
-    return {
-      analyzeId: run!.id,
-      fileName,
-      sizeBytes: file.buffer.length,
-      hasText: detected.hasText,
-      extractionMethod,
-      textPreview: detected.textPreview,
-      pageCount,
-      aiEnabled: settings.enabled,
-      suggestions,
-      warnings,
-    }
+    await recordAudit({
+      userId: run.userId,
+      action: 'material.ki.analysiert',
+      entityType: 'import',
+      entityId: analyzeId,
+      details: {
+        datei: fileName,
+        ki: settings.enabled,
+        methode: extractionMethod,
+        dauerMs: Date.now() - started,
+      },
+    })
   } catch (error) {
-    await deleteFile(stagingPath)
-    throw error
+    log.error('KI-Materialanalyse fehlgeschlagen', { analyzeId, error })
+    if (extractedTextKey) await deleteFile(extractedTextKey)
+    await db
+      .update(importRuns)
+      .set({
+        status: 'fehlgeschlagen',
+        errorMessage: oeffentlicheFehlermeldung(
+          error,
+          'Die KI-Analyse ist fehlgeschlagen. Bitte später erneut versuchen.',
+        ),
+        finishedAt: new Date(),
+      })
+      .where(eq(importRuns.id, analyzeId))
+  }
+}
+
+export async function getAiMaterialAnalyze(analyzeId: string): Promise<AiCreateAnalyzeStand> {
+  const [run] = await useDatabase()
+    .select()
+    .from(importRuns)
+    .where(eq(importRuns.id, analyzeId))
+    .limit(1)
+  if (!run || run.adapterId !== AI_CREATE_ADAPTER_ID) {
+    throw notFound('Die KI-Analyse')
+  }
+
+  const detected = (run.detected ?? {}) as unknown as Partial<AiCreateDetected>
+  const status =
+    run.status === 'vorschau' || run.status === 'fehlgeschlagen' || run.status === 'laeuft'
+      ? run.status
+      : run.status === 'analysiert'
+        ? 'vorschau'
+        : 'fehlgeschlagen'
+
+  if (status !== 'vorschau') {
+    return {
+      analyzeId: run.id,
+      status,
+      fileName: run.sourceFileName,
+      sizeBytes: run.sourceSizeBytes ?? detected.sizeBytes ?? 0,
+      errorMessage: run.errorMessage,
+      result: null,
+    }
+  }
+
+  const settings = await getAiSettings()
+  return {
+    analyzeId: run.id,
+    status: 'vorschau',
+    fileName: run.sourceFileName,
+    sizeBytes: run.sourceSizeBytes ?? detected.sizeBytes ?? 0,
+    errorMessage: null,
+    result: {
+      analyzeId: run.id,
+      fileName: run.sourceFileName,
+      sizeBytes: run.sourceSizeBytes ?? detected.sizeBytes ?? 0,
+      hasText: Boolean(detected.hasText),
+      extractionMethod: detected.extractionMethod ?? 'none',
+      textPreview: detected.textPreview ?? null,
+      pageCount: detected.pageCount ?? null,
+      aiEnabled: settings.enabled,
+      suggestions: detected.suggestions ?? {
+        title: run.sourceFileName,
+        materialType: 'arbeitsblatt',
+        schoolForm: null,
+        subjectNames: [],
+        tagNames: [],
+        learningObjectives: [],
+        description: '',
+        contentSummary: '',
+        gradeLevels: [],
+        aiUsed: false,
+      },
+      warnings: detected.warnings ?? [],
+    },
   }
 }
 
@@ -354,7 +488,7 @@ export async function discardAiMaterialCreate(analyzeId: string): Promise<void> 
   if (run.adapterId !== AI_CREATE_ADAPTER_ID) {
     throw appError('UNGUELTIGE_EINGABE', 'Dieser Vorgang ist keine KI-Materialanalyse.')
   }
-  if (!['vorschau', 'analysiert', 'fehlgeschlagen'].includes(run.status)) {
+  if (!['laeuft', 'vorschau', 'analysiert', 'fehlgeschlagen'].includes(run.status)) {
     throw appError('KONFLIKT', 'Nur offene Analysen können verworfen werden.')
   }
 

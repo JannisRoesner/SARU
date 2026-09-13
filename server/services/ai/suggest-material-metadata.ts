@@ -4,6 +4,14 @@ import {
   type MaterialType,
   type SchoolForm,
 } from '#shared/types/domain'
+import {
+  gradeLevelsFromOberstufeHint,
+  guessGradeLevelsFromFileName,
+  mapLegacyOberstufeToCurrent,
+  normalizeGradeLevel,
+  normalizeGradeLevels,
+  type GradeLevel,
+} from '#shared/utils/jahrgangsstufen'
 import { guessMaterialType } from '#shared/utils/material-type-guess'
 import { materialTypes, schoolForms } from '#shared/utils/labels'
 import {
@@ -21,7 +29,7 @@ const log = createLogger('ai:suggest-metadata')
 const MATERIAL_TYPE_SET = new Set<string>(MATERIAL_TYPES)
 const SCHOOL_FORM_SET = new Set<string>(SCHOOL_FORMS)
 
-export const MATERIAL_METADATA_PROMPT_VERSION = 'material-metadata-v3'
+export const MATERIAL_METADATA_PROMPT_VERSION = 'material-metadata-v5'
 
 export interface MaterialMetadataSuggestion {
   title: string
@@ -34,6 +42,8 @@ export interface MaterialMetadataSuggestion {
   description: string
   /** Kurze Markdown-Zusammenfassung für materials.content */
   contentSummary: string
+  /** Erkannte Jahrgangsstufen (1–10 oder E1/E2/Q1–Q4). */
+  gradeLevels: GradeLevel[]
   aiUsed: boolean
 }
 
@@ -74,6 +84,7 @@ export function filenameBasedMaterialSuggestion(
     learningObjectives: [],
     description: '',
     contentSummary: '',
+    gradeLevels: guessGradeLevelsFromFileName(fileName),
     aiUsed: false,
   }
 }
@@ -136,6 +147,20 @@ Regeln für title und description:
 - description: 1–2 Sätze zum fachlichen Inhalt.
 - Keine Herkunfts- oder Prozessfloskeln (nicht: importiert, Schulportal, KI-Entwurf, automatisch erstellt, manuell geprüft).
 
+Regeln für gradeLevels:
+- Nur gültige Stufen: ganze Zahlen 1–10 oder hessische Oberstufen-Codes E1, E2, Q1, Q2, Q3, Q4. Keine 11/12/13.
+- Hessische gymnasiale Oberstufe:
+  - E1, E2 = Einführungsphase (E-Phase; oft Jahrgang 11, 1. und 2. Halbjahr).
+  - Q1, Q2, Q3, Q4 = Qualifikationsphase (Q-Phase; oft Jahrgänge 12 und 13).
+- Steht nur „Einführungsphase“ / „E-Phase“ ohne Halbjahr: E1 und E2.
+- Steht nur „Qualifikationsphase“ / „Q-Phase“ ohne Halbjahr: Q1, Q2, Q3 und Q4.
+- Klasse 11 ≈ E-Phase, Klasse 12 ≈ Q1/Q2, Klasse 13 ≈ Q3/Q4.
+- „Oberstufe“ allein reicht nicht, außer ein Lehrwerk deckt erkennbar die ganze gymnasiale Oberstufe ab – dann E1–Q4.
+- Das genaue Halbjahr (E1 vs. E2, Q2 vs. Q3) nur setzen, wenn es explizit vorkommt. Sonst die ganze Phase, nicht raten.
+- Nutze Hinweise aus Dateiname und Text (z. B. „Klasse 8“, „Bio 8“, „E1“, „Q2“, „Einführungsphase“).
+- Keine Schuljahre wie 2024, keine Kapitel- oder Seitenzahlen.
+- Fehlt jeder belastbare Hinweis: leeres Array.
+
 Auszug aus dem Dokument:
 """
 ${excerpt}
@@ -150,10 +175,11 @@ Antworte ausschließlich mit einem JSON-Objekt (kein Markdown):
   "tagNames": ["max. 5 kurze Schlagwörter zu Inhalten/Themen"],
   "learningObjectives": ["max. 4 kurze Lernziele auf Deutsch"],
   "description": "1–2 Sätze Kurzbeschreibung auf Deutsch",
-  "contentSummary": "Kurze Markdown-Zusammenfassung (max. 4 Sätze oder Stichpunkte) – keine Volltext-Abschrift"
+  "contentSummary": "Kurze Markdown-Zusammenfassung (max. 4 Sätze oder Stichpunkte) – keine Volltext-Abschrift",
+  "gradeLevels": []
 }`
 
-  const maxTokens = Math.min(Math.max(options.settings.maxOutputTokens || 2000, 2000), 4000)
+  const maxTokens = Math.min(Math.max(options.settings.maxOutputTokens || 800, 400), 800)
 
   let lastError: unknown
   let lastRawResponse = ''
@@ -228,6 +254,12 @@ Antworte ausschließlich mit einem JSON-Objekt (kein Markdown):
           typeof parsed.contentSummary === 'string'
             ? parsed.contentSummary.trim().slice(0, 8000)
             : '',
+        gradeLevels: resolveSuggestedGradeLevels(
+          parsed.gradeLevels,
+          options.fileName,
+          ctx.gradeLevel,
+          [title, typeof parsed.description === 'string' ? parsed.description : ''].join(' '),
+        ),
         aiUsed: true,
       }
     } catch (error) {
@@ -370,4 +402,49 @@ function normalizeStringList(value: unknown, max: number): string[] {
     .map((v) => v.trim())
     .filter(Boolean)
     .slice(0, max)
+}
+
+function parseGradeLevelTokens(value: unknown): GradeLevel[] {
+  const direct = normalizeGradeLevel(value)
+  if (direct) return mapLegacyOberstufeToCurrent(direct)
+  if (typeof value !== 'string') return []
+
+  const fromPhase = gradeLevelsFromOberstufeHint(value)
+  if (fromPhase.length) return fromPhase
+
+  const match = value
+    .trim()
+    .match(/^(?:klasse|jgst\.?|jg\.?)?\s*(\d{1,2}|e[12]|q[1-4])(?:\.\s*(?:klasse|jgst\.?|jg\.?))?$/i)
+  if (!match?.[1]) return []
+  const normalized = normalizeGradeLevel(match[1].replace(/^0+(\d{1,2})$/, '$1'))
+  return normalized ? mapLegacyOberstufeToCurrent(normalized) : []
+}
+
+function resolveSuggestedGradeLevels(
+  fromAi: unknown,
+  fileName: string,
+  contextGrade?: number | string | null,
+  extraText?: string,
+): GradeLevel[] {
+  const items = Array.isArray(fromAi)
+    ? fromAi
+    : fromAi == null || fromAi === ''
+      ? []
+      : [fromAi]
+  const parsed = normalizeGradeLevels(items.flatMap(parseGradeLevelTokens))
+  if (parsed.length) return parsed
+
+  if (contextGrade != null && contextGrade !== '') {
+    const fromContext = normalizeGradeLevels(
+      parseGradeLevelTokens(contextGrade),
+    )
+    if (fromContext.length) return fromContext
+  }
+
+  if (extraText?.trim()) {
+    const fromText = gradeLevelsFromOberstufeHint(extraText)
+    if (fromText.length) return fromText
+  }
+
+  return guessGradeLevelsFromFileName(fileName)
 }

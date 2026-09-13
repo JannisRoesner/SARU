@@ -3,6 +3,7 @@ import * as aiClient from '../../server/services/ai/client'
 import {
   filenameBasedMaterialSuggestion,
   guessMaterialType,
+  suggestMaterialMetadata,
   titleFromFileName,
 } from '../../server/services/ai/suggest-material-metadata'
 import {
@@ -33,11 +34,139 @@ describe('suggest-material-metadata helpers', () => {
     expect(vorschlag.contentSummary).toBe('')
     expect(vorschlag.learningObjectives).toEqual([])
     expect(vorschlag.subjectNames).toEqual([])
+    expect(vorschlag.gradeLevels).toEqual([])
+  })
+
+  it('übernimmt die Jahrgangsstufe aus dem Dateinamen', () => {
+    expect(filenameBasedMaterialSuggestion('Biologie_8_Schuelerbuch.pdf').gradeLevels).toEqual([8])
+    expect(filenameBasedMaterialSuggestion('Klasse_9_Natura.pdf').gradeLevels).toEqual([9])
   })
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
+})
+
+describe('suggestMaterialMetadata Jahrgangsstufen', () => {
+  const enabledSettings: AiSettings = {
+    enabled: true,
+    provider: 'ollama',
+    baseUrl: '',
+    apiKey: '',
+    chatModel: 'test',
+    visionModel: '',
+    useVision: false,
+    embeddingsEnabled: false,
+    embeddingModel: '',
+    temperature: 0.2,
+    maxOutputTokens: 800,
+    timeoutMs: 10_000,
+    refererUrl: '',
+    appTitle: 'SARU',
+  }
+
+  it('übernimmt gradeLevels aus der KI-Antwort', async () => {
+    vi.spyOn(aiClient, 'chatCompletion').mockResolvedValue({
+      text: JSON.stringify({
+        title: 'Natura 8 Schülerbuch',
+        materialType: 'lehrwerk',
+        schoolForm: 'gymnasium',
+        subjectNames: ['Biologie'],
+        tagNames: ['Natura'],
+        learningObjectives: [],
+        description: 'Lehrwerk für Biologie.',
+        contentSummary: 'Schülerbuch Klasse 8.',
+        gradeLevels: [8],
+      }),
+      model: 'test',
+      finishReason: 'stop',
+      outputTokens: 40,
+    })
+
+    const result = await suggestMaterialMetadata({
+      fileName: 'Scan.pdf',
+      extractedText: 'Natura Biologie Schülerbuch',
+      settings: enabledSettings,
+    })
+    expect(result.gradeLevels).toEqual([8])
+  })
+
+  it('fällt ohne KI-Jahrgang auf den Dateinamen zurück', async () => {
+    vi.spyOn(aiClient, 'chatCompletion').mockResolvedValue({
+      text: JSON.stringify({
+        title: 'Biologie Schülerbuch',
+        materialType: 'lehrwerk',
+        schoolForm: null,
+        subjectNames: ['Biologie'],
+        tagNames: [],
+        learningObjectives: [],
+        description: 'Lehrwerk für Biologie.',
+        contentSummary: 'Schülerbuch.',
+      }),
+      model: 'test',
+      finishReason: 'stop',
+      outputTokens: 40,
+    })
+
+    const result = await suggestMaterialMetadata({
+      fileName: 'Biologie_8_Schuelerbuch.pdf',
+      extractedText: 'Natura Biologie',
+      settings: enabledSettings,
+    })
+    expect(result.gradeLevels).toEqual([8])
+  })
+
+  it('liest Jahrgangsstufen aus Freitext der KI', async () => {
+    vi.spyOn(aiClient, 'chatCompletion').mockResolvedValue({
+      text: JSON.stringify({
+        title: 'Klausur Einführungsphase',
+        materialType: 'klausur',
+        schoolForm: null,
+        subjectNames: ['Biologie'],
+        tagNames: [],
+        learningObjectives: [],
+        description: 'Klausur zur Einführungsphase.',
+        contentSummary: '',
+        gradeLevels: ['E1'],
+      }),
+      model: 'test',
+      finishReason: 'stop',
+      outputTokens: 40,
+    })
+
+    const result = await suggestMaterialMetadata({
+      fileName: 'Scan.pdf',
+      extractedText: 'Klausur E1',
+      settings: enabledSettings,
+    })
+    expect(result.gradeLevels).toEqual(['E1'])
+  })
+
+  it('setzt bei Einführungsphase E1 und E2, wenn das Halbjahr fehlt', async () => {
+    vi.spyOn(aiClient, 'chatCompletion').mockResolvedValue({
+      text: JSON.stringify({
+        title: 'Klausur Einführungsphase',
+        materialType: 'klausur',
+        schoolForm: null,
+        subjectNames: ['Biologie'],
+        tagNames: [],
+        learningObjectives: [],
+        description: 'Klausur zur Einführungsphase.',
+        contentSummary: '',
+        gradeLevels: ['Einführungsphase'],
+      }),
+      model: 'test',
+      finishReason: 'stop',
+      outputTokens: 40,
+    })
+
+    const result = await suggestMaterialMetadata({
+      fileName: 'Scan.pdf',
+      extractedText: 'Klausur Einführungsphase Genetik',
+      settings: enabledSettings,
+    })
+    expect(result.gradeLevels).toEqual(['E1', 'E2'])
+  })
 })
 
 describe('bulk suggestFileMetadata Wrapper', () => {

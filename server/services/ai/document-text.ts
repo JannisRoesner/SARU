@@ -34,6 +34,8 @@ export interface EnsuredTextResult {
 export interface EnsureExtractedTextOptions {
   /** Nur die ersten N Seiten für Text/Vision (Metadaten-Vorschau). */
   maxPages?: number
+  /** Token-Deckel für Vision-OCR; ohne Angabe gilt der KI-Standard. */
+  maxOutputTokens?: number
 }
 
 export function visionExtractionAvailable(settings: AiSettings): boolean {
@@ -92,7 +94,13 @@ export async function ensureExtractedText(
   }
 
   try {
-    const vision = await extractTextViaVision(work, fileName, settings, maxPages)
+    const vision = await extractTextViaVision(
+      work,
+      fileName,
+      settings,
+      maxPages,
+      options.maxOutputTokens,
+    )
     if (vision.text.trim()) {
       return {
         status: 'erfolgreich',
@@ -191,6 +199,7 @@ async function extractTextViaVision(
   fileName: string,
   settings: AiSettings,
   maxPages?: number,
+  maxOutputTokens?: number,
 ): Promise<{ text: string; pageCount?: number; error?: string }> {
   const model = (settings.visionModel || settings.chatModel).trim()
   const parts: ChatPart[] = [
@@ -236,7 +245,7 @@ Wenn etwas unleserlich ist, überspringe es still.`,
       const result = await chatCompletion(settings, [{ role: 'user', parts: batchParts }], {
         model,
         temperature: 0,
-        maxOutputTokens: Math.min(settings.maxOutputTokens || 4000, 8000),
+        maxOutputTokens: maxOutputTokens ?? Math.min(settings.maxOutputTokens || 4000, 8000),
       })
       chunks.push(result.text.trim())
     }
@@ -246,7 +255,7 @@ Wenn etwas unleserlich ist, überspringe es still.`,
   const result = await chatCompletion(settings, [{ role: 'user', parts }], {
     model,
     temperature: 0,
-    maxOutputTokens: Math.min(settings.maxOutputTokens || 4000, 8000),
+    maxOutputTokens: maxOutputTokens ?? Math.min(settings.maxOutputTokens || 4000, 8000),
   })
 
   return { text: result.text.trim(), pageCount }

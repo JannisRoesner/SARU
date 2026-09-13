@@ -1,12 +1,14 @@
-import { analyzeAiMaterialCreate } from '../../../services/ai/material-create'
-import { recordAudit } from '../../../services/audit.service'
+import {
+  processAiMaterialAnalyze,
+  startAiMaterialAnalyze,
+} from '../../../services/ai/material-create'
 import { requireEditor } from '../../../utils/auth'
 import { invalidInput } from '../../../utils/errors'
 import { readMultipartParts } from '../../../utils/multipart'
 import { normalizeGradeLevel } from '#shared/utils/jahrgangsstufen'
 import type { MaterialType } from '#shared/types/domain'
 
-/** Einzeldatei analysieren: Text einmal extrahieren, Metadaten vorschlagen. */
+/** Einzeldatei entgegennehmen; Vision/KI laufen im Hintergrund (kein Proxy-504). */
 export default defineEventHandler(async (event) => {
   const user = await requireEditor(event)
 
@@ -43,27 +45,14 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  const result = await analyzeAiMaterialCreate(
+  const { analyzeId } = await startAiMaterialAnalyze(
     { buffer: Buffer.from(filePart.data), fileName: filePart.filename },
     user.id,
     context,
   )
 
-  await recordAudit(
-    {
-      userId: user.id,
-      action: 'material.ki.analysiert',
-      entityType: 'import',
-      entityId: result.analyzeId,
-      details: {
-        datei: result.fileName,
-        ki: result.aiEnabled,
-        methode: result.extractionMethod,
-      },
-    },
-    event,
-  )
+  void processAiMaterialAnalyze(analyzeId)
 
-  setResponseStatus(event, 201)
-  return result
+  setResponseStatus(event, 202)
+  return { analyzeId, status: 'laeuft' as const }
 })

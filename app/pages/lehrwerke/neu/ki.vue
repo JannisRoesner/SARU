@@ -30,6 +30,7 @@ interface AnalyseErgebnis {
     tagNames: string[]
     description: string
     contentSummary: string
+    gradeLevels: GradeLevel[]
     aiUsed: boolean
   }
   warnings: string[]
@@ -81,20 +82,14 @@ async function dateiAnalysieren(files: FileList | null | undefined) {
   analysiertLaeuft.value = true
   analyseDateiname.value = file.name
 
-  const body = new FormData()
-  body.append('file', file)
-  body.append('context', JSON.stringify({ defaultMaterialType: 'lehrwerk' }))
-
   try {
-    const ergebnis = await $fetch<AnalyseErgebnis>('/api/materials/ai/analyze', {
-      method: 'POST',
-      body,
-    })
+    const ergebnis = await analysiereKiMaterial(file, { defaultMaterialType: 'lehrwerk' })
     analyse.value = ergebnis
     formular.title = ergebnis.suggestions.title
     formular.description = ergebnis.suggestions.description || ergebnis.suggestions.contentSummary
     formular.subjectNames = [...ergebnis.suggestions.subjectNames]
     formular.tagNames = [...ergebnis.suggestions.tagNames]
+    formular.gradeLevels = [...(ergebnis.suggestions.gradeLevels ?? [])]
   } catch (error) {
     analyse.value = null
     fehler.value = toApiFehler(error).nachricht
