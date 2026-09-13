@@ -52,7 +52,7 @@ const eintraege = computed(() =>
 </script>
 
 <template>
-  <LayoutEinstellungsSeite>
+  <LayoutEinstellungsSeite volle-breite>
     <LayoutSeitenkopf
       kicker="Verwaltung"
       titel="Einstellungen"

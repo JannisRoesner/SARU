@@ -58,6 +58,13 @@ const mass = computed(() => {
   return 'h-24 w-[4.5rem]'
 })
 
+function beiKlick(event: Event) {
+  if (!props.klickbar) return
+  event.preventDefault()
+  event.stopPropagation()
+  emit('klick')
+}
+
 function revokeObjectUrl() {
   if (objectUrl) {
     URL.revokeObjectURL(objectUrl)
@@ -118,7 +125,7 @@ onBeforeUnmount(() => {
     ]"
     :title="klickbar ? 'Vorschau öffnen' : undefined"
     :aria-label="klickbar ? `Vorschau von ${fileName || 'Dokument'}` : undefined"
-    @click="klickbar && emit('klick')"
+    @click="beiKlick"
   >
     <img
       v-if="src && !fehler"

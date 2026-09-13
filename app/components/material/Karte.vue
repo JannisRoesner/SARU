@@ -1,10 +1,8 @@
 <script setup lang="ts">
-import { NuxtLink } from '#components'
 import { materialTypes, origins } from '#shared/utils/labels'
 import { materialPfad } from '#shared/utils/material-pfad'
 import { istKiMusterloesung, kiAutorAnzeige } from '#shared/utils/ki'
-import { materialVorschauIcon, materialZeigtIconVorschau } from '#shared/utils/moodle'
-import { isThumbnailCandidate } from '#shared/utils/thumbnail-candidate'
+import { materialVorschauIcon } from '#shared/utils/moodle'
 import type { MaterialSummary } from '~~/server/repositories/material.repository'
 
 const props = withDefaults(
@@ -29,10 +27,6 @@ const { alsVerwendetMerken } = useMaterialAktionen()
 
 const ziel = computed(() => materialPfad(props.material, { lehrwerkId: props.lehrwerkId }))
 const icon = computed(() => materialVorschauIcon(props.material.materialType, preview.value?.fileName))
-const zeigtIconVorschau = computed(() =>
-  materialZeigtIconVorschau(props.material.materialType, preview.value?.fileName),
-)
-const fachfarbe = computed(() => props.material.subjects[0]?.color ?? null)
 const kiCredit = computed(() =>
   istKiMusterloesung(props.material)
     ? kiAutorAnzeige(props.material.aiMeta, props.material.author)
@@ -41,12 +35,6 @@ const kiCredit = computed(() =>
 
 const jetzt = useJetzt()
 const preview = computed(() => props.material.preview)
-const zeigtMiniatur = computed(() => {
-  if (zeigtIconVorschau.value) return false
-  const p = preview.value
-  if (!p || p.kind !== 'datei') return false
-  return isThumbnailCandidate(p.mimeType, p.fileName)
-})
 
 const istLehrwerk = computed(() => props.material.materialType === 'lehrwerk')
 
@@ -90,253 +78,225 @@ function herunterladen() {
   window.open(`/api/materials/${props.material.id}/download`, '_blank')
 }
 
-function beiMiniaturKlick(event: Event) {
+function beiMiniaturKlick() {
   if (!kannOeffnen.value) return
-  event.preventDefault()
-  event.stopPropagation()
   oeffnen()
 }
 </script>
 
 <template>
-  <component
-    :is="auswaehlbar ? 'div' : NuxtLink"
-    :to="auswaehlbar ? undefined : ziel"
-    class="karte group relative flex gap-3"
-    :class="[
-      !auswaehlbar && 'karte-klickbar',
-      kompakt ? 'items-center p-3' : 'flex-col p-4 sm:flex-row',
-      ausgewaehlt && 'ring-2 ring-primary',
-      material.isArchived && 'opacity-60',
-    ]"
-  >
-    <label
-      v-if="auswaehlbar"
-      class="absolute left-2 top-2 z-10 flex cursor-pointer items-center p-1"
-      @click.stop
+  <div class="w-full min-w-0">
+    <div
+      class="karte group relative flex gap-3"
+      :class="[
+        !auswaehlbar && 'karte-klickbar',
+        kompakt ? 'items-center p-3' : 'flex-col p-4 sm:flex-row',
+        ausgewaehlt && 'ring-2 ring-primary',
+        material.isArchived && 'opacity-60',
+      ]"
     >
-      <input
-        type="checkbox"
-        :checked="ausgewaehlt"
-        class="size-4 accent-[var(--color-primary)]"
-        :aria-label="`${material.title} auswählen`"
-        @change="emit('auswahl', material.id, ($event.target as HTMLInputElement).checked)"
+      <NuxtLink
+        v-if="!auswaehlbar"
+        :to="ziel"
+        class="absolute inset-0 z-0 rounded-[inherit]"
       >
-    </label>
+        <span class="sr-only">{{ material.title }}</span>
+      </NuxtLink>
 
-    <MaterialVorschauMiniatur
-      v-if="zeigtIconVorschau || (zeigtMiniatur && preview?.assetId)"
-      :asset-id="preview?.assetId"
-      :file-name="preview?.fileName"
-      :mime-type="preview?.mimeType"
-      :material-type="material.materialType"
-      :groesse="kompakt ? 'sm' : 'md'"
-      :klickbar="kannOeffnen"
-      @click="beiMiniaturKlick"
-    />
-    <button
-      v-else-if="kannOeffnen"
-      type="button"
-      class="flex shrink-0 items-center justify-center rounded-xl"
-      :class="kompakt ? 'size-10 text-base' : 'size-12 text-lg'"
-      :style="!zeigtIconVorschau && fachfarbe
-        ? { backgroundColor: `${fachfarbe}22`, color: fachfarbe }
-        : undefined"
-      :data-standard="!zeigtIconVorschau && !fachfarbe ? '' : undefined"
-      title="Vorschau öffnen"
-      :aria-label="`Vorschau von ${material.title}`"
-      @click.stop.prevent="oeffnen"
-    >
-      <UiIcon :name="icon" fest class="group-data-[standard]:text-primary" />
-    </button>
-    <span
-      v-else
-      class="flex shrink-0 items-center justify-center rounded-xl"
-      :class="kompakt ? 'size-10 text-base' : 'size-12 text-lg'"
-      :style="!zeigtIconVorschau && fachfarbe
-        ? { backgroundColor: `${fachfarbe}22`, color: fachfarbe }
-        : undefined"
-      :data-standard="!zeigtIconVorschau && !fachfarbe ? '' : undefined"
-    >
-      <UiIcon :name="icon" fest class="group-data-[standard]:text-primary" />
-    </span>
-
-    <div class="min-w-0 flex-1">
-      <div class="flex items-start gap-2">
-        <NuxtLink
-          v-if="auswaehlbar"
-          :to="ziel"
-          class="min-w-0 flex-1 font-medium text-ink hover:text-primary"
+      <label
+        v-if="auswaehlbar"
+        class="absolute left-2 top-2 z-10 flex cursor-pointer items-center p-1"
+        @click.stop
+      >
+        <input
+          type="checkbox"
+          :checked="ausgewaehlt"
+          class="size-4 accent-[var(--color-primary)]"
+          :aria-label="`${material.title} auswählen`"
+          @change="emit('auswahl', material.id, ($event.target as HTMLInputElement).checked)"
         >
-          {{ material.title }}
-        </NuxtLink>
-        <h3 v-else class="min-w-0 flex-1 font-medium text-ink group-hover:text-primary">
-          {{ material.title }}
-        </h3>
+      </label>
 
-        <div class="flex shrink-0 items-center" @click.stop.prevent>
+      <MaterialVorschauMiniatur
+        class="relative z-10"
+        :class="kannOeffnen ? 'pointer-events-auto' : 'pointer-events-none'"
+        :asset-id="preview?.assetId"
+        :file-name="preview?.fileName"
+        :mime-type="preview?.mimeType"
+        :material-type="material.materialType"
+        :groesse="kompakt ? 'sm' : 'md'"
+        :klickbar="kannOeffnen"
+        @klick="beiMiniaturKlick"
+      />
+
+      <div class="relative z-10 min-w-0 flex-1 pointer-events-none">
+        <div class="flex items-start gap-2">
+          <NuxtLink
+            v-if="auswaehlbar"
+            :to="ziel"
+            class="pointer-events-auto min-w-0 flex-1 font-medium text-ink hover:text-primary"
+          >
+            {{ material.title }}
+          </NuxtLink>
+          <h3 v-else class="min-w-0 flex-1 font-medium text-ink group-hover:text-primary">
+            {{ material.title }}
+          </h3>
+
+          <div class="relative z-10 flex shrink-0 items-center pointer-events-auto" @click.stop.prevent>
+            <button
+              v-if="kompakt && kannOeffnen"
+              type="button"
+              class="rounded-md p-1 text-ink-subtle hover:bg-surface-hover hover:text-ink"
+              title="Vorschau"
+              :aria-label="`Vorschau von ${material.title}`"
+              @click="oeffnen"
+            >
+              <UiIcon name="eye" fest />
+            </button>
+            <button
+              v-if="kompakt && kannHerunterladen"
+              type="button"
+              class="rounded-md p-1 text-ink-subtle hover:bg-surface-hover hover:text-ink"
+              title="Herunterladen"
+              :aria-label="`${material.title} herunterladen`"
+              @click="herunterladen"
+            >
+              <UiIcon name="download" fest />
+            </button>
+            <button
+              type="button"
+              class="rounded-md p-1 text-ink-subtle transition-colors hover:bg-surface-hover hover:text-warning"
+              :class="material.isFavorite && 'text-warning'"
+              :aria-label="material.isFavorite ? 'Favorit entfernen' : 'Als Favorit merken'"
+              :aria-pressed="material.isFavorite"
+              @click="emit('favorit', material.id, !material.isFavorite)"
+            >
+              <UiIcon name="star" :stil="material.isFavorite ? 'fas' : 'far'" fest />
+            </button>
+          </div>
+        </div>
+
+        <p
+          v-if="material.description && !kompakt"
+          class="mt-1 line-clamp-2 text-sm text-ink-muted"
+        >
+          {{ material.description }}
+        </p>
+
+        <div class="mt-2 flex flex-wrap items-center gap-1.5">
+          <UiBadge groesse="sm" :ton="materialTypes.tone(material.materialType)" :icon="icon">
+            {{ materialTypes.label(material.materialType) }}
+          </UiBadge>
+          <UiBadge
+            v-for="fach in material.subjects.slice(0, kompakt ? 1 : 2)"
+            :key="fach.id"
+            groesse="sm"
+            :farbe="fach.color"
+          >
+            {{ fach.name }}
+          </UiBadge>
+          <UiBadge v-if="material.gradeLevels.length" groesse="sm">
+            {{ formatJahrgaenge(material.gradeLevels) }}
+          </UiBadge>
+          <template v-if="!kompakt">
+            <UiBadge
+              v-if="kiCredit"
+              groesse="sm"
+              ton="ki"
+              icon="robot"
+            >
+              {{ kiCredit }}
+            </UiBadge>
+            <UiBadge
+              v-else-if="material.origin !== 'manuell'"
+              groesse="sm"
+              :ton="origins.tone(material.origin)"
+              :icon="origins.icon(material.origin)"
+            >
+              {{ origins.label(material.origin) }}
+            </UiBadge>
+            <UiBadge
+              v-if="kiCredit && material.aiMeta?.reviewed"
+              groesse="sm"
+              ton="gruen"
+              icon="circle-check"
+            >
+              Geprüft
+            </UiBadge>
+          </template>
+          <UiBadge v-if="material.isArchived" groesse="sm" icon="box-archive">Archiviert</UiBadge>
+        </div>
+
+        <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-subtle">
+          <template v-if="!kompakt">
+            <span
+              v-if="material.materialType === 'lehrwerk' && material.childCount"
+              class="flex items-center gap-1"
+            >
+              <UiIcon name="layer-group" fest />
+              {{ material.childCount }}
+              {{ material.childCount === 1 ? 'Material' : 'Materialien' }}
+            </span>
+            <span v-if="material.variantCount > 1" class="flex items-center gap-1">
+              <UiIcon name="code-branch" fest />
+              {{ material.variantCount }} Varianten
+            </span>
+            <span v-if="material.assetCount" class="flex items-center gap-1">
+              <UiIcon name="paperclip" fest />
+              {{ material.assetCount }}
+              {{ material.assetCount === 1 ? 'Anhang' : 'Anhänge' }}
+            </span>
+            <span v-if="material.hasSolution" class="flex items-center gap-1 text-success-strong">
+              <UiIcon name="circle-check" fest />
+              Lösung vorhanden
+            </span>
+            <span v-if="material.usageCount" class="flex items-center gap-1">
+              <UiIcon name="link" fest />
+              {{ material.usageCount }}× verwendet
+            </span>
+          </template>
+          <span v-else-if="material.assetCount" class="flex items-center gap-1">
+            <UiIcon name="paperclip" fest />
+            {{ material.assetCount }}
+          </span>
+          <span class="flex items-center gap-1">
+            <UiIcon name="clock-rotate-left" fest />
+            {{ formatRelativ(material.updatedAt, '–', jetzt) }}
+          </span>
+        </div>
+
+        <div
+          v-if="!kompakt && (kannOeffnen || kannHerunterladen)"
+          class="pointer-events-auto mt-3 flex flex-nowrap items-center gap-5 text-sm font-medium text-primary"
+        >
           <button
-            v-if="kompakt && kannOeffnen"
+            v-if="kannOeffnen"
             type="button"
-            class="rounded-md p-1 text-ink-subtle hover:bg-surface-hover hover:text-ink"
-            title="Vorschau"
-            :aria-label="`Vorschau von ${material.title}`"
-            @click="oeffnen"
+            class="inline-flex items-center gap-1.5 hover:underline"
+            @click.stop.prevent="oeffnen"
           >
             <UiIcon name="eye" fest />
+            Vorschau
           </button>
           <button
-            v-if="kompakt && kannHerunterladen"
+            v-if="kannHerunterladen"
             type="button"
-            class="rounded-md p-1 text-ink-subtle hover:bg-surface-hover hover:text-ink"
-            title="Herunterladen"
-            :aria-label="`${material.title} herunterladen`"
-            @click="herunterladen"
+            class="inline-flex items-center gap-1.5 hover:underline"
+            @click.stop.prevent="herunterladen"
           >
             <UiIcon name="download" fest />
-          </button>
-          <button
-            type="button"
-            class="rounded-md p-1 text-ink-subtle transition-colors hover:bg-surface-hover hover:text-warning"
-            :class="material.isFavorite && 'text-warning'"
-            :aria-label="material.isFavorite ? 'Favorit entfernen' : 'Als Favorit merken'"
-            :aria-pressed="material.isFavorite"
-            @click="emit('favorit', material.id, !material.isFavorite)"
-          >
-            <UiIcon name="star" :stil="material.isFavorite ? 'fas' : 'far'" fest />
+            Herunterladen
           </button>
         </div>
       </div>
-
-      <p
-        v-if="material.description && !kompakt"
-        class="mt-1 line-clamp-2 text-sm text-ink-muted"
-      >
-        {{ material.description }}
-      </p>
-
-      <div class="mt-2 flex flex-wrap items-center gap-1.5">
-        <UiBadge groesse="sm" :ton="materialTypes.tone(material.materialType)" :icon="icon">
-          {{ materialTypes.label(material.materialType) }}
-        </UiBadge>
-        <UiBadge
-          v-for="fach in material.subjects.slice(0, kompakt ? 1 : 2)"
-          :key="fach.id"
-          groesse="sm"
-          :farbe="fach.color"
-        >
-          {{ fach.name }}
-        </UiBadge>
-        <UiBadge v-if="material.gradeLevels.length" groesse="sm">
-          {{ formatJahrgaenge(material.gradeLevels) }}
-        </UiBadge>
-        <template v-if="!kompakt">
-          <UiBadge
-            v-if="kiCredit"
-            groesse="sm"
-            ton="ki"
-            icon="robot"
-          >
-            {{ kiCredit }}
-          </UiBadge>
-          <UiBadge
-            v-else-if="material.origin !== 'manuell'"
-            groesse="sm"
-            :ton="origins.tone(material.origin)"
-            :icon="origins.icon(material.origin)"
-          >
-            {{ origins.label(material.origin) }}
-          </UiBadge>
-          <UiBadge
-            v-if="kiCredit && material.aiMeta?.reviewed"
-            groesse="sm"
-            ton="gruen"
-            icon="circle-check"
-          >
-            Geprüft
-          </UiBadge>
-        </template>
-        <UiBadge v-if="material.isArchived" groesse="sm" icon="box-archive">Archiviert</UiBadge>
-      </div>
-
-      <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-subtle">
-        <template v-if="!kompakt">
-          <span
-            v-if="material.materialType === 'lehrwerk' && material.childCount"
-            class="flex items-center gap-1"
-          >
-            <UiIcon name="layer-group" fest />
-            {{ material.childCount }}
-            {{ material.childCount === 1 ? 'Material' : 'Materialien' }}
-          </span>
-          <span v-if="material.variantCount > 1" class="flex items-center gap-1">
-            <UiIcon name="code-branch" fest />
-            {{ material.variantCount }} Varianten
-          </span>
-          <span v-if="material.assetCount" class="flex items-center gap-1">
-            <UiIcon name="paperclip" fest />
-            {{ material.assetCount }}
-            {{ material.assetCount === 1 ? 'Anhang' : 'Anhänge' }}
-          </span>
-          <span v-if="material.hasSolution" class="flex items-center gap-1 text-success-strong">
-            <UiIcon name="circle-check" fest />
-            Lösung vorhanden
-          </span>
-          <span v-if="material.usageCount" class="flex items-center gap-1">
-            <UiIcon name="link" fest />
-            {{ material.usageCount }}× verwendet
-          </span>
-        </template>
-        <span v-else-if="material.assetCount" class="flex items-center gap-1">
-          <UiIcon name="paperclip" fest />
-          {{ material.assetCount }}
-        </span>
-        <span class="flex items-center gap-1">
-          <UiIcon name="clock-rotate-left" fest />
-          {{ formatRelativ(material.updatedAt, '–', jetzt) }}
-        </span>
-      </div>
-
-      <div
-        v-if="!kompakt && (kannOeffnen || kannHerunterladen)"
-        class="mt-3 flex flex-nowrap items-center gap-5 text-sm font-medium text-primary"
-      >
-        <button
-          v-if="kannOeffnen"
-          type="button"
-          class="inline-flex items-center gap-1.5 hover:underline"
-          @click.stop.prevent="oeffnen"
-        >
-          <UiIcon name="eye" fest />
-          Vorschau
-        </button>
-        <button
-          v-if="kannHerunterladen"
-          type="button"
-          class="inline-flex items-center gap-1.5 hover:underline"
-          @click.stop.prevent="herunterladen"
-        >
-          <UiIcon name="download" fest />
-          Herunterladen
-        </button>
-      </div>
     </div>
 
-  </component>
-
-  <MaterialVorschauModal
-    v-if="vorschauOffen && preview?.kind === 'datei' && preview.assetId"
-    v-model="vorschauOffen"
-    :asset-id="preview.assetId"
-    :titel="material.title"
-    @herunterladen="alsVerwendetMerken(material.id)"
-  />
+    <MaterialVorschauModal
+      v-if="vorschauOffen && preview?.kind === 'datei' && preview.assetId"
+      v-model="vorschauOffen"
+      :asset-id="preview.assetId"
+      :titel="material.title"
+      @herunterladen="alsVerwendetMerken(material.id)"
+    />
+  </div>
 </template>
-
-<style scoped>
-span[data-standard],
-button[data-standard] {
-  background: var(--surface-sunken);
-  color: var(--ink-subtle);
-}
-</style>
