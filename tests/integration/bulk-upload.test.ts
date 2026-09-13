@@ -2,10 +2,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { samplePdf } from '../fixtures'
 import { closeConnections, createTestUser, resetDatabase, withTempUploadDir } from './helpers'
 
+const { createMaterial } = await import('../../server/services/material.service')
 const {
   analyzeBulkPdfUpload,
   commitBulkUpload,
   getBulkRunOverview,
+  processBulkPdfUpload,
+  startBulkPdfUpload,
   undoBulkUpload,
   updateBulkMapping,
 } = await import('../../server/services/bulk-upload/bulk-upload.service')
@@ -224,6 +227,46 @@ describe('PDF-Stapel-Upload', () => {
       const materials = await listMaterials({ pageSize: 20 })
       const gfbMaterial = materials.items.find((m) => m.materialType === 'gefaehrdungsbeurteilung')
       expect(gfbMaterial).toBeTruthy()
+    })
+  })
+
+  it('nimmt Dateien sofort an und erzeugt die Vorschau danach', async () => {
+    await withTempUploadDir(async () => {
+      const started = await startBulkPdfUpload(
+        [{ buffer: pdf, fileName: 'AB_Mitose.pdf' }],
+        userId,
+      )
+      expect(started.status).toBe('laeuft')
+      const laufend = await getBulkRunOverview(started.runId)
+      expect(laufend.analysisPending).toBe(true)
+      expect(laufend.canCommit).toBe(false)
+
+      await processBulkPdfUpload(started.runId)
+      const fertig = await getBulkRunOverview(started.runId)
+      expect(fertig.analysisPending).toBe(false)
+      expect(fertig.canCommit).toBe(true)
+      expect(fertig.clusters.length).toBe(1)
+    })
+  })
+
+  it('ordnet Materialien einem bestehenden Lehrwerk zu', async () => {
+    await withTempUploadDir(async () => {
+      const lehrwerkId = await createMaterial(
+        { title: 'Natura Oberstufe', materialType: 'lehrwerk' },
+        userId,
+      )
+      const { runId } = await analyzeBulkPdfUpload(
+        [{ buffer: pdf, fileName: 'AB_Zelle.pdf' }],
+        userId,
+        { createLehrwerk: true, lehrwerkId },
+      )
+      const commit = await commitBulkUpload(runId, userId)
+      expect(commit.stats.materialien).toBe(1)
+      expect(commit.materialIds).not.toContain(lehrwerkId)
+
+      const materials = await listMaterials({ pageSize: 20, filters: { excludeMaterialTypes: ['lehrwerk'] } })
+      const detail = await getMaterialDetail(materials.items[0]!.id)
+      expect(detail?.relations.some((r) => r.relationType === 'gehoert_zu' && r.material.id === lehrwerkId)).toBe(true)
     })
   })
 })

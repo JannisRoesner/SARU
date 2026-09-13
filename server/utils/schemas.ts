@@ -345,6 +345,7 @@ export const bulkUploadMappingSchema = z.object({
   linkDuplicates: z.boolean().default(true),
   createLehrwerk: z.boolean().optional(),
   lehrwerkTitle: z.string().max(300).optional(),
+  lehrwerkId: uuidSchema.nullish(),
   records: z
     .record(
       z.string(),

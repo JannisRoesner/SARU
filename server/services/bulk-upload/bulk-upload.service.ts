@@ -32,6 +32,7 @@ import {
   storeStagingFile,
   validateUpload,
 } from '../storage.service'
+import { getMaterialDetail } from '../../repositories/material.repository'
 import { getOrCreateSubject, resolveSubjectIds } from '../taxonomy.service'
 import { waitForIndex } from '../search/indexer'
 import { mapLimit } from '../../utils/async'
@@ -118,15 +119,30 @@ function clusterDuplicate(
   return null
 }
 
+function buildBulkMapping(mappingInput: BulkUploadMapping): BulkUploadMapping {
+  return {
+    subjectId: mappingInput.subjectId ?? null,
+    subjectName: mappingInput.subjectName ?? '',
+    gradeLevel: normalizeGradeLevel(mappingInput.gradeLevel) ?? null,
+    schoolForm: mappingInput.schoolForm ?? null,
+    defaultMaterialType: mappingInput.defaultMaterialType ?? 'arbeitsblatt',
+    linkDuplicates: mappingInput.linkDuplicates ?? true,
+    createLehrwerk: mappingInput.createLehrwerk ?? false,
+    lehrwerkTitle: mappingInput.lehrwerkTitle ?? '',
+    lehrwerkId: mappingInput.lehrwerkId ?? null,
+    records: {},
+  }
+}
+
 /**
- * Nimmt PDFs, Office-Dateien und ZIP-Pakete entgegen, clustert zusammengehörige
- * Dateien und erzeugt Metadaten-Vorschläge (KI oder Dateiname).
+ * Legt den Stapel an und speichert die Dateien. Textextraktion und KI laufen
+ * danach im Hintergrund – sonst 504 am Reverse-Proxy bei großen Ordnern.
  */
-export async function analyzeBulkPdfUpload(
+export async function startBulkPdfUpload(
   files: BulkUploadInputFile[],
   userId: string | null,
   mappingInput: BulkUploadMapping = {},
-): Promise<{ runId: string; fileCount: number; aiEnabled: boolean; clusterCount: number }> {
+): Promise<{ runId: string; fileCount: number; status: 'laeuft'; aiEnabled: boolean }> {
   if (!files.length) throw invalidInput('Bitte mindestens eine Datei auswählen.')
 
   const expanded = expandBulkArchives(files)
@@ -164,39 +180,133 @@ export async function analyzeBulkPdfUpload(
     throw invalidInput('Im Paket wurden keine gültigen Dokumente gefunden.')
   }
 
+  const mapping = buildBulkMapping(mappingInput)
+  const settings = await getAiSettings()
+  const checksums = prepared.map((file) => sha256(file.buffer))
+  const stagingPaths: string[] = []
+
+  try {
+    const stubFiles = await mapLimit(prepared, 8, async (file, index) => {
+      const checksum = checksums[index]!
+      const stagingPath = await storeStagingFile(file.buffer, file.fileName)
+      stagingPaths.push(stagingPath)
+      return {
+        sourceRef: `file:${index}:${checksum.slice(0, 12)}`,
+        fileName: file.fileName,
+        relativePath: file.relativePath ?? file.fileName,
+        folderRole: detectFolderRole(file.relativePath, file.fileName),
+        sizeBytes: file.buffer.length,
+        checksum,
+        stagingPath,
+        extractedTextKey: null,
+        extractionMethod: 'none' as const,
+        pageCount: null,
+        hasText: false,
+        textPreview: null,
+        duplicate: null,
+        warnings: [],
+      } satisfies BulkUploadDetectedFile
+    })
+
+    const firstName = expanded.archiveNames[0] ?? prepared[0]!.fileName
+    const sourceFileName =
+      expanded.archiveNames.length === 1
+        ? expanded.archiveNames[0]!
+        : prepared.length === 1
+          ? firstName
+          : `${prepared.length} Dateien (u. a. ${firstName})`
+
+    const [run] = await useDatabase()
+      .insert(importRuns)
+      .values({
+        userId,
+        sourceFileName,
+        sourceSizeBytes: totalIncoming,
+        sourceChecksum: sha256(Buffer.from(checksums.join('|'))),
+        adapterId: BULK_PDF_ADAPTER_ID,
+        adapterVersion: BULK_PDF_ADAPTER_VERSION,
+        status: 'laeuft',
+        detected: {
+          files: stubFiles,
+          clusters: [],
+          aiEnabled: settings.enabled,
+          aiErrors: 0,
+          analysisPending: true,
+          archiveNames: expanded.archiveNames,
+          skippedCount: expanded.skipped.length + rejected.length,
+        } satisfies BulkUploadDetected as never,
+        mapping: mapping as never,
+        stagingPath: stubFiles[0]?.stagingPath ?? null,
+      })
+      .returning({ id: importRuns.id })
+
+    const runId = run!.id
+    await addLog(
+      runId,
+      'info',
+      `${prepared.length} Datei${prepared.length === 1 ? '' : 'en'} angenommen (${formatBytes(totalIncoming)}). Analyse läuft im Hintergrund.`,
+    )
+    if (expanded.archiveNames.length) {
+      await addLog(runId, 'info', `ZIP entpackt: ${expanded.archiveNames.join(', ')}.`)
+    }
+    if (expanded.skipped.length || rejected.length) {
+      await addLog(
+        runId,
+        'warnung',
+        `${expanded.skipped.length + rejected.length} Einträge übersprungen (kein unterstütztes oder ungültiges Dokument).`,
+      )
+    }
+
+    log.info('Stapel-Upload gestartet', {
+      runId,
+      files: prepared.length,
+      aiEnabled: settings.enabled,
+    })
+    return { runId, fileCount: prepared.length, status: 'laeuft', aiEnabled: settings.enabled }
+  } catch (error) {
+    for (const path of stagingPaths) await deleteFile(path)
+    throw error
+  }
+}
+
+/** Textextraktion, Cluster und KI-Vorschläge – nicht im HTTP-Request. */
+export async function processBulkPdfUpload(runId: string): Promise<void> {
+  const run = await requireBulkRun(runId)
+  const detected = (run.detected ?? {}) as unknown as BulkUploadDetected
+  if (!detected.analysisPending || run.status !== 'laeuft') return
+
   const mapping: BulkUploadMapping = {
-    subjectId: mappingInput.subjectId ?? null,
-    subjectName: mappingInput.subjectName ?? '',
-    gradeLevel: normalizeGradeLevel(mappingInput.gradeLevel) ?? null,
-    schoolForm: mappingInput.schoolForm ?? null,
-    defaultMaterialType: mappingInput.defaultMaterialType ?? 'arbeitsblatt',
-    linkDuplicates: mappingInput.linkDuplicates ?? true,
-    createLehrwerk: mappingInput.createLehrwerk ?? false,
-    lehrwerkTitle: mappingInput.lehrwerkTitle ?? '',
-    records: {},
+    ...((run.mapping as unknown as BulkUploadMapping | null) ?? {}),
+    records: { ...(((run.mapping as unknown as BulkUploadMapping | null)?.records) ?? {}) },
+  }
+  const files = detected.files ?? []
+  if (!files.length) {
+    await useDatabase()
+      .update(importRuns)
+      .set({
+        status: 'fehlgeschlagen',
+        errorMessage: 'Keine Dateien in diesem Stapel gefunden.',
+        finishedAt: new Date(),
+      })
+      .where(eq(importRuns.id, runId))
+    return
   }
 
   const settings = await getAiSettings()
   const subjectLabel = await resolveSubjectLabel(mapping)
-  const checksums = prepared.map((f) => sha256(f.buffer))
-  const duplicates = await findAttachmentDuplicates(checksums)
+  const duplicates = await findAttachmentDuplicates(files.map((file) => file.checksum))
 
-  const stagingPaths: string[] = []
-
-  let detectedFiles: BulkUploadDetectedFile[]
   try {
-    detectedFiles = await mapLimit(prepared, BULK_EXTRACT_CONCURRENCY, async (file, index) => {
-      const checksum = checksums[index]!
-      const stagingPath = await storeStagingFile(file.buffer, file.fileName)
-      stagingPaths.push(stagingPath)
-
-      const extraction = await ensureExtractedText(file.buffer, file.fileName, settings)
+    await addLog(runId, 'info', 'Texte werden gelesen …')
+    const detectedFiles = await mapLimit(files, BULK_EXTRACT_CONCURRENCY, async (file) => {
+      const buffer = await readFile(resolveStoragePath(file.stagingPath))
+      const extraction = await ensureExtractedText(buffer, file.fileName, settings)
       const hasText = Boolean(extraction.text.trim())
       const warnings: string[] = []
 
       let extractedTextKey: string | null = null
       if (hasText) {
-        extractedTextKey = await storeExtractedTextSidecar(stagingPath, extraction.text)
+        extractedTextKey = await storeExtractedTextSidecar(file.stagingPath, extraction.text)
       }
 
       if (!hasText) {
@@ -214,19 +324,13 @@ export async function analyzeBulkPdfUpload(
         warnings.push('Leerer Titel nach Bereinigung des Dateinamens.')
       }
 
-      const duplicate = duplicates.get(checksum)
+      const duplicate = duplicates.get(file.checksum)
       if (duplicate) {
         warnings.push(`Mögliche Dublette: „${duplicate.title}“.`)
       }
 
       return {
-        sourceRef: `file:${index}:${checksum.slice(0, 12)}`,
-        fileName: file.fileName,
-        relativePath: file.relativePath ?? file.fileName,
-        folderRole: detectFolderRole(file.relativePath, file.fileName),
-        sizeBytes: file.buffer.length,
-        checksum,
-        stagingPath,
+        ...file,
         extractedTextKey,
         extractionMethod: extraction.method,
         pageCount: extraction.pageCount ?? null,
@@ -242,180 +346,186 @@ export async function analyzeBulkPdfUpload(
         warnings,
       } satisfies BulkUploadDetectedFile
     })
-  } catch (error) {
-    for (const path of stagingPaths) await deleteFile(path)
-    throw error
-  }
 
-  const filesByRef = new Map(detectedFiles.map((file) => [file.sourceRef, file]))
-  const clusters = clusterBulkFiles(
-    detectedFiles.map((file) => ({
-      sourceRef: file.sourceRef,
-      fileName: file.fileName,
-      relativePath: file.relativePath,
-      extension: extensionOf(file.fileName),
-    })),
-    mapping.defaultMaterialType ?? 'arbeitsblatt',
-  )
+    const filesByRef = new Map(detectedFiles.map((file) => [file.sourceRef, file]))
+    const clusters = clusterBulkFiles(
+      detectedFiles.map((file) => ({
+        sourceRef: file.sourceRef,
+        fileName: file.fileName,
+        relativePath: file.relativePath,
+        extension: extensionOf(file.fileName),
+      })),
+      mapping.defaultMaterialType ?? 'arbeitsblatt',
+    )
 
-  let aiErrors = 0
-  const useAi = settings.enabled
-
-  for (const cluster of clusters) {
-    const clusterFiles = cluster.fileRefs
-      .map((ref) => filesByRef.get(ref))
-      .filter((file): file is BulkUploadDetectedFile => Boolean(file))
-    for (const file of clusterFiles) {
-      cluster.warnings.push(...file.warnings)
-    }
-  }
-
-  if (useAi) {
-    await mapLimit(clusters, BULK_AI_CONCURRENCY, async (cluster) => {
-      const primaryRef =
-        cluster.fileRefs.find((ref) => cluster.suggestedRoles[ref] === 'schueler') ??
-        cluster.fileRefs.find((ref) => cluster.suggestedRoles[ref] === 'einzeln') ??
-        cluster.fileRefs[0]
-      const primary = primaryRef ? filesByRef.get(primaryRef) : undefined
-      const extractedText = primary?.extractedTextKey
-        ? ((await readExtractedTextSidecar(primary.extractedTextKey)) ?? '')
-        : ''
-      const extraContext = [
-        primary?.relativePath && primary.relativePath !== primary.fileName
-          ? `Pfad im Paket: ${primary.relativePath}`
-          : null,
-        primary?.folderRole && primary.folderRole !== 'sonstiges'
-          ? `Ordner: ${BULK_FOLDER_ROLE_LABELS[primary.folderRole]}`
-          : null,
-      ]
-        .filter(Boolean)
-        .join('\n')
-
-      try {
-        const suggestions = await suggestFileMetadata({
-          fileName: primary?.relativePath || primary?.fileName || cluster.stem,
-          extractedText,
-          mapping: {
-            ...mapping,
-            defaultMaterialType: cluster.suggestions.materialType,
-          },
-          subjectLabel,
-          extraContext: extraContext || null,
-          settings,
-        })
-        cluster.suggestions = {
-          ...suggestions,
-          title: suggestions.title || cluster.suggestions.title,
-          materialType: cluster.suggestions.materialType,
-        }
-        if (!cluster.suggestions.aiUsed) aiErrors += 1
-      } catch {
-        aiErrors += 1
+    let aiErrors = 0
+    for (const cluster of clusters) {
+      const clusterFiles = cluster.fileRefs
+        .map((ref) => filesByRef.get(ref))
+        .filter((file): file is BulkUploadDetectedFile => Boolean(file))
+      for (const file of clusterFiles) {
+        cluster.warnings.push(...file.warnings)
       }
-    })
-  }
-
-  for (const cluster of clusters) {
-    const clusterFiles = cluster.fileRefs
-      .map((ref) => filesByRef.get(ref))
-      .filter((file): file is BulkUploadDetectedFile => Boolean(file))
-
-    if (!cluster.suggestions.title.trim()) {
-      cluster.warnings.push('Leerer Titel – bitte vor dem Anlegen ergänzen.')
     }
 
-    for (const file of clusterFiles) {
-      file.suggestions = cluster.suggestions
+    if (settings.enabled) {
+      await addLog(runId, 'info', `KI-Vorschläge für ${clusters.length} Bündel werden erzeugt …`)
+      await mapLimit(clusters, BULK_AI_CONCURRENCY, async (cluster) => {
+        const primaryRef =
+          cluster.fileRefs.find((ref) => cluster.suggestedRoles[ref] === 'schueler') ??
+          cluster.fileRefs.find((ref) => cluster.suggestedRoles[ref] === 'einzeln') ??
+          cluster.fileRefs[0]
+        const primary = primaryRef ? filesByRef.get(primaryRef) : undefined
+        const extractedText = primary?.extractedTextKey
+          ? ((await readExtractedTextSidecar(primary.extractedTextKey)) ?? '')
+          : ''
+        const extraContext = [
+          primary?.relativePath && primary.relativePath !== primary.fileName
+            ? `Pfad im Paket: ${primary.relativePath}`
+            : null,
+          primary?.folderRole && primary.folderRole !== 'sonstiges'
+            ? `Ordner: ${BULK_FOLDER_ROLE_LABELS[primary.folderRole]}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join('\n')
+
+        try {
+          const suggestions = await suggestFileMetadata({
+            fileName: primary?.relativePath || primary?.fileName || cluster.stem,
+            extractedText,
+            mapping: {
+              ...mapping,
+              defaultMaterialType: cluster.suggestions.materialType,
+            },
+            subjectLabel,
+            extraContext: extraContext || null,
+            settings,
+          })
+          cluster.suggestions = {
+            ...suggestions,
+            title: suggestions.title || cluster.suggestions.title,
+            materialType: cluster.suggestions.materialType,
+          }
+          if (!cluster.suggestions.aiUsed) aiErrors += 1
+        } catch {
+          aiErrors += 1
+        }
+      })
     }
 
-    const duplicate = clusterDuplicate(cluster, filesByRef)
-    const skipDuplicate = Boolean(duplicate) && mapping.linkDuplicates !== false
-    mapping.records![cluster.clusterId] = {
-      include: !skipDuplicate,
-      title: cluster.suggestions.title,
-      materialType: cluster.suggestions.materialType,
-      description: cluster.suggestions.description,
-      tagNames: cluster.suggestions.tagNames,
-      learningObjectives: cluster.suggestions.learningObjectives ?? [],
-      content: cluster.suggestions.contentSummary ?? '',
-      action: skipDuplicate ? 'ueberspringen' : 'erstellen',
-      duplicateOfId: duplicate?.materialId ?? null,
-      fileRoles: { ...cluster.suggestedRoles },
-      links: Object.fromEntries(
-        cluster.proposedLinks.map((link) => [link.targetClusterId, link.confidence === 'hoch']),
-      ),
+    mapping.records = {}
+    for (const cluster of clusters) {
+      const clusterFiles = cluster.fileRefs
+        .map((ref) => filesByRef.get(ref))
+        .filter((file): file is BulkUploadDetectedFile => Boolean(file))
+
+      if (!cluster.suggestions.title.trim()) {
+        cluster.warnings.push('Leerer Titel – bitte vor dem Anlegen ergänzen.')
+      }
+
+      for (const file of clusterFiles) {
+        file.suggestions = cluster.suggestions
+      }
+
+      const duplicate = clusterDuplicate(cluster, filesByRef)
+      const skipDuplicate = Boolean(duplicate) && mapping.linkDuplicates !== false
+      mapping.records[cluster.clusterId] = {
+        include: !skipDuplicate,
+        title: cluster.suggestions.title,
+        materialType: cluster.suggestions.materialType,
+        description: cluster.suggestions.description,
+        tagNames: cluster.suggestions.tagNames,
+        learningObjectives: cluster.suggestions.learningObjectives ?? [],
+        content: cluster.suggestions.contentSummary ?? '',
+        action: skipDuplicate ? 'ueberspringen' : 'erstellen',
+        duplicateOfId: duplicate?.materialId ?? null,
+        fileRoles: { ...cluster.suggestedRoles },
+        links: Object.fromEntries(
+          cluster.proposedLinks.map((link) => [link.targetClusterId, link.confidence === 'hoch']),
+        ),
+      }
     }
-  }
 
-  const detected: BulkUploadDetected = {
-    files: detectedFiles,
-    clusters,
-    aiEnabled: settings.enabled,
-    aiErrors,
-  }
+    await useDatabase()
+      .update(importRuns)
+      .set({
+        status: 'vorschau',
+        detected: {
+          files: detectedFiles,
+          clusters,
+          aiEnabled: settings.enabled,
+          aiErrors,
+          analysisPending: false,
+          archiveNames: detected.archiveNames,
+          skippedCount: detected.skippedCount,
+        } satisfies BulkUploadDetected as never,
+        mapping: mapping as never,
+        errorMessage: null,
+      })
+      .where(eq(importRuns.id, runId))
 
-  const firstName = expanded.archiveNames[0] ?? prepared[0]!.fileName
-  const sourceFileName =
-    expanded.archiveNames.length === 1
-      ? expanded.archiveNames[0]!
-      : prepared.length === 1
-        ? firstName
-        : `${prepared.length} Dateien (u. a. ${firstName})`
-
-  const db = useDatabase()
-  const [run] = await db
-    .insert(importRuns)
-    .values({
-      userId,
-      sourceFileName,
-      sourceSizeBytes: totalIncoming,
-      sourceChecksum: sha256(Buffer.from(checksums.join('|'))),
-      adapterId: BULK_PDF_ADAPTER_ID,
-      adapterVersion: BULK_PDF_ADAPTER_VERSION,
-      status: 'vorschau',
-      detected: detected as never,
-      mapping: mapping as never,
-      stagingPath: detectedFiles[0]?.stagingPath ?? null,
-    })
-    .returning({ id: importRuns.id })
-
-  const runId = run!.id
-  await addLog(
-    runId,
-    'info',
-    `${prepared.length} Datei${prepared.length === 1 ? '' : 'en'} in ${clusters.length} Bündel analysiert (${formatBytes(totalIncoming)}).`,
-  )
-  if (expanded.archiveNames.length) {
-    await addLog(runId, 'info', `ZIP entpackt: ${expanded.archiveNames.join(', ')}.`)
-  }
-  if (expanded.skipped.length || rejected.length) {
     await addLog(
       runId,
-      'warnung',
-      `${expanded.skipped.length + rejected.length} Einträge übersprungen (kein unterstütztes oder ungültiges Dokument).`,
+      'info',
+      `${detectedFiles.length} Datei${detectedFiles.length === 1 ? '' : 'en'} in ${clusters.length} Bündel analysiert.`,
     )
-  }
-  if (settings.enabled) {
-    await addLog(
-      runId,
-      aiErrors ? 'warnung' : 'info',
-      aiErrors
-        ? `KI-Vorschläge für ${aiErrors} von ${clusters.length} Bündeln unvollständig. Fehlende Felder nutzen Dateiname und Ordner.`
-        : settings.useVision
-          ? `Textextraktion (inkl. Vision/OCR bei Scans) und KI-Metadaten für ${clusters.length} Bündel erzeugt.`
-          : `KI-Metadaten für ${clusters.length} Bündel erzeugt. Vision/OCR ist in den Einstellungen aus.`,
-    )
-  } else {
-    await addLog(runId, 'info', 'KI deaktiviert – Titel aus Dateinamen abgeleitet.')
-  }
+    if (settings.enabled) {
+      await addLog(
+        runId,
+        aiErrors ? 'warnung' : 'info',
+        aiErrors
+          ? `KI-Vorschläge für ${aiErrors} von ${clusters.length} Bündeln unvollständig. Fehlende Felder nutzen Dateiname und Ordner.`
+          : settings.useVision
+            ? `Textextraktion (inkl. Vision/OCR bei Scans) und KI-Metadaten für ${clusters.length} Bündel erzeugt.`
+            : `KI-Metadaten für ${clusters.length} Bündel erzeugt. Vision/OCR ist in den Einstellungen aus.`,
+      )
+    } else {
+      await addLog(runId, 'info', 'KI deaktiviert – Titel aus Dateinamen abgeleitet.')
+    }
 
-  log.info('Stapel-Upload analysiert', {
-    runId,
-    files: prepared.length,
-    clusters: clusters.length,
-    aiEnabled: settings.enabled,
-  })
-  return { runId, fileCount: prepared.length, clusterCount: clusters.length, aiEnabled: settings.enabled }
+    log.info('Stapel-Upload analysiert', {
+      runId,
+      files: detectedFiles.length,
+      clusters: clusters.length,
+      aiEnabled: settings.enabled,
+    })
+  } catch (error) {
+    const message = oeffentlicheFehlermeldung(error, 'Die Stapel-Analyse ist fehlgeschlagen.')
+    await useDatabase()
+      .update(importRuns)
+      .set({
+        status: 'fehlgeschlagen',
+        errorMessage: message,
+        finishedAt: new Date(),
+        detected: { ...detected, analysisPending: false } as never,
+      })
+      .where(eq(importRuns.id, runId))
+    await addLog(runId, 'fehler', message)
+    log.warn('Stapel-Analyse fehlgeschlagen', { runId, error })
+  }
+}
+
+/**
+ * Synchroner Einstieg für Tests: startet und wartet auf die Vorschau.
+ */
+export async function analyzeBulkPdfUpload(
+  files: BulkUploadInputFile[],
+  userId: string | null,
+  mappingInput: BulkUploadMapping = {},
+): Promise<{ runId: string; fileCount: number; aiEnabled: boolean; clusterCount: number }> {
+  const started = await startBulkPdfUpload(files, userId, mappingInput)
+  await processBulkPdfUpload(started.runId)
+  const overview = await getBulkRunOverview(started.runId)
+  if (overview.status === 'fehlgeschlagen') {
+    throw appError('IMPORT_FEHLER', overview.errorMessage || 'Die Analyse ist fehlgeschlagen.')
+  }
+  return {
+    runId: started.runId,
+    fileCount: started.fileCount,
+    clusterCount: overview.clusters.length,
+    aiEnabled: overview.aiEnabled,
+  }
 }
 
 export async function updateBulkMapping(runId: string, mapping: BulkUploadMapping): Promise<void> {
@@ -599,7 +709,22 @@ export async function commitBulkUpload(
   }
 
   let lehrwerkId: string | null = null
-  if (mapping.createLehrwerk && mapping.lehrwerkTitle?.trim()) {
+  if (mapping.createLehrwerk && mapping.lehrwerkId) {
+    try {
+      const existing = await getMaterialDetail(mapping.lehrwerkId)
+      if (!existing || existing.materialType !== 'lehrwerk') {
+        throw invalidInput('Das gewählte Lehrwerk wurde nicht gefunden.')
+      }
+      lehrwerkId = existing.id
+      mapping.lehrwerkId = lehrwerkId
+      await track('lehrwerk', lehrwerkId, 'verknuepft', 'Bestehendes Lehrwerk')
+    } catch (error) {
+      const message = oeffentlicheFehlermeldung(error, 'Das Lehrwerk konnte nicht zugeordnet werden.')
+      stats.fehlgeschlagen = (stats.fehlgeschlagen ?? 0) + 1
+      errors.push({ sourceRef: 'lehrwerk', message })
+      await track('lehrwerk', null, 'fehlgeschlagen', message)
+    }
+  } else if (mapping.createLehrwerk && mapping.lehrwerkTitle?.trim()) {
     try {
       lehrwerkId = await createMaterial(
         {
@@ -889,6 +1014,7 @@ export interface BulkRunOverview {
   stats: BulkUploadStats | null
   errorMessage: string | null
   aiEnabled: boolean
+  analysisPending: boolean
   startedAt: string
   finishedAt: string | null
   undoneAt: string | null
@@ -899,8 +1025,9 @@ export interface BulkRunOverview {
 export async function getBulkRunOverview(runId: string): Promise<BulkRunOverview> {
   const run = await requireBulkRun(runId)
   const detected = (run.detected ?? {}) as unknown as BulkUploadDetected
+  const analysisPending = Boolean(detected.analysisPending)
   const files = detected.files ?? []
-  const clusters = resolveClusters(detected)
+  const clusters = analysisPending ? [] : resolveClusters(detected)
 
   return {
     runId: run.id,
@@ -914,6 +1041,7 @@ export async function getBulkRunOverview(runId: string): Promise<BulkRunOverview
     stats: (run.stats as unknown as BulkUploadStats | null) ?? null,
     errorMessage: run.errorMessage,
     aiEnabled: Boolean(detected.aiEnabled),
+    analysisPending,
     startedAt: run.startedAt.toISOString(),
     finishedAt: run.finishedAt?.toISOString() ?? null,
     undoneAt: run.undoneAt?.toISOString() ?? null,

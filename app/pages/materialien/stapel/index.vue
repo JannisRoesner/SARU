@@ -55,6 +55,7 @@ const mapping = reactive({
   linkDuplicates: true,
   createLehrwerk: false,
   lehrwerkTitle: '',
+  lehrwerkId: null as string | null,
 })
 
 function relativPfad(file: File): string {
@@ -101,6 +102,7 @@ async function analysieren() {
       linkDuplicates: mapping.linkDuplicates,
       createLehrwerk: mapping.createLehrwerk,
       lehrwerkTitle: mapping.lehrwerkTitle || undefined,
+      lehrwerkId: mapping.lehrwerkId || undefined,
     }),
   )
 
@@ -108,7 +110,7 @@ async function analysieren() {
     const ergebnis = await aufruf<{ runId: string }>('/api/materials/bulk/analyze', {
       method: 'POST',
       body,
-      erfolgsmeldung: 'Dateien analysiert.',
+      erfolgsmeldung: 'Analyse gestartet.',
       stumm: true,
     })
     if (ergebnis) await navigateTo(`/materialien/stapel/${ergebnis.runId}`)
@@ -224,17 +226,15 @@ async function analysieren() {
             :optionen="materialTypes.options().map((o) => ({ value: o.value, label: o.label }))"
           />
         </UiField>
-        <UiField v-if="mapping.createLehrwerk" label="Lehrwerk-Titel" class="sm:col-span-2">
-          <UiInput v-model="mapping.lehrwerkTitle" platzhalter="z. B. Klett Biologie Oberstufe" />
-        </UiField>
+        <StapelLehrwerkFeld
+          v-model:zuordnen="mapping.createLehrwerk"
+          v-model:lehrwerk-id="mapping.lehrwerkId"
+          v-model:titel="mapping.lehrwerkTitle"
+        />
       </div>
       <label class="mt-4 flex items-center gap-2 text-sm">
         <input v-model="mapping.linkDuplicates" type="checkbox" class="accent-[var(--color-primary)]">
         Erkannte Dubletten standardmäßig abwählen
-      </label>
-      <label class="mt-2 flex items-center gap-2 text-sm">
-        <input v-model="mapping.createLehrwerk" type="checkbox" class="accent-[var(--color-primary)]">
-        Alles einem Lehrwerk zuordnen
       </label>
     </UiCard>
 

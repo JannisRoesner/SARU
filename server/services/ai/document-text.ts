@@ -36,6 +36,8 @@ export interface EnsureExtractedTextOptions {
   maxPages?: number
   /** Token-Deckel für Vision-OCR; ohne Angabe gilt der KI-Standard. */
   maxOutputTokens?: number
+  /** Steuert, worauf die Vision-OCR achten soll. */
+  ocrHint?: 'lehrwerk' | 'material'
 }
 
 export function visionExtractionAvailable(settings: AiSettings): boolean {
@@ -100,6 +102,7 @@ export async function ensureExtractedText(
       settings,
       maxPages,
       options.maxOutputTokens,
+      options.ocrHint,
     )
     if (vision.text.trim()) {
       return {
@@ -194,21 +197,35 @@ async function slicePdfFront(
   return { preview: Buffer.from(await out.save()), pageCount }
 }
 
+function visionOcrPrompt(ocrHint?: 'lehrwerk' | 'material'): string {
+  if (ocrHint === 'lehrwerk') {
+    return `Du liest die vorderen Seiten eines Schulbuchs (Schülerband).
+Gib den erkannten Text in Lesereihenfolge wieder – kein Markdown, keine Erklärungen.
+Bevorzuge vollständig:
+1. Einband und Titelseite (Reihentitel, Band, Fach, Verlag, Jahrgangsstufe)
+2. Impressum
+3. Inhaltsverzeichnis (Kapitel und Unterpunkte mit Seitenzahlen, soweit lesbar)
+Schreibe kein einzelnes Kapitel als Ganzes ab. Wenn etwas unleserlich ist, überspringe es still.`
+  }
+  return `Du bist eine OCR-/Texterkennung für deutschsprachige Unterrichtsmaterialien.
+Extrahiere den gesamten lesbaren Text aus dem Dokument möglichst vollständig und in Lesereihenfolge.
+Antworte ausschließlich mit dem erkannten Fließtext – kein Markdown, keine Erklärungen, keine Meta-Kommentare.
+Wenn etwas unleserlich ist, überspringe es still.`
+}
+
 async function extractTextViaVision(
   buffer: Buffer,
   fileName: string,
   settings: AiSettings,
   maxPages?: number,
   maxOutputTokens?: number,
+  ocrHint?: 'lehrwerk' | 'material',
 ): Promise<{ text: string; pageCount?: number; error?: string }> {
   const model = (settings.visionModel || settings.chatModel).trim()
   const parts: ChatPart[] = [
     {
       type: 'text',
-      text: `Du bist eine OCR-/Texterkennung für deutschsprachige Unterrichtsmaterialien.
-Extrahiere den gesamten lesbaren Text aus dem Dokument möglichst vollständig und in Lesereihenfolge.
-Antworte ausschließlich mit dem erkannten Fließtext – kein Markdown, keine Erklärungen, keine Meta-Kommentare.
-Wenn etwas unleserlich ist, überspringe es still.`,
+      text: visionOcrPrompt(ocrHint),
     },
   ]
 

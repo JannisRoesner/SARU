@@ -601,6 +601,18 @@ export async function addFileAsset(
     }
   }
 
+  if (material?.materialType === 'lehrwerk' && (options.role ?? 'haupt') === 'haupt') {
+    const [{ value: vorhanden } = { value: 0 }] = await db
+      .select({ value: sql<number>`count(*)::int` })
+      .from(materialAssets)
+      .where(and(eq(materialAssets.variantId, variantId), eq(materialAssets.role, 'haupt')))
+    if ((vorhanden ?? 0) > 0) {
+      throw invalidInput(
+        'Dieses Lehrwerk hat bereits eine Buchdatei. Ersetze sie, statt eine zweite hochzuladen.',
+      )
+    }
+  }
+
   const stored = await storeFile(file.buffer, file.fileName)
 
   const [{ value: highest } = { value: null }] = await db

@@ -29,15 +29,9 @@ const ziehe = ref(false)
 const dateiInput = ref<HTMLInputElement | null>(null)
 
 function dateienHinzufuegen(files: FileList | null | undefined) {
-  if (!files?.length) return
-  const bestehende = new Set(dateien.value.map((f) => `${f.name}:${f.size}:${f.lastModified}`))
-  for (const file of Array.from(files)) {
-    const schluessel = `${file.name}:${file.size}:${file.lastModified}`
-    if (!bestehende.has(schluessel)) {
-      dateien.value.push(file)
-      bestehende.add(schluessel)
-    }
-  }
+  const file = files?.[0]
+  if (!file) return
+  dateien.value = [file]
   if (dateiInput.value) dateiInput.value.value = ''
 }
 
@@ -127,7 +121,7 @@ async function anlegen() {
 
       <UiCard
         titel="Buchdatei"
-        untertitel="Optional – meist die PDF des Schülerbuchs. Serviceband und Lösungsheft ordnest du danach als eigene Materialien zu."
+        untertitel="Optional – genau eine PDF des Schülerbuchs. Serviceband und Lösungsheft ordnest du danach als eigene Materialien zu."
         icon="book"
       >
         <div
@@ -139,12 +133,11 @@ async function anlegen() {
         >
           <UiIcon name="cloud-arrow-up" class="mb-3 text-3xl text-primary" />
           <p class="font-medium text-ink">Buch-PDF hier ablegen</p>
-          <p class="mt-1 text-sm text-ink-muted">PDF oder andere Dateien – mehrere möglich</p>
+          <p class="mt-1 text-sm text-ink-muted">Eine Datei – meist die PDF des Schülerbuchs</p>
           <label class="mt-4 inline-flex cursor-pointer">
             <input
               ref="dateiInput"
               type="file"
-              multiple
               class="sr-only"
               @change="dateienHinzufuegen(($event.target as HTMLInputElement).files)"
             >

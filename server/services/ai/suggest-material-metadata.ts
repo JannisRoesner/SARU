@@ -29,7 +29,7 @@ const log = createLogger('ai:suggest-metadata')
 const MATERIAL_TYPE_SET = new Set<string>(MATERIAL_TYPES)
 const SCHOOL_FORM_SET = new Set<string>(SCHOOL_FORMS)
 
-export const MATERIAL_METADATA_PROMPT_VERSION = 'material-metadata-v5'
+export const MATERIAL_METADATA_PROMPT_VERSION = 'material-metadata-v6'
 
 export interface MaterialMetadataSuggestion {
   title: string
@@ -124,60 +124,23 @@ export async function suggestMaterialMetadata(
   const excerpt = text
     ? text.slice(0, 8000)
     : '(kein Dokumenttext – Titel, Dateiname und Kontext nutzen)'
-  const prompt = `Du hilfst einer Lehrkraft in Hessen, Metadaten und eine kurze Zusammenfassung für Unterrichtsmaterial vorzuschlagen.
-
-Dateiname: ${options.fileName}
-${contextParts.length ? `Kontext: ${contextParts.join(' · ')}` : ''}
-
-Erlaubte materialType-Werte (genau einen verwenden): ${typeList}
-Erlaubte schoolForm-Werte (einen oder null): ${schoolList}
-
-Schulfächer (nur aus dieser Liste wählen – keine Unterrichtsthemen, keine Detailgebiete):
-${fachListe}
-
-Regeln für subjectNames:
-- Nur echte Schulfächer aus der obigen Liste (z. B. „Informatik“, „Biologie“, „Deutsch“).
-- Keine Themen, Kapitel oder Methoden (z. B. NICHT „Objektorientierung“, „Photosynthese“, „Bruchrechnung“).
-- Solche Inhalte gehören in tagNames oder learningObjectives.
-- Typisch 1 Fach, höchstens 2 bei klarer fächerübergreifender Zuordnung.
-- Bei Unsicherheit lieber leeres Array als raten.
-
-Regeln für title und description:
-- title: klarer deutscher Titel, keine Dateiendung, keine kryptischen Verlags-IDs wenn der Inhalt erkennbar ist.
-- description: 1–2 Sätze zum fachlichen Inhalt.
-- Keine Herkunfts- oder Prozessfloskeln (nicht: importiert, Schulportal, KI-Entwurf, automatisch erstellt, manuell geprüft).
-
-Regeln für gradeLevels:
-- Nur gültige Stufen: ganze Zahlen 1–10 oder hessische Oberstufen-Codes E1, E2, Q1, Q2, Q3, Q4. Keine 11/12/13.
-- Hessische gymnasiale Oberstufe:
-  - E1, E2 = Einführungsphase (E-Phase; oft Jahrgang 11, 1. und 2. Halbjahr).
-  - Q1, Q2, Q3, Q4 = Qualifikationsphase (Q-Phase; oft Jahrgänge 12 und 13).
-- Steht nur „Einführungsphase“ / „E-Phase“ ohne Halbjahr: E1 und E2.
-- Steht nur „Qualifikationsphase“ / „Q-Phase“ ohne Halbjahr: Q1, Q2, Q3 und Q4.
-- Klasse 11 ≈ E-Phase, Klasse 12 ≈ Q1/Q2, Klasse 13 ≈ Q3/Q4.
-- „Oberstufe“ allein reicht nicht, außer ein Lehrwerk deckt erkennbar die ganze gymnasiale Oberstufe ab – dann E1–Q4.
-- Das genaue Halbjahr (E1 vs. E2, Q2 vs. Q3) nur setzen, wenn es explizit vorkommt. Sonst die ganze Phase, nicht raten.
-- Nutze Hinweise aus Dateiname und Text (z. B. „Klasse 8“, „Bio 8“, „E1“, „Q2“, „Einführungsphase“).
-- Keine Schuljahre wie 2024, keine Kapitel- oder Seitenzahlen.
-- Fehlt jeder belastbare Hinweis: leeres Array.
-
-Auszug aus dem Dokument:
-"""
-${excerpt}
-"""
-
-Antworte ausschließlich mit einem JSON-Objekt (kein Markdown):
-{
-  "title": "kurzer, klarer deutscher Titel ohne Dateiendung",
-  "materialType": "einer der erlaubten Werte",
-  "schoolForm": "einer der erlaubten Werte oder null",
-  "subjectNames": ["max. 2 exakte Namen aus der Schulfächer-Liste"],
-  "tagNames": ["max. 5 kurze Schlagwörter zu Inhalten/Themen"],
-  "learningObjectives": ["max. 4 kurze Lernziele auf Deutsch"],
-  "description": "1–2 Sätze Kurzbeschreibung auf Deutsch",
-  "contentSummary": "Kurze Markdown-Zusammenfassung (max. 4 Sätze oder Stichpunkte) – keine Volltext-Abschrift",
-  "gradeLevels": []
-}`
+  const istLehrwerk = ctx.defaultMaterialType === 'lehrwerk' || fallback.materialType === 'lehrwerk'
+  const prompt = istLehrwerk
+    ? buildLehrwerkMetadataPrompt({
+        fileName: options.fileName,
+        contextParts,
+        schoolList,
+        fachListe,
+        excerpt,
+      })
+    : buildMaterialMetadataPrompt({
+        fileName: options.fileName,
+        contextParts,
+        typeList,
+        schoolList,
+        fachListe,
+        excerpt,
+      })
 
   const maxTokens = Math.min(Math.max(options.settings.maxOutputTokens || 800, 400), 800)
 
@@ -241,7 +204,10 @@ Antworte ausschließlich mit einem JSON-Objekt (kein Markdown):
 
       return {
         title,
-        materialType: normalizeMaterialType(parsed.materialType, fallback.materialType),
+        materialType:
+          ctx.defaultMaterialType === 'lehrwerk'
+            ? 'lehrwerk'
+            : normalizeMaterialType(parsed.materialType, fallback.materialType),
         schoolForm: normalizeSchoolForm(parsed.schoolForm, ctx.schoolForm),
         subjectNames,
         tagNames: normalizeStringList(parsed.tagNames, 8),
@@ -348,6 +314,131 @@ Antworte ausschließlich mit JSON: {"description":"..."}`,
     log.warn('Kurzbeschreibung per KI fehlgeschlagen', { title, error })
     return null
   }
+}
+
+const GRADE_LEVEL_RULES = `Regeln für gradeLevels:
+- Nur gültige Stufen: ganze Zahlen 1–10 oder hessische Oberstufen-Codes E1, E2, Q1, Q2, Q3, Q4. Keine 11/12/13.
+- Hessische gymnasiale Oberstufe:
+  - E1, E2 = Einführungsphase (E-Phase; oft Jahrgang 11, 1. und 2. Halbjahr).
+  - Q1, Q2, Q3, Q4 = Qualifikationsphase (Q-Phase; oft Jahrgänge 12 und 13).
+- Steht nur „Einführungsphase“ / „E-Phase“ ohne Halbjahr: E1 und E2.
+- Steht nur „Qualifikationsphase“ / „Q-Phase“ ohne Halbjahr: Q1, Q2, Q3 und Q4.
+- Klasse 11 ≈ E-Phase, Klasse 12 ≈ Q1/Q2, Klasse 13 ≈ Q3/Q4.
+- „Oberstufe“ allein reicht nicht, außer ein Lehrwerk deckt erkennbar die ganze gymnasiale Oberstufe ab – dann E1–Q4.
+- Das genaue Halbjahr (E1 vs. E2, Q2 vs. Q3) nur setzen, wenn es explizit vorkommt. Sonst die ganze Phase, nicht raten.
+- Nutze Hinweise aus Dateiname, Einband und Text (z. B. „Klasse 8“, „Bio 8“, „E1“, „Q2“, „Einführungsphase“).
+- Keine Schuljahre wie 2024, keine Kapitel- oder Seitenzahlen.
+- Fehlt jeder belastbare Hinweis: leeres Array.`
+
+function buildMaterialMetadataPrompt(input: {
+  fileName: string
+  contextParts: string[]
+  typeList: string
+  schoolList: string
+  fachListe: string
+  excerpt: string
+}): string {
+  return `Du hilfst einer Lehrkraft in Hessen, Metadaten und eine kurze Zusammenfassung für Unterrichtsmaterial vorzuschlagen.
+
+Dateiname: ${input.fileName}
+${input.contextParts.length ? `Kontext: ${input.contextParts.join(' · ')}` : ''}
+
+Erlaubte materialType-Werte (genau einen verwenden): ${input.typeList}
+Erlaubte schoolForm-Werte (einen oder null): ${input.schoolList}
+
+Schulfächer (nur aus dieser Liste wählen – keine Unterrichtsthemen, keine Detailgebiete):
+${input.fachListe}
+
+Regeln für subjectNames:
+- Nur echte Schulfächer aus der obigen Liste (z. B. „Informatik“, „Biologie“, „Deutsch“).
+- Keine Themen, Kapitel oder Methoden (z. B. NICHT „Objektorientierung“, „Photosynthese“, „Bruchrechnung“).
+- Solche Inhalte gehören in tagNames oder learningObjectives.
+- Typisch 1 Fach, höchstens 2 bei klarer fächerübergreifender Zuordnung.
+- Bei Unsicherheit lieber leeres Array als raten.
+
+Regeln für title und description:
+- title: klarer deutscher Titel, keine Dateiendung, keine kryptischen Verlags-IDs wenn der Inhalt erkennbar ist.
+- description: 1–2 Sätze zum fachlichen Inhalt.
+- Keine Herkunfts- oder Prozessfloskeln (nicht: importiert, Schulportal, KI-Entwurf, automatisch erstellt, manuell geprüft).
+
+${GRADE_LEVEL_RULES}
+
+Auszug aus dem Dokument:
+"""
+${input.excerpt}
+"""
+
+Antworte ausschließlich mit einem JSON-Objekt (kein Markdown):
+{
+  "title": "kurzer, klarer deutscher Titel ohne Dateiendung",
+  "materialType": "einer der erlaubten Werte",
+  "schoolForm": "einer der erlaubten Werte oder null",
+  "subjectNames": ["max. 2 exakte Namen aus der Schulfächer-Liste"],
+  "tagNames": ["max. 5 kurze Schlagwörter zu Inhalten/Themen"],
+  "learningObjectives": ["max. 4 kurze Lernziele auf Deutsch"],
+  "description": "1–2 Sätze Kurzbeschreibung auf Deutsch",
+  "contentSummary": "Kurze Markdown-Zusammenfassung (max. 4 Sätze oder Stichpunkte) – keine Volltext-Abschrift",
+  "gradeLevels": []
+}`
+}
+
+function buildLehrwerkMetadataPrompt(input: {
+  fileName: string
+  contextParts: string[]
+  schoolList: string
+  fachListe: string
+  excerpt: string
+}): string {
+  return `Du hilfst einer Lehrkraft in Hessen, ein Schulbuch (Schülerband / Lehrwerk) zu katalogisieren – kein Arbeitsblatt und kein einzelnes Kapitel.
+
+Dateiname: ${input.fileName}
+${input.contextParts.length ? `Kontext: ${input.contextParts.join(' · ')}` : ''}
+
+materialType muss genau "lehrwerk" sein.
+Erlaubte schoolForm-Werte (einen oder null): ${input.schoolList}
+
+Schulfächer (nur aus dieser Liste wählen):
+${input.fachListe}
+
+Das Dokument ist ein ganzes Schulbuch. Typisch stehen vorn:
+- Einband / Titelseite: Reihentitel, Band, Fach, Verlag, Jahrgang (z. B. „Natura Biologie Oberstufe Einführungsphase“)
+- Impressum
+- Inhaltsverzeichnis mit den Kapiteln des Bandes
+
+Regeln für title:
+- Nimm den Werktitel vom Einband oder der Titelseite (Reihe + Band/Stufe, z. B. „Natura Oberstufe Einführungsphase“).
+- Kein Kapitel-, Themen- oder Lektionstitel (nicht „Bakterien“, nicht „Die Zelle“, nicht „Kapitel 3“).
+- Keine Dateiendung, kein „komplett“, kein Scan-Zusatz. Der Dateiname darf nur stützen, wenn er zum Einband passt.
+
+Regeln für description und contentSummary:
+- description: 1–2 Sätze über das Buch als Ganzes (Reihe, Fach, Stufe, Verlag falls erkennbar).
+- contentSummary: Überblick aus dem Inhaltsverzeichnis als kurze Markdown-Stichpunkte der Hauptkapitel – nicht den Text eines einzelnen Kapitels nacherzählen.
+- Keine Herkunfts- oder Prozessfloskeln (nicht: importiert, KI-Entwurf, automatisch erstellt).
+
+Regeln für subjectNames, tagNames, learningObjectives:
+- subjectNames: nur das Schulfach des Werks (meist 1).
+- tagNames: Reihe, Stufe oder grobe Themenblöcke aus dem Inhaltsverzeichnis – keine einzelnen Unterkapitel.
+- learningObjectives: leer lassen oder höchstens 2 buchweite Ziele, keine Kapitelziele.
+
+${GRADE_LEVEL_RULES}
+
+Auszug aus dem vorderen Teil des Buchs:
+"""
+${input.excerpt}
+"""
+
+Antworte ausschließlich mit einem JSON-Objekt (kein Markdown):
+{
+  "title": "Werktitel vom Einband, ohne Kapitelname",
+  "materialType": "lehrwerk",
+  "schoolForm": "einer der erlaubten Werte oder null",
+  "subjectNames": ["max. 2 exakte Namen aus der Schulfächer-Liste"],
+  "tagNames": ["max. 5 Schlagwörter zur Reihe oder zu großen Themenblöcken"],
+  "learningObjectives": [],
+  "description": "1–2 Sätze über das Schulbuch als Ganzes",
+  "contentSummary": "Markdown-Stichpunkte der Hauptkapitel aus dem Inhaltsverzeichnis",
+  "gradeLevels": []
+}`
 }
 
 function pause(ms: number): Promise<void> {

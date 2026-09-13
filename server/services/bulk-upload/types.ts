@@ -78,6 +78,10 @@ export interface BulkUploadDetected {
   clusters?: BulkUploadDetectedCluster[]
   aiEnabled: boolean
   aiErrors: number
+  /** true, solange Textextraktion und KI-Vorschläge noch laufen. */
+  analysisPending?: boolean
+  archiveNames?: string[]
+  skippedCount?: number
 }
 
 export interface BulkUploadRecordDecision {
@@ -104,8 +108,8 @@ export interface BulkUploadMapping {
   linkDuplicates?: boolean
   createLehrwerk?: boolean
   lehrwerkTitle?: string
-  /** Nach dem Anlegen gesetzt, damit die Oberfläche zum Hub springen kann. */
-  lehrwerkId?: string
+  /** Bestehendes oder nach dem Anlegen gesetztes Lehrwerk. */
+  lehrwerkId?: string | null
   records?: Record<string, BulkUploadRecordDecision>
 }
 

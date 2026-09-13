@@ -1,13 +1,19 @@
 import { readMultipartParts } from '../../../utils/multipart'
-import { analyzeBulkPdfUpload } from '../../../services/bulk-upload/bulk-upload.service'
+import {
+  processBulkPdfUpload,
+  startBulkPdfUpload,
+} from '../../../services/bulk-upload/bulk-upload.service'
 import type { BulkUploadMapping } from '../../../services/bulk-upload/types'
 import { recordAudit } from '../../../services/audit.service'
 import { requireEditor } from '../../../utils/auth'
 import { invalidInput } from '../../../utils/errors'
 import { bulkUploadMappingSchema } from '../../../utils/schemas'
 import { parseOrThrow } from '../../../utils/validation'
+import { createLogger } from '../../../utils/logger'
 
-/** Stapel hochladen (PDF, Office, ZIP), clustern, Metadaten vorschlagen. */
+const log = createLogger('bulk-analyze')
+
+/** Stapel entgegennehmen; Textextraktion und KI laufen im Hintergrund (kein Proxy-504). */
 export default defineEventHandler(async (event) => {
   const user = await requireEditor(event)
 
@@ -45,19 +51,22 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  const result = await analyzeBulkPdfUpload(files, user.id, mapping)
+  const result = await startBulkPdfUpload(files, user.id, mapping)
+  void processBulkPdfUpload(result.runId).catch((error) => {
+    log.warn('Hintergrund-Analyse des Stapels fehlgeschlagen', { runId: result.runId, error })
+  })
 
   await recordAudit(
     {
       userId: user.id,
-      action: 'material.stapel.analysiert',
+      action: 'material.stapel.gestartet',
       entityType: 'import',
       entityId: result.runId,
-      details: { dateien: result.fileCount, buendel: result.clusterCount, ki: result.aiEnabled },
+      details: { dateien: result.fileCount, ki: result.aiEnabled },
     },
     event,
   )
 
-  setResponseStatus(event, 201)
+  setResponseStatus(event, 202)
   return result
 })

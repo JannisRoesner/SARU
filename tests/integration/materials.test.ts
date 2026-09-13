@@ -423,6 +423,25 @@ describe('Materialverwaltung', () => {
     expect(ohneBuecher.items.map((m) => m.id)).not.toContain(lehrwerk)
   })
 
+  it('lässt an einem Lehrwerk nur eine Buchdatei zu', async () => {
+    await withTempUploadDir(async () => {
+      const { readFile } = await import('node:fs/promises')
+      const { fileURLToPath } = await import('node:url')
+      const buffer = await readFile(
+        fileURLToPath(new URL('../fixtures/sample.pdf', import.meta.url)),
+      )
+
+      const lehrwerk = await createMaterial({ title: 'Natura 8', materialType: 'lehrwerk' }, userId)
+      const detail = await getMaterialDetail(lehrwerk)
+      const variante = detail!.variants[0]!
+
+      await addFileAsset(variante.id, { buffer, fileName: 'natura.pdf' })
+      await expect(
+        addFileAsset(variante.id, { buffer, fileName: 'natura-kopie.pdf' }),
+      ).rejects.toThrow(/bereits eine Buchdatei/i)
+    })
+  })
+
   it('schaltet den Favoritenstatus um', async () => {
     const id = await createMaterial({ title: 'Favorit' }, userId)
     await setFavorite(id, true)

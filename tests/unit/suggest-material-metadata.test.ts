@@ -142,6 +142,41 @@ describe('suggestMaterialMetadata Jahrgangsstufen', () => {
     expect(result.gradeLevels).toEqual(['E1'])
   })
 
+  it('nutzt für Lehrwerke Einbandtitel und Inhaltsverzeichnis, nicht das erste Kapitel', async () => {
+    const spy = vi.spyOn(aiClient, 'chatCompletion').mockResolvedValue({
+      text: JSON.stringify({
+        title: 'Natura Oberstufe Einführungsphase',
+        materialType: 'arbeitsblatt',
+        schoolForm: 'oberstufe',
+        subjectNames: ['Biologie'],
+        tagNames: ['Natura', 'Zelle', 'Stoffwechsel'],
+        learningObjectives: [],
+        description: 'Schülerbuch der Reihe Natura für die Einführungsphase.',
+        contentSummary: '- Zellen und Stoffwechsel\n- Genetik\n- Ökologie',
+        gradeLevels: ['E1', 'E2'],
+      }),
+      model: 'test',
+      finishReason: 'stop',
+      outputTokens: 40,
+    })
+
+    const result = await suggestMaterialMetadata({
+      fileName: 'Natura_Oberstufe_Einfuehrungsphase_komplett.pdf',
+      extractedText: 'Einband: Natura Biologie Oberstufe Einführungsphase\nInhaltsverzeichnis\n1 Zellen\n2 Bakterien',
+      settings: enabledSettings,
+      context: { defaultMaterialType: 'lehrwerk' },
+    })
+
+    const nachrichten = spy.mock.calls[0]![1] as Array<{ parts: Array<{ text?: string }> }>
+    const prompt = nachrichten[1]?.parts[0]?.text ?? ''
+    expect(prompt).toContain('Schulbuch')
+    expect(prompt).toContain('Einband')
+    expect(prompt).toContain('Inhaltsverzeichnis')
+    expect(prompt).not.toMatch(/Unterrichtsmaterial vorzuschlagen/)
+    expect(result.materialType).toBe('lehrwerk')
+    expect(result.title).toBe('Natura Oberstufe Einführungsphase')
+  })
+
   it('setzt bei Einführungsphase E1 und E2, wenn das Halbjahr fehlt', async () => {
     vi.spyOn(aiClient, 'chatCompletion').mockResolvedValue({
       text: JSON.stringify({

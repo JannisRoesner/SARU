@@ -56,6 +56,7 @@ const vorschauAssetId = ref<string | null>(null)
 const vorschauTitel = ref<string | null>(null)
 const ziehe = ref(false)
 const dateiInput = ref<HTMLInputElement | null>(null)
+const ersetzenInput = ref<HTMLInputElement | null>(null)
 
 const gefilterterInhalt = computed(() => {
   const q = inhaltSuche.value.trim().toLowerCase()
@@ -113,9 +114,10 @@ function assetHerunterladen(assetId: string) {
 }
 
 async function buchHochladen(files: FileList | null) {
-  if (!files?.length || !standardVariante.value) return
+  const file = files?.[0]
+  if (!file || !standardVariante.value || hauptVorschau.value) return
   const body = new FormData()
-  for (const file of Array.from(files)) body.append('files', file)
+  body.append('files', file)
   body.append('role', 'haupt')
   const ergebnis = await aufruf(`/api/variants/${standardVariante.value.id}/uploads`, {
     method: 'POST',
@@ -124,6 +126,44 @@ async function buchHochladen(files: FileList | null) {
   })
   if (dateiInput.value) dateiInput.value.value = ''
   if (ergebnis) await refresh()
+}
+
+async function buchErsetzen(files: FileList | null) {
+  const file = files?.[0]
+  const alt = hauptVorschau.value
+  if (!file || !standardVariante.value || !alt) return
+  const geloescht = await aufruf(`/api/assets/${alt.id}`, {
+    method: 'DELETE',
+  })
+  if (ersetzenInput.value) ersetzenInput.value.value = ''
+  if (geloescht === null) return
+  await refresh()
+  const body = new FormData()
+  body.append('files', file)
+  body.append('role', 'haupt')
+  const ergebnis = await aufruf(`/api/variants/${standardVariante.value.id}/uploads`, {
+    method: 'POST',
+    body,
+    erfolgsmeldung: 'Buchdatei ersetzt.',
+  })
+  if (ergebnis) await refresh()
+}
+
+async function buchEntfernen() {
+  if (!hauptVorschau.value) return
+  const ok = await aufruf(`/api/assets/${hauptVorschau.value.id}`, {
+    method: 'DELETE',
+    erfolgsmeldung: 'Buchdatei entfernt.',
+  })
+  if (ok !== null) await refresh()
+}
+
+async function extraDateiEntfernen(assetId: string) {
+  const ok = await aufruf(`/api/assets/${assetId}`, {
+    method: 'DELETE',
+    erfolgsmeldung: 'Datei entfernt.',
+  })
+  if (ok !== null) await refresh()
 }
 
 async function materialZuordnen(material: MaterialSummary) {
@@ -225,7 +265,7 @@ async function zuordnungLoesen(relationId: string) {
       <div class="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
         <UiCard
           titel="Schulbuch"
-          untertitel="Die Datei des Buchs. Lösungsheft, Serviceband und Arbeitsblätter liegen als zugeordnete Materialien daneben."
+          untertitel="Genau eine Buchdatei. Lösungsheft, Serviceband und Arbeitsblätter liegen als zugeordnete Materialien daneben."
           icon="book"
         >
           <div v-if="hauptVorschau" class="space-y-4">
@@ -259,6 +299,28 @@ async function zuordnungLoesen(relationId: string) {
                   >
                     Laden
                   </UiButton>
+                  <template v-if="darfBearbeiten">
+                    <input
+                      ref="ersetzenInput"
+                      type="file"
+                      class="sr-only"
+                      @change="buchErsetzen(($event.target as HTMLInputElement).files)"
+                    >
+                    <UiButton
+                      variante="sekundaer"
+                      icon="rotate-right"
+                      @click="ersetzenInput?.click()"
+                    >
+                      Ersetzen
+                    </UiButton>
+                    <UiButton
+                      variante="still"
+                      icon="trash"
+                      nur-icon
+                      title="Buchdatei entfernen"
+                      @click="buchEntfernen"
+                    />
+                  </template>
                 </div>
               </div>
             </div>
@@ -277,6 +339,15 @@ async function zuordnungLoesen(relationId: string) {
                 >
                   {{ asset.title || asset.fileName || 'Datei' }}
                 </button>
+                <UiButton
+                  v-if="darfBearbeiten"
+                  variante="still"
+                  groesse="sm"
+                  icon="trash"
+                  nur-icon
+                  title="Datei entfernen"
+                  @click="extraDateiEntfernen(asset.id)"
+                />
               </li>
             </ul>
           </div>
@@ -290,7 +361,7 @@ async function zuordnungLoesen(relationId: string) {
           />
 
           <label
-            v-if="darfBearbeiten"
+            v-if="darfBearbeiten && !hauptVorschau"
             class="mt-4 flex cursor-pointer flex-col items-center rounded-xl border-2 border-dashed px-4 py-6 text-center transition-colors"
             :class="ziehe ? 'border-primary bg-primary-soft/40' : 'border-line'"
             @dragover.prevent="ziehe = true"
@@ -300,7 +371,6 @@ async function zuordnungLoesen(relationId: string) {
             <input
               ref="dateiInput"
               type="file"
-              multiple
               class="sr-only"
               @change="buchHochladen(($event.target as HTMLInputElement).files)"
             >

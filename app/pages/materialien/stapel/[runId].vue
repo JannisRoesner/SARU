@@ -83,7 +83,7 @@ interface RunOverview {
     linkDuplicates?: boolean
     createLehrwerk?: boolean
     lehrwerkTitle?: string
-    lehrwerkId?: string
+    lehrwerkId?: string | null
     records?: Record<
       string,
       {
@@ -105,6 +105,7 @@ interface RunOverview {
   stats: Record<string, number> | null
   errorMessage: string | null
   aiEnabled: boolean
+  analysisPending?: boolean
   canCommit: boolean
   canUndo: boolean
 }
@@ -124,6 +125,7 @@ const mapping = reactive({
   linkDuplicates: true,
   createLehrwerk: false,
   lehrwerkTitle: '',
+  lehrwerkId: null as string | null,
   records: {} as Record<
     string,
     {
@@ -172,6 +174,7 @@ watch(
     mapping.linkDuplicates = m.linkDuplicates ?? true
     mapping.createLehrwerk = m.createLehrwerk ?? false
     mapping.lehrwerkTitle = m.lehrwerkTitle ?? ''
+    mapping.lehrwerkId = m.lehrwerkId ?? null
 
     const records: typeof mapping.records = {}
     for (const cluster of wert.clusters ?? []) {
@@ -216,9 +219,11 @@ const autosave = useAutosave(mapping, {
   },
 })
 
+const analyseLaeuft = computed(() => Boolean(data.value?.analysisPending))
+
 const schritt = computed(() => {
   const s = data.value?.status
-  if (!s) return 1
+  if (!s || analyseLaeuft.value) return 1
   if (['importiert', 'teilweise_importiert', 'fehlgeschlagen', 'rueckgaengig'].includes(s)) return 4
   if (s === 'laeuft') return 3
   return 2
@@ -239,7 +244,14 @@ const ausgewaehlt = computed(
 
 const materialzahl = computed(() => {
   let n = Object.keys(mapping.records).reduce((sum, id) => sum + clusterMaterialzahl(id), 0)
-  if (mapping.createLehrwerk && mapping.lehrwerkTitle.trim() && ausgewaehlt.value) n += 1
+  if (
+    mapping.createLehrwerk
+    && ausgewaehlt.value
+    && !mapping.lehrwerkId
+    && mapping.lehrwerkTitle.trim()
+  ) {
+    n += 1
+  }
   return n
 })
 
@@ -296,6 +308,26 @@ watch(
   () => data.value?.status,
   () => void logsLaden(),
 )
+
+let analysePoll: ReturnType<typeof setInterval> | undefined
+watch(
+  analyseLaeuft,
+  (an) => {
+    if (analysePoll) {
+      clearInterval(analysePoll)
+      analysePoll = undefined
+    }
+    if (!an) return
+    analysePoll = setInterval(() => {
+      void refresh()
+      void logsLaden()
+    }, 2000)
+  },
+  { immediate: true },
+)
+onUnmounted(() => {
+  if (analysePoll) clearInterval(analysePoll)
+})
 
 function alleWaehlen(wert: boolean) {
   for (const key of Object.keys(mapping.records)) {
@@ -402,6 +434,13 @@ function hatLoesung(clusterId: string): boolean {
         {{ data.errorMessage }}
       </p>
 
+      <UiCard v-if="analyseLaeuft" titel="Analyse läuft" icon="spinner" class="mb-6">
+        <p class="text-sm text-ink-muted">
+          {{ data.files.length }} Dateien sind angenommen. Texte und KI-Vorschläge werden im Hintergrund erzeugt –
+          bei großen Ordnern kann das mehrere Minuten dauern. Diese Seite bleibt offen und aktualisiert sich von selbst.
+        </p>
+      </UiCard>
+
       <div v-if="data.stats" class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div v-for="(wert, key) in data.stats" :key="key" class="karte p-3">
           <p class="text-xs uppercase text-ink-subtle">{{ key }}</p>
@@ -445,20 +484,18 @@ function hatLoesung(clusterId: string): boolean {
                   :optionen="materialTypes.options().map((o) => ({ value: o.value, label: o.label }))"
                 />
               </UiField>
-              <UiField v-if="mapping.createLehrwerk" label="Lehrwerk-Titel" class="sm:col-span-2">
-                <UiInput v-model="mapping.lehrwerkTitle" platzhalter="z. B. Klett Biologie Oberstufe" />
-              </UiField>
+              <StapelLehrwerkFeld
+                v-model:zuordnen="mapping.createLehrwerk"
+                v-model:lehrwerk-id="mapping.lehrwerkId"
+                v-model:titel="mapping.lehrwerkTitle"
+              />
             </div>
-            <label class="mt-3 flex items-center gap-2 text-sm">
-              <input v-model="mapping.createLehrwerk" type="checkbox" class="accent-[var(--color-primary)]">
-              Alles einem Lehrwerk zuordnen
-            </label>
             <p class="mt-3 text-xs text-ink-subtle">
               Änderungen werden automatisch gespeichert.
             </p>
           </UiCard>
 
-          <UiCard titel="Vorschau &amp; Prüfung" icon="eye" einklappbar einklapp-id="stapel-vorschau">
+          <UiCard v-if="!analyseLaeuft" titel="Vorschau &amp; Prüfung" icon="eye" einklappbar einklapp-id="stapel-vorschau">
             <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
               <p class="text-sm text-ink-muted">
                 {{ data.clusters.length }} Bündel · {{ ausgewaehlt }} ausgewählt · {{ materialzahl }} Materialien

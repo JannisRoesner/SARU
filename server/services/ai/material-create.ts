@@ -47,8 +47,11 @@ const LEGACY_OFFICE = new Set(['doc', 'ppt', 'xls'])
 
 /** Titel, Fach, Jahrgang und Kurzinhalt stehen typischerweise vorn. */
 export const AI_CREATE_PREVIEW_PAGES = 6
+/** Einband, Impressum und Inhaltsverzeichnis brauchen etwas mehr vorn. */
+export const AI_CREATE_LEHRWERK_PREVIEW_PAGES = 10
 /** Vision-OCR für die Vorschau: genug für den 8k-Auszug, ohne 70s-4000-Token-Läufe. */
 const AI_CREATE_VISION_MAX_TOKENS = 1600
+const AI_CREATE_LEHRWERK_VISION_MAX_TOKENS = 2200
 
 export type AiCreateContext = {
   subjectId?: string | null
@@ -197,15 +200,20 @@ export async function processAiMaterialAnalyze(analyzeId: string): Promise<void>
     let extractedText = ''
 
     if (isExtractable(fileName)) {
+      const istLehrwerk = mapping.defaultMaterialType === 'lehrwerk'
       const ensured = await ensureExtractedText(buffer, fileName, settings, {
-        maxPages: AI_CREATE_PREVIEW_PAGES,
-        maxOutputTokens: AI_CREATE_VISION_MAX_TOKENS,
+        maxPages: istLehrwerk ? AI_CREATE_LEHRWERK_PREVIEW_PAGES : AI_CREATE_PREVIEW_PAGES,
+        maxOutputTokens: istLehrwerk
+          ? AI_CREATE_LEHRWERK_VISION_MAX_TOKENS
+          : AI_CREATE_VISION_MAX_TOKENS,
+        ocrHint: istLehrwerk ? 'lehrwerk' : 'material',
       })
       extractedText = ensured.text
       extractionMethod = ensured.method
       pageCount = ensured.pageCount ?? null
-      const pagesUsed = ensured.pagesUsed ?? (extractedText.trim() ? AI_CREATE_PREVIEW_PAGES : 0)
-      if (pageCount && pageCount > AI_CREATE_PREVIEW_PAGES) {
+      const previewPages = istLehrwerk ? AI_CREATE_LEHRWERK_PREVIEW_PAGES : AI_CREATE_PREVIEW_PAGES
+      const pagesUsed = ensured.pagesUsed ?? (extractedText.trim() ? previewPages : 0)
+      if (pageCount && pageCount > previewPages) {
         warnings.push(
           `Vorschläge beruhen auf den ersten ${pagesUsed} Seiten (von ${pageCount}).`,
         )
