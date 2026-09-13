@@ -267,26 +267,26 @@ function beiMiniaturKlick() {
 
         <div
           v-if="!kompakt && (kannOeffnen || kannHerunterladen)"
-          class="pointer-events-auto mt-3 flex flex-nowrap items-center gap-5 text-sm font-medium text-primary"
+          class="pointer-events-auto mt-3 flex flex-wrap items-center gap-2"
         >
-          <button
+          <UiButton
             v-if="kannOeffnen"
-            type="button"
-            class="inline-flex items-center gap-1.5 hover:underline"
+            variante="primaer"
+            groesse="sm"
+            icon="eye"
             @click.stop.prevent="oeffnen"
           >
-            <UiIcon name="eye" fest />
             Vorschau
-          </button>
-          <button
+          </UiButton>
+          <UiButton
             v-if="kannHerunterladen"
-            type="button"
-            class="inline-flex items-center gap-1.5 hover:underline"
+            variante="sekundaer"
+            groesse="sm"
+            icon="download"
             @click.stop.prevent="herunterladen"
           >
-            <UiIcon name="download" fest />
             Herunterladen
-          </button>
+          </UiButton>
         </div>
       </div>
     </div>
