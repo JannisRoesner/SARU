@@ -9,7 +9,9 @@ export default defineEventHandler(async (event) => {
   const assetId = parseOrThrow(uuidSchema, getRouterParam(event, 'assetId'))
 
   const origin = getRequestURL(event).origin
-  const info = await getAssetPreviewInfo(assetId, user, origin)
+  // Office-Dokumente öffnen nur lesend – Bearbeiten muss ausdrücklich angefordert werden.
+  const bearbeiten = ['1', 'true'].includes(String(getQuery(event).bearbeiten ?? ''))
+  const info = await getAssetPreviewInfo(assetId, user, origin, { bearbeiten })
   if (!info) throw notFound('Die Datei')
   return info
 })

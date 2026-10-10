@@ -124,7 +124,11 @@ const autosave = useAutosave(autosaveQuelle, {
   },
 })
 
-async function laden() {
+/**
+ * Office-Dokumente öffnen standardmäßig schreibgeschützt. `bearbeiten` fordert beim Server
+ * ausdrücklich einen Schreibzugriff an (Button „Bearbeiten“) – das passiert nie automatisch.
+ */
+async function laden(bearbeiten = false) {
   if (!props.assetId) return
   laedt.value = true
   ladefehler.value = null
@@ -132,7 +136,9 @@ async function laden() {
   textInhalt.value = null
   textFehler.value = false
   try {
-    info.value = await $fetch<AssetPreviewInfo>(`/api/assets/${props.assetId}/preview`)
+    info.value = await $fetch<AssetPreviewInfo>(`/api/assets/${props.assetId}/preview`, {
+      query: bearbeiten ? { bearbeiten: '1' } : undefined,
+    })
     if (info.value.mode === 'text' && info.value.inlineUrl) {
       try {
         textInhalt.value = await $fetch<string>(info.value.inlineUrl, { responseType: 'text' })
@@ -145,6 +151,10 @@ async function laden() {
   } finally {
     laedt.value = false
   }
+}
+
+function bearbeitenFreischalten() {
+  void laden(true)
 }
 
 function strukturAusProps() {
@@ -764,10 +774,40 @@ onBeforeUnmount(() => {
               >
                 {{ info.hinweis }}
               </p>
+              <div
+                class="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm"
+                :class="
+                  info.editing
+                    ? 'border-amber-500/40 bg-amber-500/10 text-ink'
+                    : 'border-white/10 bg-white/5 text-white/80'
+                "
+                role="status"
+              >
+                <UiIcon :name="info.editing ? 'pen-to-square' : 'lock'" fest />
+                <span class="min-w-0 flex-1">
+                  <template v-if="info.editing">
+                    Bearbeitungsmodus – Änderungen werden direkt in der gespeicherten Datei übernommen.
+                  </template>
+                  <template v-else>
+                    Schreibgeschützte Ansicht – das Dokument wird nicht verändert.
+                  </template>
+                </span>
+                <UiButton
+                  v-if="info.canWrite && !info.editing"
+                  variante="sekundaer"
+                  groesse="sm"
+                  icon="pen-to-square"
+                  :laedt="laedt"
+                  class="!border-white/20 !bg-white/10 !text-white hover:!bg-white/20"
+                  @click="bearbeitenFreischalten"
+                >
+                  Bearbeiten
+                </UiButton>
+              </div>
               <iframe
                 :src="info.collaboraUrl"
                 class="min-h-0 w-full flex-1 rounded-lg bg-white shadow-2xl"
-                :title="info.canWrite ? 'Office-Editor (Collabora)' : 'Office-Vorschau (Collabora)'"
+                :title="info.editing ? 'Office-Editor (Collabora)' : 'Office-Vorschau (Collabora, schreibgeschützt)'"
                 allow="fullscreen"
               />
             </div>

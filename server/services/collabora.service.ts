@@ -19,6 +19,14 @@ function signingKey(): Buffer {
   return Buffer.from(raw)
 }
 
+/**
+ * Office-Dokumente öffnen standardmäßig schreibgeschützt. Schreibrechte gibt es nur,
+ * wenn die Rolle sie erlaubt **und** der Nutzer das Bearbeiten ausdrücklich angefordert hat.
+ */
+export function officeSchreibzugriff(rolleDarfSchreiben: boolean, bearbeitenAngefordert: boolean): boolean {
+  return rolleDarfSchreiben && bearbeitenAngefordert
+}
+
 export interface WopiTokenPayload {
   assetId: string
   userId: string

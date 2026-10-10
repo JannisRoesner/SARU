@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   createWopiAccessToken,
+  officeSchreibzugriff,
   parseDiscoveryActions,
   rewriteToBaseOrigin,
   verifyWopiAccessToken,
@@ -69,5 +70,17 @@ describe('rewriteToBaseOrigin', () => {
         'https://office.roesner.family',
       ),
     ).toBe('https://office.roesner.family/browser/dist/cool.html?x=1')
+  })
+})
+
+describe('officeSchreibzugriff', () => {
+  it('öffnet Office-Dokumente nur nach ausdrücklicher Anforderung beschreibbar', () => {
+    expect(officeSchreibzugriff(true, false)).toBe(false)
+    expect(officeSchreibzugriff(true, true)).toBe(true)
+  })
+
+  it('gibt Leserollen auch auf Anforderung keinen Schreibzugriff', () => {
+    expect(officeSchreibzugriff(false, true)).toBe(false)
+    expect(officeSchreibzugriff(false, false)).toBe(false)
   })
 })

@@ -8,6 +8,7 @@ import {
   createWopiAccessToken,
   isCollaboraCandidate,
   isCollaboraConfigured,
+  officeSchreibzugriff,
   shouldShowCollaboraCertHint,
 } from './collabora.service'
 import { getCollaboraSettings } from './settings.service'
@@ -31,8 +32,10 @@ export interface AssetPreviewInfo {
   thumbnailUrl: string | null
   /** Collabora iframe-URL, nur wenn konfiguriert und Dateityp geeignet. */
   collaboraUrl: string | null
-  /** true, wenn der aktuelle Nutzer Office-Dokumente bearbeiten darf. */
+  /** true, wenn der aktuelle Nutzer Office-Dokumente bearbeiten darf (Rolle). */
   canWrite: boolean
+  /** true nur, wenn Collabora mit Schreibrechten geöffnet ist (ausdrücklich angefordert). */
+  editing: boolean
   hinweis: string | null
   /** PDF: Seitenzahl für Bild-Vorschau (Mobile). */
   pdfPageCount: number | null
@@ -45,6 +48,7 @@ export async function getAssetPreviewInfo(
   assetId: string,
   user: SafeUser,
   requestOrigin: string,
+  options: { bearbeiten?: boolean } = {},
 ): Promise<AssetPreviewInfo | null> {
   const [asset] = await useDatabase()
     .select()
@@ -57,6 +61,8 @@ export async function getAssetPreviewInfo(
   const title = asset.title || asset.fileName || asset.url || 'Anhang'
   const downloadUrl = `/api/assets/${asset.id}/download`
   const canWrite = hasRole(user, 'lehrkraft')
+  // Standard ist Nur-Lesen; Schreibrechte erst auf ausdrückliche Anforderung („Bearbeiten“-Button).
+  const editing = officeSchreibzugriff(canWrite, options.bearbeiten === true)
   const base: Omit<
     AssetPreviewInfo,
     'mode' | 'inlineUrl' | 'collaboraUrl' | 'hinweis' | 'thumbnailUrl' | 'pdfPageCount'
@@ -69,6 +75,7 @@ export async function getAssetPreviewInfo(
     url: asset.url,
     downloadUrl,
     canWrite,
+    editing: false,
   }
 
   if (asset.kind === 'link') {
@@ -142,14 +149,14 @@ export async function getAssetPreviewInfo(
       assetId: asset.id,
       userId: user.id,
       userName: user.name || user.email,
-      canWrite,
+      canWrite: editing,
     })
     const collaboraUrl = await buildCollaboraIframeUrl({
       assetId: asset.id,
       fileName: asset.fileName ?? 'dokument.docx',
       accessToken,
       wopiHost,
-      canWrite,
+      canWrite: editing,
     })
 
     if (collaboraUrl) {
@@ -178,6 +185,7 @@ export async function getAssetPreviewInfo(
       return {
         ...base,
         mode: 'collabora',
+        editing,
         inlineUrl: null,
         thumbnailUrl: thumb,
         collaboraUrl,
