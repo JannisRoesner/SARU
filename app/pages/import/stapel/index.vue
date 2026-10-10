@@ -4,7 +4,7 @@ import {
   bulkMaterialAcceptAttribute,
   isBulkMaterialFileName,
 } from '#shared/utils/ai-material-formats'
-import { type GradeLevel } from '#shared/utils/jahrgangsstufen'
+import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
 
 useHead({ title: 'Stapel-Upload' })
 
@@ -108,7 +108,7 @@ async function analysieren() {
       erfolgsmeldung: 'Analyse gestartet.',
       stumm: true,
     })
-    if (ergebnis) await navigateTo(`/materialien/stapel/${ergebnis.runId}`)
+    if (ergebnis) await navigateTo(`/import/stapel/${ergebnis.runId}`)
   } catch (error) {
     fehler.value = (error as { nachricht?: string }).nachricht ?? toApiFehler(error).nachricht
   }
@@ -118,9 +118,9 @@ async function analysieren() {
 <template>
   <div>
     <LayoutSeitenkopf
-      zurueck-to="/materialien/neu"
-      zurueck-label="Wege zum Anlegen"
-      kicker="Materialien"
+      zurueck-to="/import"
+      zurueck-label="Import"
+      kicker="Import"
       titel="Stapel-Upload"
       untertitel="Mehrere Dateien"
     />
@@ -255,7 +255,7 @@ async function analysieren() {
       <ul v-else class="space-y-2">
         <li v-for="lauf in laeufe" :key="lauf.id">
           <NuxtLink
-            :to="`/materialien/stapel/${lauf.id}`"
+            :to="`/import/stapel/${lauf.id}`"
             class="karte karte-klickbar flex flex-wrap items-center gap-3 p-4"
           >
             <span class="flex size-10 items-center justify-center rounded-xl bg-primary-soft text-primary-strong">

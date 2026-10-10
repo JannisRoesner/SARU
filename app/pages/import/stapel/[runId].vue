@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { materialTypes, importStatuses } from '#shared/utils/labels'
-import { type GradeLevel } from '#shared/utils/jahrgangsstufen'
+import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
 import type { MaterialType } from '#shared/types/domain'
 import {
   BULK_FILE_ROLE_LABELS,
@@ -348,7 +348,7 @@ function hatLoesung(clusterId: string): boolean {
   <div>
     <div class="mb-2">
       <NuxtLink
-        to="/materialien/stapel"
+        to="/import/stapel"
         class="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-primary"
       >
         <UiIcon name="arrow-left" fest /> Alle Stapel

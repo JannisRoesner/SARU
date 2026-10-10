@@ -20,18 +20,6 @@ const wege = [
     titel: 'Mit KI',
     text: 'Metadaten aus der Datei.',
   },
-  {
-    to: '/materialien/stapel',
-    icon: 'layer-group',
-    titel: 'Stapel-Upload',
-    text: 'Mehrere Dateien auf einmal.',
-  },
-  {
-    to: '/materialien/neu/moodle',
-    icon: 'graduation-cap',
-    titel: 'Moodle-Kurs',
-    text: 'MBZ- oder IMSCC-Archiv.',
-  },
 ] as const
 </script>
 
@@ -42,10 +30,10 @@ const wege = [
       zurueck-label="Alle Materialien"
       kicker="Materialien"
       titel="Material anlegen"
-      untertitel="Klassisch, KI oder Stapel"
+      untertitel="Klassisch oder KI"
     />
 
-    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div class="grid gap-4 sm:grid-cols-2">
       <NuxtLink
         v-for="weg in wege"
         :key="weg.to"
@@ -63,7 +51,9 @@ const wege = [
     </div>
 
     <p class="mt-6 text-sm text-ink-muted">
-      Schulbuch?
+      Mehrere Dateien, ein Ordner oder ein Moodle-Archiv?
+      <NuxtLink to="/import" class="font-medium text-primary hover:underline">Import</NuxtLink>
+      · Schulbuch?
       <NuxtLink to="/lehrwerke/neu" class="font-medium text-primary hover:underline">
         Lehrwerk anlegen
       </NuxtLink>

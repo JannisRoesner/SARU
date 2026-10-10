@@ -125,9 +125,9 @@ async function anlegen() {
 <template>
   <div>
     <LayoutSeitenkopf
-      zurueck-to="/materialien/neu"
-      zurueck-label="Wege zum Anlegen"
-      kicker="Materialien"
+      zurueck-to="/import"
+      zurueck-label="Import"
+      kicker="Import"
       titel="Moodle-Kurs anlegen"
       untertitel="MBZ- oder IMSCC-Archiv"
     />

@@ -50,6 +50,13 @@ export default defineNuxtConfig({
     pageTransition: { name: 'page', mode: 'out-in' },
   },
 
+  // Alte Adressen (Lesezeichen, Verlauf) führen zum neuen Import-Bereich.
+  routeRules: {
+    '/materialien/stapel': { redirect: { to: '/import/stapel', statusCode: 308 } },
+    '/materialien/stapel/**': { redirect: { to: '/import/stapel/**', statusCode: 308 } },
+    '/materialien/neu/moodle': { redirect: { to: '/import/moodle', statusCode: 308 } },
+  },
+
   runtimeConfig: {
     databaseUrl: '',
     sessionSecret: '',

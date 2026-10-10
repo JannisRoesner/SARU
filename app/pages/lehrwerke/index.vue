@@ -86,9 +86,6 @@ const fachChips = computed(() => (facetten.value?.subjects ?? []).slice(0, 8))
       untertitel="Schulbücher und Zuordnungen"
     >
       <template v-if="darfBearbeiten" #aktionen>
-        <UiButton to="/materialien/stapel" variante="sekundaer" icon="layer-group">
-          Stapel-Upload
-        </UiButton>
         <UiButton to="/lehrwerke/neu" variante="primaer" icon="plus">
           Lehrwerk anlegen
         </UiButton>

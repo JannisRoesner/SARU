@@ -18,14 +18,16 @@ const HAUPTNAVIGATION: NavEintrag[] = [
   { pfad: '/materialien', label: 'Materialien', icon: 'folder-open' },
   { pfad: '/reihen', label: 'Unterrichtsreihen', icon: 'layer-group' },
   { pfad: '/stunden', label: 'Unterrichtsstunden', icon: 'chalkboard-user' },
+  { pfad: '/import', label: 'Import', icon: 'file-import', nurBearbeiter: true },
 ]
 
 const WERKZEUGE: NavEintrag[] = [
-  { pfad: '/import', label: 'Import', icon: 'file-import', nurBearbeiter: true },
   { pfad: '/einstellungen', label: 'Einstellungen', icon: 'gear' },
 ]
 
-const werkzeuge = computed(() => WERKZEUGE.filter((e) => !e.nurBearbeiter || darfBearbeiten.value))
+const hauptnavigation = computed(() =>
+  HAUPTNAVIGATION.filter((e) => !e.nurBearbeiter || darfBearbeiten.value),
+)
 
 function istAktiv(pfad: string) {
   return pfad === '/' ? route.path === '/' : route.path.startsWith(pfad)
@@ -106,7 +108,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', beiTastenkuerzel))
 
       <nav class="min-h-0 flex-1 space-y-6 overflow-y-auto px-3 py-4" aria-label="Hauptnavigation">
         <ul class="space-y-0.5">
-          <li v-for="eintrag in HAUPTNAVIGATION" :key="eintrag.pfad">
+          <li v-for="eintrag in hauptnavigation" :key="eintrag.pfad">
             <NuxtLink
               :to="eintrag.pfad"
               class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors"
@@ -128,7 +130,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', beiTastenkuerzel))
             Verwaltung
           </p>
           <ul class="space-y-0.5">
-            <li v-for="eintrag in werkzeuge" :key="eintrag.pfad">
+            <li v-for="eintrag in WERKZEUGE" :key="eintrag.pfad">
               <NuxtLink
                 :to="eintrag.pfad"
                 class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors"
@@ -149,10 +151,11 @@ onBeforeUnmount(() => document.removeEventListener('keydown', beiTastenkuerzel))
           <p class="pb-1.5 text-[0.7rem] font-semibold tracking-wider text-ink-subtle uppercase">
             Schnell anlegen
           </p>
-          <div class="grid grid-cols-3 gap-1.5">
+          <div class="grid grid-cols-2 gap-1.5">
             <NuxtLink
               v-for="ziel in [
                 { to: '/materialien/neu', icon: 'file-circle-plus', label: 'Material' },
+                { to: '/lehrwerke/neu', icon: 'book', label: 'Lehrwerk' },
                 { to: '/stunden/neu', icon: 'calendar-plus', label: 'Stunde' },
                 { to: '/reihen/neu', icon: 'layer-group', label: 'Reihe' },
               ]"

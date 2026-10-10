@@ -181,8 +181,8 @@ watch(
 <template>
   <div>
     <div class="mb-2">
-      <NuxtLink to="/import" class="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-primary">
-        <UiIcon name="arrow-left" fest /> Alle Importe
+      <NuxtLink to="/import/kursmappe" class="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-primary">
+        <UiIcon name="arrow-left" fest /> Alle Kursmappen-Importe
       </NuxtLink>
     </div>
 

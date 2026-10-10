@@ -51,7 +51,11 @@ const wege = [
     </div>
 
     <p class="mt-6 text-sm text-ink-muted">
-      Einzelmaterial?
+      Ordner oder DVD mit vielen Dateien?
+      <NuxtLink to="/import/stapel" class="font-medium text-primary hover:underline">
+        Import
+      </NuxtLink>
+      · Einzelmaterial?
       <NuxtLink to="/materialien/neu" class="font-medium text-primary hover:underline">
         Material anlegen
       </NuxtLink>

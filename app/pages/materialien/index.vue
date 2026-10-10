@@ -131,12 +131,6 @@ const aktiveFilter = computed(() => {
       untertitel="Arbeitsblätter, Kurse, Medien"
     >
       <template v-if="darfBearbeiten" #aktionen>
-        <UiButton to="/materialien/stapel" variante="sekundaer" icon="layer-group">
-          Stapel-Upload
-        </UiButton>
-        <UiButton to="/materialien/neu/moodle" variante="sekundaer" icon="graduation-cap">
-          Moodle-Kurs
-        </UiButton>
         <UiButton to="/materialien/neu" variante="primaer" icon="plus">
           Material anlegen
         </UiButton>

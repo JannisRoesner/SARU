@@ -67,7 +67,7 @@ const schnellaktionen = [
   { label: 'Material anlegen', kurz: 'Material', icon: 'plus', to: '/materialien/neu', variante: 'primaer' as const },
   { label: 'Stunde anlegen', kurz: 'Stunde', icon: 'calendar-plus', to: '/stunden/neu', variante: 'sekundaer' as const },
   { label: 'Reihe anlegen', kurz: 'Reihe', icon: 'layer-group', to: '/reihen/neu', variante: 'sekundaer' as const },
-  { label: 'Import aus Schulportal', kurz: 'Import', icon: 'file-import', to: '/import', variante: 'sekundaer' as const },
+  { label: 'Import', kurz: 'Import', icon: 'file-import', to: '/import', variante: 'sekundaer' as const },
 ]
 
 const { favoritSetzen } = useMaterialAktionen(() => refresh())
