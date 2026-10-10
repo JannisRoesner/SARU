@@ -123,7 +123,7 @@ export async function suggestMaterialMetadata(
     ctx.lessonContext?.trim()
       ? `Unterrichtskontext: ${ctx.lessonContext.trim().slice(0, 1500)}`
       : null,
-  ].filter(Boolean)
+  ].filter((part): part is string => Boolean(part))
 
   const fachListe = schulfaecherPromptListe()
   const excerpt = text

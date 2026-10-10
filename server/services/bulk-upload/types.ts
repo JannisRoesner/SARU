@@ -17,9 +17,9 @@ export const BULK_EXTRACT_CONCURRENCY = 4
 /** Parallele Metadaten-Vorschläge. */
 export const BULK_AI_CONCURRENCY = 3
 
-export type BulkClusterKind = 'paar' | 'einzeln' | 'unklar'
+export type BulkClusterKind = 'paar' | 'varianten' | 'einzeln' | 'unklar'
 
-export const BULK_FILE_ROLES = ['schueler', 'loesung', 'einzeln', 'abbildung', 'anhaengsel'] as const
+export const BULK_FILE_ROLES = ['schueler', 'loesung', 'einzeln', 'abbildung', 'anhaengsel', 'fassung'] as const
 
 export interface BulkUploadFileSuggestion {
   title: string
@@ -125,6 +125,7 @@ export interface BulkUploadStats {
   materialien?: number
   dateien?: number
   verknuepft?: number
+  fassungen?: number
   uebersprungen?: number
   fehlgeschlagen?: number
 }

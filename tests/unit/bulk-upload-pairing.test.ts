@@ -5,6 +5,8 @@ import {
   clusterBulkFiles,
   clusterTitleFromStem,
   detectFolderRole,
+  fassungInfo,
+  fassungLabel,
 } from '../../server/services/bulk-upload/pairing'
 
 describe('resolveBulkGradeLevels', () => {
@@ -163,5 +165,76 @@ describe('Stapel-Paarung', () => {
       { sourceRef: 'b', fileName: 'Test.docx', extension: 'docx' },
     ])
     expect(unklar[0]!.kind).toBe('unklar')
+  })
+
+  it('liest die Fassungs-Bezeichnung aus dem Dateinamen', () => {
+    expect(fassungLabel('Hunde und Katzen - Fassung Handbuch (LH 1.1 Diff-02).pdf')).toBe('Handbuch')
+    expect(fassungLabel('Natura 1 Lehrerband - Fassung Unterrichtsassistent (alle Seiten).pdf')).toBe(
+      'Unterrichtsassistent',
+    )
+    expect(fassungInfo('Modell Katzenkralle (2) - Fassung Assistent (S038-03)')).toEqual({
+      base: 'Modell Katzenkralle (2)',
+      label: 'Assistent',
+    })
+    expect(fassungLabel('Hunde und Katzen.pdf')).toBeNull()
+  })
+
+  it('fasst Dateien mit „- Fassung …“ im selben Ordner zu einem Material mit mehreren Fassungen zusammen', () => {
+    const clusters = clusterBulkFiles([
+      {
+        sourceRef: 'h',
+        fileName: 'Hunde und Katzen im Vergleich (2) - Fassung Handbuch (LH 1.1 Diff-02).pdf',
+        relativePath: 'Natura 1/Kapitel 01/Arbeitsblätter/Hunde und Katzen im Vergleich (2) - Fassung Handbuch (LH 1.1 Diff-02).pdf',
+        extension: 'pdf',
+      },
+      {
+        sourceRef: 'a',
+        fileName: 'Hunde und Katzen im Vergleich (2) - Fassung Assistent (S040-03).pdf',
+        relativePath: 'Natura 1/Kapitel 01/Arbeitsblätter/Hunde und Katzen im Vergleich (2) - Fassung Assistent (S040-03).pdf',
+        extension: 'pdf',
+      },
+      {
+        sourceRef: 'x',
+        fileName: 'Der Wolf (S032-01).pdf',
+        relativePath: 'Natura 1/Kapitel 01/Arbeitsblätter/Der Wolf (S032-01).pdf',
+        extension: 'pdf',
+      },
+    ])
+    expect(clusters).toHaveLength(2)
+    const faessungen = clusters.find((c) => c.kind === 'varianten')!
+    expect(faessungen.suggestions.title).toBe('Hunde und Katzen im Vergleich (2)')
+    // alphabetisch nach Bezeichnung: „Assistent“ wird das Material, „Handbuch“ eine weitere Fassung
+    expect(faessungen.suggestedRoles).toEqual({ a: 'schueler', h: 'fassung' })
+    expect(clusters.find((c) => c.kind === 'einzeln')!.fileRefs).toEqual(['x'])
+  })
+
+  it('bildet keine Fassungen, wenn die Bezeichnung doppelt vorkommt oder der Ordner verschieden ist', () => {
+    const doppelt = clusterBulkFiles([
+      { sourceRef: 'a', fileName: 'AB - Fassung A (1).pdf', relativePath: 'x/AB - Fassung A (1).pdf', extension: 'pdf' },
+      { sourceRef: 'b', fileName: 'AB - Fassung A (2).pdf', relativePath: 'x/AB - Fassung A (2).pdf', extension: 'pdf' },
+    ])
+    expect(doppelt.every((c) => c.kind !== 'varianten')).toBe(true)
+
+    const andererOrdner = clusterBulkFiles([
+      { sourceRef: 'a', fileName: 'AB - Fassung A.pdf', relativePath: 'x/AB - Fassung A.pdf', extension: 'pdf' },
+      { sourceRef: 'b', fileName: 'AB - Fassung B.pdf', relativePath: 'y/AB - Fassung B.pdf', extension: 'pdf' },
+    ])
+    expect(andererOrdner).toHaveLength(2)
+    expect(andererOrdner.every((c) => c.kind === 'einzeln')).toBe(true)
+  })
+
+  it('ordnet drei Fassungen einem Material zu (Lehrerband)', () => {
+    const clusters = clusterBulkFiles(
+      ['Lehrerhandbuch', 'Unterrichtsassistent', 'Kopie'].map((label) => ({
+        sourceRef: label,
+        fileName: `Natura 1 Lehrerband - Fassung ${label} (alle Seiten).pdf`,
+        relativePath: `Natura 1/00 Lehrerband/Natura 1 Lehrerband - Fassung ${label} (alle Seiten).pdf`,
+        extension: 'pdf',
+      })),
+    )
+    expect(clusters).toHaveLength(1)
+    expect(clusters[0]!.kind).toBe('varianten')
+    expect(clusters[0]!.suggestions.title).toBe('Natura 1 Lehrerband')
+    expect(Object.values(clusters[0]!.suggestedRoles).sort()).toEqual(['fassung', 'fassung', 'schueler'])
   })
 })

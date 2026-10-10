@@ -14,7 +14,14 @@ import { appError, invalidInput, notFound } from '../../utils/errors'
 import { sha256 } from '../../utils/crypto'
 import { createLogger } from '../../utils/logger'
 import { findAttachmentDuplicates } from '../import/duplicates'
-import { addFileAsset, addRelation, createMaterial, deleteMaterial } from '../material.service'
+import {
+  addFileAsset,
+  addRelation,
+  addVariant,
+  createMaterial,
+  deleteMaterial,
+  updateVariant,
+} from '../material.service'
 import {
   ensureExtractedText,
   readExtractedTextSidecar,
@@ -38,7 +45,7 @@ import { mapLimit } from '../../utils/async'
 import { BULK_FOLDER_ROLE_LABELS, resolveBulkGradeLevels } from '#shared/utils/bulk-upload'
 import { suggestFileMetadata, titleFromFileName } from './suggest-metadata'
 import { AI_CREATE_ADAPTER_ID } from '../ai/material-create'
-import { clusterBulkFiles, detectFolderRole, filesAsSingletonClusters } from './pairing'
+import { clusterBulkFiles, detectFolderRole, fassungLabel, filesAsSingletonClusters } from './pairing'
 import { expandBulkArchives } from './zip'
 import {
   BULK_AI_CONCURRENCY,
@@ -346,7 +353,9 @@ export async function processBulkPdfUpload(runId: string): Promise<void> {
       } satisfies BulkUploadDetectedFile
     })
 
-    const filesByRef = new Map(detectedFiles.map((file) => [file.sourceRef, file]))
+    const filesByRef = new Map<string, BulkUploadDetectedFile>(
+      detectedFiles.map((file) => [file.sourceRef, file]),
+    )
     const clusters = clusterBulkFiles(
       detectedFiles.map((file) => ({
         sourceRef: file.sourceRef,
@@ -675,6 +684,8 @@ export async function commitBulkUpload(
     extractionMethod?: BulkUploadDetectedFile['extractionMethod']
     aiUsed: boolean
     assets: { file: BulkUploadDetectedFile; role: 'haupt' | 'anhang' }[]
+    /** Weitere Fassungen desselben Materials – jede wird eine eigene Variante. */
+    fassungen?: BulkUploadDetectedFile[]
   }): Promise<string> => {
     const materialId = await createMaterial(
       {
@@ -703,6 +714,20 @@ export async function commitBulkUpload(
     for (const asset of input.assets) {
       await attachStagedAsset(variantId, asset.file, asset.role)
       stats.dateien = (stats.dateien ?? 0) + 1
+    }
+    if (input.fassungen?.length) {
+      // Bezeichnung der ersten Fassung aus dem Dateinamen („… - Fassung Handbuch“).
+      const hauptLabel = fassungLabel(input.assets.find((a) => a.role === 'haupt')?.file.fileName ?? '')
+      if (hauptLabel) await updateVariant(variantId, { label: hauptLabel })
+      for (const file of input.fassungen) {
+        const extraId = await addVariant(materialId, {
+          label: fassungLabel(file.fileName) ?? 'Weitere Fassung',
+          variantKind: 'standard',
+        })
+        await attachStagedAsset(extraId, file, 'haupt')
+        stats.dateien = (stats.dateien ?? 0) + 1
+        stats.fassungen = (stats.fassungen ?? 0) + 1
+      }
     }
     materialIds.push(materialId)
     stats.materialien = (stats.materialien ?? 0) + 1
@@ -787,6 +812,7 @@ export async function commitBulkUpload(
     })
     const loesungen = clusterFiles.filter((file) => roles[file.sourceRef] === 'loesung')
     const anhaenge = clusterFiles.filter((file) => roles[file.sourceRef] === 'anhaengsel')
+    const fassungFiles = clusterFiles.filter((file) => roles[file.sourceRef] === 'fassung')
     let primaryFiles = schueler
     let solutionFiles = loesungen
     if (!primaryFiles.length && solutionFiles.length) {
@@ -794,7 +820,13 @@ export async function commitBulkUpload(
       solutionFiles = []
     }
     if (!primaryFiles.length) {
-      primaryFiles = clusterFiles.filter((file) => roles[file.sourceRef] !== 'anhaengsel')
+      primaryFiles = clusterFiles.filter(
+        (file) => roles[file.sourceRef] !== 'anhaengsel' && roles[file.sourceRef] !== 'fassung',
+      )
+    }
+    if (!primaryFiles.length && fassungFiles.length) {
+      // Nur Fassungen gewählt: die erste wird zum Material, die übrigen bleiben Fassungen davon.
+      primaryFiles = [fassungFiles.shift()!]
     }
 
     try {
@@ -848,6 +880,7 @@ export async function commitBulkUpload(
             { file: haupt, role: 'haupt' },
             ...rest.map((file) => ({ file, role: 'anhang' as const })),
           ],
+          fassungen: fassungFiles,
         })
         primaryByCluster.set(cluster.clusterId, primaryId)
         await track(cluster.clusterId, primaryId, 'erstellt')

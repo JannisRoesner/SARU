@@ -361,7 +361,7 @@ export const bulkUploadMappingSchema = z.object({
         action: z.enum(['erstellen', 'ueberspringen']).default('erstellen'),
         duplicateOfId: uuidSchema.nullish(),
         fileRoles: z
-          .record(z.string(), z.enum(['schueler', 'loesung', 'einzeln', 'abbildung', 'anhaengsel']))
+          .record(z.string(), z.enum(['schueler', 'loesung', 'einzeln', 'abbildung', 'anhaengsel', 'fassung']))
           .optional(),
         links: z.record(z.string(), z.boolean()).optional(),
         solutionTitle: z.string().max(300).optional(),

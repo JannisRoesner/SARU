@@ -12,7 +12,7 @@ export type BulkFolderRole =
   | 'versuche'
   | 'sonstiges'
 
-export type BulkFileRole = 'schueler' | 'loesung' | 'einzeln' | 'abbildung' | 'anhaengsel'
+export type BulkFileRole = 'schueler' | 'loesung' | 'einzeln' | 'abbildung' | 'anhaengsel' | 'fassung'
 
 export const BULK_FOLDER_ROLE_LABELS: Record<BulkFolderRole, string> = {
   kopiervorlagen: 'Kopiervorlagen',
@@ -29,6 +29,7 @@ export const BULK_FILE_ROLE_LABELS: Record<BulkFileRole, string> = {
   einzeln: 'Eigenes Material',
   abbildung: 'Abbildung',
   anhaengsel: 'Anhang',
+  fassung: 'Weitere Fassung',
 }
 
 /** Mehrfachauswahl; `gradeLevel` nur noch für ältere Stapel-Läufe. */

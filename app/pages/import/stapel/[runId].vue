@@ -37,7 +37,7 @@ interface DetectedFile {
 
 interface DetectedCluster {
   clusterId: string
-  kind: 'paar' | 'einzeln' | 'unklar'
+  kind: 'paar' | 'varianten' | 'einzeln' | 'unklar'
   folderRole: BulkFolderRole
   stem: string
   fileRefs: string[]
@@ -533,7 +533,15 @@ function hatLoesung(clusterId: string): boolean {
                       <div class="min-w-0 flex-1 space-y-3">
                         <div>
                           <p class="text-xs text-ink-subtle">
-                            {{ cluster.kind === 'paar' ? 'Paar' : cluster.kind === 'unklar' ? 'Bitte prüfen' : 'Einzeldatei' }}
+                            {{
+                              cluster.kind === 'paar'
+                                ? 'Paar'
+                                : cluster.kind === 'varianten'
+                                  ? 'Fassungen'
+                                  : cluster.kind === 'unklar'
+                                    ? 'Bitte prüfen'
+                                    : 'Einzeldatei'
+                            }}
                             · {{ cluster.fileRefs.length }} Datei{{ cluster.fileRefs.length === 1 ? '' : 'en' }}
                             <template v-if="cluster.suggestions.aiUsed"> · KI</template>
                           </p>

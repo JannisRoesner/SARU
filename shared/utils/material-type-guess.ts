@@ -8,9 +8,13 @@ function fold(value: string): string {
     .replace(/\p{M}/gu, '')
 }
 
+export type BookLikeMaterialType = 'lehrwerk' | 'serviceband' | 'loesungsbuch'
+
 const BOOK_TYPES = new Set<MaterialType>(['lehrwerk', 'serviceband', 'loesungsbuch'])
 
-export function isBookLikeMaterialType(type: MaterialType | null | undefined): boolean {
+export function isBookLikeMaterialType(
+  type: MaterialType | null | undefined,
+): type is BookLikeMaterialType {
   return Boolean(type && BOOK_TYPES.has(type))
 }
 

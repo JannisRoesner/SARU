@@ -65,6 +65,24 @@ function hasSolutionSuffix(stem: string): boolean {
   return SOLUTION_SUFFIX.test(folded) && folded.replace(SOLUTION_SUFFIX, '') !== ''
 }
 
+/**
+ * Mehrere Fassungen desselben Materials: `<Titel> - Fassung <Bezeichnung> (<Code>).<Endung>`,
+ * z. B. „Hunde und Katzen - Fassung Handbuch (LH 1.1).pdf“ neben „… - Fassung Assistent (S040).pdf“.
+ */
+const FASSUNG = /^(.*?)\s+[-–—]\s+Fassung\s+(.+?)(?:\s+\(([^)]*)\))?$/i
+
+export function fassungInfo(stem: string): { base: string; label: string } | null {
+  const match = FASSUNG.exec(stem.trim())
+  const base = match?.[1]?.trim()
+  const label = match?.[2]?.trim()
+  return base && label ? { base, label } : null
+}
+
+/** Bezeichnung der Fassung aus dem Dateinamen („Handbuch“), sonst `null`. */
+export function fassungLabel(fileName: string): string | null {
+  return fassungInfo(basename(fileName).replace(/\.[^.]+$/, ''))?.label ?? null
+}
+
 function posixPath(value: string): string {
   return value.replace(/\\/g, '/').replace(/\/+/g, '/')
 }
@@ -168,6 +186,13 @@ function defaultRoles(
   solutionRefs: ReadonlySet<string> | null = null,
 ): Record<string, BulkFileRole> {
   const roles: Record<string, BulkFileRole> = {}
+  if (kind === 'varianten') {
+    // Die erste Fassung (nach Bezeichnung sortiert) ist das Material, die weiteren sind Fassungen davon.
+    files.forEach((file, index) => {
+      roles[file.sourceRef] = index === 0 ? 'schueler' : 'fassung'
+    })
+    return roles
+  }
   if (kind !== 'paar') {
     const einzel = folderRole === 'abbildungen' ? 'abbildung' : 'einzeln'
     for (const file of files) roles[file.sourceRef] = einzel
@@ -251,7 +276,8 @@ export function clusterBulkFiles(
   for (const file of files) {
     const path = posixPath(file.relativePath || file.fileName)
     const folder = parentFolder(path)
-    const stem = solutionBaseStem(stemOf(file.fileName))
+    const fassung = fassungInfo(stemOf(file.fileName))
+    const stem = fassung ? fold(fassung.base) : solutionBaseStem(stemOf(file.fileName))
     const key = `${fold(folder)}::${stem}`
     const list = groups.get(key)
     if (list) list.push(file)
@@ -267,12 +293,23 @@ export function clusterBulkFiles(
         .filter((file) => hasSolutionSuffix(stemOf(file.fileName)))
         .map((file) => file.sourceRef),
     )
-    const namedSolutionPair = group.length === 2 && solutionRefs.size === 1
+    // Mehrere Fassungen („… - Fassung A“, „… - Fassung B“) gehören zu einem Material.
+    const fassungLabels = group.map((file) => fassungInfo(stemOf(file.fileName))?.label)
+    const fassungsGruppe =
+      group.length >= 2 &&
+      fassungLabels.every(Boolean) &&
+      new Set(fassungLabels.map((label) => fold(label!))).size === group.length
+    if (fassungsGruppe) {
+      group.sort((a, b) =>
+        fold(fassungInfo(stemOf(a.fileName))!.label).localeCompare(fold(fassungInfo(stemOf(b.fileName))!.label)),
+      )
+    }
+    const namedSolutionPair = !fassungsGruppe && group.length === 2 && solutionRefs.size === 1
     const first = namedSolutionPair
       ? group.find((file) => !solutionRefs.has(file.sourceRef))!
       : group[0]!
     const folderRole = detectFolderRole(first.relativePath, first.fileName)
-    const stem = stemOf(first.fileName)
+    const stem = fassungsGruppe ? fassungInfo(stemOf(first.fileName))!.base : stemOf(first.fileName)
     const extensions = new Set(group.map((file) => file.extension))
     const isPair =
       group.length === 2 &&
@@ -285,7 +322,13 @@ export function clusterBulkFiles(
             (SOLUTION_EXTENSIONS.has(group[0]!.extension) &&
               OFFICE_EXTENSIONS.has(group[1]!.extension)))))
 
-    const kind: BulkClusterKind = isPair ? 'paar' : group.length === 1 ? 'einzeln' : 'unklar'
+    const kind: BulkClusterKind = fassungsGruppe
+      ? 'varianten'
+      : isPair
+        ? 'paar'
+        : group.length === 1
+          ? 'einzeln'
+          : 'unklar'
     const fileRefs = group.map((file) => file.sourceRef)
     const clusterId = group.length === 1 ? first.sourceRef : `cluster:${index}:${fold(stem).slice(0, 40)}`
     // Bei benannten Lösungspaaren bestimmt nur die Aufgabenfassung den Materialtyp.
