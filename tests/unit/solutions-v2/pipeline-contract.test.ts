@@ -137,15 +137,15 @@ describe('solution pipeline v2 contract', () => {
 
   it('weist offenen Schreibbereichen stabile IDs und eigenen Aufgabenbezug zu', () => {
     const document = buildTextOnlyLayoutDocumentV2(
-      '1. Worauf ist beim Rasieren zu achten?\n2. Wie funktioniert Epilieren?',
-      'rasieren',
+      '1. Worauf ist beim Gießen zu achten?\n2. Wie funktioniert Umtopfen?',
+      'gießen',
     )
     const build = buildSolutionPlanV2({
       document,
       sourceFormat: 'pdf',
       tasks: [
-        freeTextTask('old-1', 1, 0.4, 'Worauf ist beim Rasieren zu achten?'),
-        freeTextTask('old-2', 1, 0.75, 'Wie funktioniert Epilieren?'),
+        freeTextTask('old-1', 1, 0.4, 'Worauf ist beim Gießen zu achten?'),
+        freeTextTask('old-2', 1, 0.75, 'Wie funktioniert Umtopfen?'),
       ],
     })
 
@@ -154,7 +154,7 @@ describe('solution pipeline v2 contract', () => {
     expect(build.plan.tasks[0]!.answerSlots[0]!.targetId).not.toBe(
       build.plan.tasks[1]!.answerSlots[0]!.targetId,
     )
-    expect(build.plan.tasks[0]!.answerSlots[0]!.promptContext).toContain('Rasieren')
+    expect(build.plan.tasks[0]!.answerSlots[0]!.promptContext).toContain('Gießen')
     expect(validateSolutionPlanV2(build.plan)).toEqual([])
   })
 

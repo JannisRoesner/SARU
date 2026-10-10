@@ -14,14 +14,14 @@ import {
 import type { CandidateBank } from '../../../server/services/ai/solutions/types'
 import type { StructuredSolution } from '../../../server/services/ai/document-fill'
 
-const VORHAUT_WORDS = [
-  'Eichel',
+const BLATT_WORDS = [
+  'Blattstiel',
   'unterschiedlich',
   'lang',
-  'Hautschichten',
-  'Schleimhaut',
-  'Erektion',
-  'Nervenenden',
+  'Zellschichten',
+  'Wachsschicht',
+  'Spaltöffnung',
+  'Leitbündel',
   'Unterseite',
   'Spitze',
 ]
@@ -56,11 +56,11 @@ function solutionFromWords(words: string[]): StructuredSolution {
 }
 
 describe('solution validation gate', () => {
-  it('zerlegt die Vorhaut-Wortliste (zweizeilig mit /) in 9 Kandidaten', () => {
+  it('zerlegt die Blatt-Wortliste (zweizeilig mit /) in 9 Kandidaten', () => {
     const text = `
 Wortliste:
-Eichel / Erektion / Hautschichten / lang / Nervenenden /
-Schleimhaut / Spitze / unterschiedlich / Unterseite
+Blattstiel / Spaltöffnung / Zellschichten / lang / Leitbündel /
+Wachsschicht / Spitze / unterschiedlich / Unterseite
 Fülle die Lücken mit Wörtern aus der Wortliste.
 `
     const bank = extractCandidateBank({ documentText: '', pdfText: text, blankCount: 9 })
@@ -71,10 +71,10 @@ Fülle die Lücken mit Wörtern aus der Wortliste.
 
   it('wirft bei endgültigem Validierungsfehler und speichert keine ???-Antworten', () => {
     const malformedBank = bankFromWords([
-      'Eichel / Erektion / Hautschichten / lang / Nervenenden /',
-      'Schleimhaut / Spitze / unterschiedlich / Unterseite',
+      'Blattstiel / Spaltöffnung / Zellschichten / lang / Leitbündel /',
+      'Wachsschicht / Spitze / unterschiedlich / Unterseite',
     ])
-    const answers = solutionFromWords(VORHAUT_WORDS)
+    const answers = solutionFromWords(BLATT_WORDS)
     const validation = validateClozeAnswers(answers, malformedBank, 9)
     expect(validation.valid).toBe(false)
     expect(validation.violations.outOfBank.length).toBeGreaterThan(0)
@@ -97,8 +97,8 @@ Fülle die Lücken mit Wörtern aus der Wortliste.
   })
 
   it('lässt korrekte bijektive Zuordnung passieren', () => {
-    const bank = bankFromWords(VORHAUT_WORDS)
-    const answers = solutionFromWords(VORHAUT_WORDS)
+    const bank = bankFromWords(BLATT_WORDS)
+    const answers = solutionFromWords(BLATT_WORDS)
     const validation = validateClozeAnswers(answers, bank, 9)
     expect(validation.valid).toBe(true)
     expect(() => assertClozeValidationPassed(validation)).not.toThrow()

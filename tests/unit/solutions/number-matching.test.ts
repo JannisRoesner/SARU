@@ -11,18 +11,17 @@ import { buildSolutionPlan } from '../../../server/services/ai/solutions/orchest
 import type { PdfBlankRegion } from '../../../server/services/ai/document-fill'
 import { buildSolutionPrompt } from '../../../server/services/ai/prompts'
 
-const SPERMA_TEXT = `
-Du bist kein Werwolf – Sexualerziehung © WDR 2020
-10_Arbeitsblatt: Sperma
-Viele Menschen denken, Sperma würde nur aus Samenzellen bestehen. Doch das stimmt nicht!
-Schaue dir den Filmclip „Sperma“ an (Clip 10).
+const TRANSPORT_TEXT = `
+10_Arbeitsblatt: Transport
+Viele Menschen denken, Pflanzen würden nur über die Wurzeln trinken. Doch das stimmt nicht!
+Schaue dir den Filmclip „Transport“ an (Clip 10).
 Ordne anschließend die Nummern der Begriffe den richtigen Aussagen zu.
-___ bilden Samenzellen (Spermien)
-___ reife Samenzellen sammeln sich hier.
-___ geben oft schon vor dem Orgasmus klare, leicht schleimige Flüssigkeit ab
-___ produziert dünnflüssiges, milchiges Sekret
-___ produzieren eine Flüssigkeit mit viel Fruchtzucker
-1 Cowpersche Drüsen 2 Prostata 3 Nebenhoden 4 Samenbläschen 5 Hoden
+___ nehmen Wasser aus dem Boden auf.
+___ transportieren Wasser und Nährstoffe nach oben.
+___ öffnen sich bei Licht und lassen Gase hindurch
+___ bilden den grünen Farbstoff für die Fotosynthese
+___ speichern Zucker in Form von Stärke
+1 Wurzelhaare 2 Leitbündel 3 Spaltöffnungen 4 Chloroplasten 5 Speichergewebe
 `
 
 function blank(i: number, right: string): PdfBlankRegion {
@@ -41,22 +40,22 @@ function blank(i: number, right: string): PdfBlankRegion {
 
 describe('number-matching', () => {
   it('erkennt Instruktion „Ordne die Nummern … zu“', () => {
-    expect(instructionExpectsNumberAnswers(SPERMA_TEXT)).toBe(true)
+    expect(instructionExpectsNumberAnswers(TRANSPORT_TEXT)).toBe(true)
     expect(
       instructionExpectsNumberAnswers('Fülle die Lücken mit der Wortliste.'),
     ).toBe(false)
   })
 
   it('extrahiert nummerierte Begriffslegende (inline)', () => {
-    const legend = extractNumberedTermMap(SPERMA_TEXT)
+    const legend = extractNumberedTermMap(TRANSPORT_TEXT)
     expect(legend).not.toBeNull()
     expect(legend!.entries.map((e) => e.number)).toEqual(['1', '2', '3', '4', '5'])
-    expect(legend!.numberToTerm.get('5')).toMatch(/Hoden/i)
-    expect(legend!.numberToTerm.get('2')).toMatch(/Prostata/i)
+    expect(legend!.numberToTerm.get('5')).toMatch(/Speichergewebe/i)
+    expect(legend!.numberToTerm.get('2')).toMatch(/Leitbündel/i)
   })
 
   it('detectNumberMatchingTask liefert Bank mit Nummern', () => {
-    const task = detectNumberMatchingTask(SPERMA_TEXT)
+    const task = detectNumberMatchingTask(TRANSPORT_TEXT)
     expect(task).not.toBeNull()
     const bank = numberMatchingCandidateBank(task!, 5)
     expect(bank.candidates.map((c) => c.value)).toEqual(['1', '2', '3', '4', '5'])
@@ -64,13 +63,13 @@ describe('number-matching', () => {
   })
 
   it('coerceAnswersToNumbers mappt Begriffe auf Ziffern', () => {
-    const task = detectNumberMatchingTask(SPERMA_TEXT)!
+    const task = detectNumberMatchingTask(TRANSPORT_TEXT)!
     const coerced = coerceAnswersToNumbers(
       {
         summary: '',
         answers: [
-          { id: '1', label: 'Lücke 1', answer: 'Hoden', page: 1, blankIndex: 0 },
-          { id: '2', label: 'Lücke 2', answer: '3 Nebenhoden', page: 1, blankIndex: 1 },
+          { id: '1', label: 'Lücke 1', answer: 'Speichergewebe', page: 1, blankIndex: 0 },
+          { id: '2', label: 'Lücke 2', answer: '3 Spaltöffnungen', page: 1, blankIndex: 1 },
           { id: '3', label: 'Lücke 3', answer: '1', page: 1, blankIndex: 2 },
         ],
         formFields: [],
@@ -83,9 +82,9 @@ describe('number-matching', () => {
   })
 
   it('Prompt enthält Antwortformat Nur Nummern', () => {
-    const task = detectNumberMatchingTask(SPERMA_TEXT)!
+    const task = detectNumberMatchingTask(TRANSPORT_TEXT)!
     const prompt = buildSolutionPrompt({
-      title: 'Sperma',
+      title: 'Transport',
       subjects: [],
       gradeLevels: [],
       topics: [],
@@ -101,16 +100,16 @@ describe('number-matching', () => {
     expect(prompt).toContain('Verbindliche Nummern')
   })
 
-  it('buildSolutionPlan setzt Nummern-Bank für Sperma-AB', () => {
+  it('buildSolutionPlan setzt Nummern-Bank für Transport-AB', () => {
     const blanks = [
-      blank(0, 'bilden Samenzellen'),
-      blank(1, 'reife Samenzellen'),
-      blank(2, 'geben oft schon'),
-      blank(3, 'produziert dünnflüssiges'),
-      blank(4, 'produzieren eine Flüssigkeit'),
+      blank(0, 'nehmen Wasser aus dem Boden'),
+      blank(1, 'transportieren Wasser'),
+      blank(2, 'öffnen sich bei Licht'),
+      blank(3, 'bilden den grünen Farbstoff'),
+      blank(4, 'speichern Zucker'),
     ]
     const plan = buildSolutionPlan({
-      documentText: SPERMA_TEXT,
+      documentText: TRANSPORT_TEXT,
       pdfBlanks: blanks,
     })
     expect(plan.numberMatching).not.toBeNull()

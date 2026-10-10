@@ -2,7 +2,7 @@ import type { StructuredSolution } from '../document-fill'
 import { normalizeCandidate } from './candidate-bank'
 import type { CandidateBank, CandidateTerm } from './types'
 
-/** Nummerierte Legende: Nummer → Begriff (z. B. 5 → Hoden). */
+/** Nummerierte Legende: Nummer → Begriff (z. B. 5 → Speichergewebe). */
 export interface NumberMatchingLegend {
   entries: Array<{ number: string; term: string }>
   numberToTerm: Map<string, string>
@@ -78,7 +78,7 @@ function extractFromNumberedLines(text: string): NumberMatchingLegend | null {
 
 function extractFromInlineNumbers(text: string): NumberMatchingLegend | null {
   const pairs: Array<{ number: string; term: string }> = []
-  // z. B. „1 Cowpersche Drüsen 2 Prostata 3 Nebenhoden … 5 Hoden geben oft…“
+  // z. B. „1 Wurzelhaare 2 Leitbündel 3 Spaltöffnungen … 5 Speichergewebe speichern …“
   // Nur großgeschriebene Wörter (Begriffsnamen), nicht Folgesätze („Hoden geben oft…“).
   const re =
     /(?:^|[\s.])(\d{1,2})\s+((?:[\p{Lu}][\p{L}\p{N}\-äöüÄÖÜß]*)(?:\s+[\p{Lu}][\p{L}\p{N}\-äöüÄÖÜß]*){0,3})(?=\s+\d{1,2}\s+[\p{L}]|\s+[\p{Ll}]|\s*[.!?]|\s*$)/gu
@@ -132,7 +132,7 @@ export function formatNumberMatchingForPrompt(task: NumberMatchingLegend): strin
     .join('\n')
   return [
     'Die Aufgabenstellung verlangt Nummern zuzuordnen – NICHT die Begriffsnamen.',
-    'Jeder answer-Wert darf NUR die Nummer sein (z. B. „5“), niemals „Hoden“ oder „5 Hoden“.',
+    'Jeder answer-Wert darf NUR die Nummer sein (z. B. „5“), niemals „Speichergewebe“ oder „5 Speichergewebe“.',
     'Legende (Nummer → Begriff, nur zum Verständnis der Zuordnung):',
     legend,
     'Jeden Nummer genau einmal verwenden (bijektive Zuordnung zu den Lücken).',
@@ -177,7 +177,7 @@ function coerceOneAnswer(answer: string, task: NumberMatchingLegend): string {
   const exact = task.termToNumber.get(norm)
   if (exact) return exact
 
-  // Fuzzy: Antwort enthält Begriff, oder Begriff ≈ Antwort (nicht „Hoden“ ⊆ „Nebenhoden“).
+  // Fuzzy: Antwort enthält Begriff, oder Begriff ≈ Antwort (nicht „Wurzel“ ⊆ „Seitenwurzel“).
   let best: { number: string; len: number } | null = null
   for (const [termNorm, number] of task.termToNumber) {
     if (termNorm.length < 3 || norm.length < 3) continue

@@ -9,48 +9,48 @@ import { buildSolutionPlan } from '../../../server/services/ai/solutions/orchest
 import { isLikelyLayoutGap } from '../../../server/services/ai/document-fill'
 import type { PdfBlankRegion } from '../../../server/services/ai/document-fill'
 
-const HODEN_TEXT = `
+const BLATT_TEXT = `
 Du bist kein Werwolf – Sexualerziehung © WDR 2020
-02_Arbeitsblatt: Die Hoden
-Was passiert eigentlich genau in den Hoden? Schaue dir dazu aus der Sendereihe „Du bist kein Werwolf“ den passenden Filmclip „Die Hoden“ an (Clip 02). Bearbeite anschließend die Aufgaben.
-Ordne die fünf Begriffe dem Bild zu: Harnröhre, Hoden, Nebenhoden, Samenstrang, Hodensack
-Die Hoden sind sehr schmerzempfindlich. Jeder Junge passt deshalb besonders gut auf, dass er an dieser Stelle keinen Schlag oder Stoß abbekommt. Stelle dir vor, bei einem Jungen würde ein Tritt in die Hoden weniger weh tun – nur etwa so viel, wie ein Tritt in den Po. Warum wäre das schlecht für seine Familienplanung? Und wenn das bei allen Jungs so wäre – was könnte das für den Fortbestand der Menschheit bedeuten?
-Welche umgangssprachlichen Begriffe für „Hoden“ kennst du? Nenne mindestens drei.
-Wenn die Hoden doch so empfindlich sind – warum hängen sie dann überhaupt außen und liegen nicht beispielsweise gut geschützt im Bauch? Recherchiere dazu im Internet auf der Seite www.dubistkeinwerwolf.de in der Rubrik „Mein Körper“ und beantworte dann die Frage. Erkläre auch, wie die Hoden bei Kälte geschützt werden. Schreibe mindestens drei Sätze.
-02_Arbeitsblatt: Glossar „Die Hoden“
-Vervollständige das Glossar mit wichtigen Begriffen aus dem Bereich Sexualaufklärung.
-Begriff Bedeutung Ejakulation Hoden Hodenkanälchen Hodenläppchen Hodensack Leydig-Zwischenzellen Nebenhoden Samenstrang
+02_Arbeitsblatt: Das Blatt
+Was passiert eigentlich genau im Blatt? Schaue dir dazu den passenden Filmclip „Das Blatt“ an (Clip 02). Bearbeite anschließend die Aufgaben.
+Ordne die fünf Begriffe dem Bild zu: Blattstiel, Blattspreite, Blattader, Oberhaut, Spaltöffnung
+Das Blatt ist sehr dünn. Jede Pflanze braucht deshalb eine schützende Wachsschicht. Stelle dir vor, ein Blatt hätte keine Wachsschicht und würde bei Sonne sofort austrocknen. Warum wäre das schlecht für die Pflanze? Und wenn das bei allen Bäumen so wäre – was könnte das für das Klima bedeuten?
+Welche Pflanzen mit besonders großen Blättern kennst du? Nenne mindestens drei.
+Wenn Blätter so dünn sind – warum haben sie dann überhaupt eine große Fläche und keine kleine, kompakte Form? Recherchiere dazu im Internet auf einer Biologieseite und beantworte dann die Frage. Erkläre auch, wie Blätter bei Hitze Wasser sparen. Schreibe mindestens drei Sätze.
+02_Arbeitsblatt: Glossar „Das Blatt“
+Vervollständige das Glossar mit wichtigen Begriffen aus dem Bereich Pflanzenkunde.
+Begriff Bedeutung Transpiration Blattader Blattspreite Blattstiel Chloroplast Oberhaut Spaltöffnung Wachsschicht
 `
 
-describe('worksheet-tasks (AB Hoden)', () => {
+describe('worksheet-tasks (AB Blatt)', () => {
   it('erkennt Bildbeschriftung mit Wortliste', () => {
-    const task = detectImageLabelingTask(HODEN_TEXT)
+    const task = detectImageLabelingTask(BLATT_TEXT)
     expect(task).not.toBeNull()
     expect(task!.terms).toEqual([
-      'Harnröhre',
-      'Hoden',
-      'Nebenhoden',
-      'Samenstrang',
-      'Hodensack',
+      'Blattstiel',
+      'Blattspreite',
+      'Blattader',
+      'Oberhaut',
+      'Spaltöffnung',
     ])
   })
 
   it('erkennt Glossarbegriffe', () => {
-    const terms = extractGlossaryTerms(HODEN_TEXT)
-    expect(terms).toContain('Ejakulation')
-    expect(terms).toContain('Nebenhoden')
+    const terms = extractGlossaryTerms(BLATT_TEXT)
+    expect(terms).toContain('Transpiration')
+    expect(terms).toContain('Blattader')
     expect(terms.length).toBeGreaterThanOrEqual(6)
-    expect(detectGlossaryTask(HODEN_TEXT)?.kind).toBe('glossary')
+    expect(detectGlossaryTask(BLATT_TEXT)?.kind).toBe('glossary')
   })
 
   it('segmentiert mehrere Teilaufgaben', () => {
-    const tasks = detectWorksheetTasks(HODEN_TEXT)
+    const tasks = detectWorksheetTasks(BLATT_TEXT)
     expect(tasks.some((t) => t.kind === 'image_labeling')).toBe(true)
     expect(tasks.some((t) => t.kind === 'glossary')).toBe(true)
     const open = tasks.filter((t) => t.kind === 'open_ended')
     expect(open).toHaveLength(3)
     expect(open.some((t) =>
-      /warum hängen sie/i.test(t.instruction) && /bei Kälte geschützt/i.test(t.instruction),
+      /warum haben sie/i.test(t.instruction) && /bei Hitze Wasser sparen/i.test(t.instruction),
     )).toBe(true)
   })
 
@@ -83,7 +83,7 @@ describe('worksheet-tasks (AB Hoden)', () => {
     }
     // Gap sollte bereits vor Plan gefiltert sein – zusätzlich Suppression im Segmenter.
     const plan = buildSolutionPlan({
-      documentText: HODEN_TEXT,
+      documentText: BLATT_TEXT,
       pdfBlanks: [fakeGap],
     })
     expect(plan.fillMode).toBe('offen')
@@ -91,11 +91,11 @@ describe('worksheet-tasks (AB Hoden)', () => {
     expect(plan.tasks.some((t) => t.kind === 'matching_inline')).toBe(true)
     expect(plan.tasks.some((t) => t.kind === 'free_text_separate')).toBe(true)
     expect(plan.candidateBank?.candidates.map((c) => c.value)).toEqual([
-      'Harnröhre',
-      'Hoden',
-      'Nebenhoden',
-      'Samenstrang',
-      'Hodensack',
+      'Blattstiel',
+      'Blattspreite',
+      'Blattader',
+      'Oberhaut',
+      'Spaltöffnung',
     ])
   })
 })

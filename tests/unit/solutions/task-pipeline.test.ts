@@ -22,9 +22,9 @@ function blank(i: number, left: string, right: string): PdfBlankRegion {
 describe('task segmenter / classifier', () => {
   it('erkennt Cloze-Task mit Wortliste und 9 Lücken', () => {
     const text = `
-Wortliste: Spitze, unterschiedlich, lang, Hautschichten, Schleimhaut, Erektion, Nervenenden, Unterseite, Eichel
+Wortliste: Spitze, unterschiedlich, lang, Zellschichten, Wachsschicht, Spaltöffnung, Leitbündel, Unterseite, Blattstiel
 Fülle die Lücken.
-Die ___ des Penis …
+Die ___ des Blattes …
 `
     const blanks = Array.from({ length: 9 }, (_, i) => blank(i, `left${i}`, `right${i}`))
     const bank = extractCandidateBank(text, 9)
@@ -55,7 +55,7 @@ Die ___ des Penis …
   it('markiert fehlende Wortliste bei Cloze als expected_but_missing', () => {
     const text = `
 Fülle die Lücken mit Wörtern aus der Wortliste.
-Die ___ des Penis …
+Die ___ des Blattes …
 `
     const blanks = Array.from({ length: 9 }, (_, i) => blank(i, `left${i}`, `right${i}`))
     const doc = analyzeDocument({ fullText: text, pdfBlanks: blanks })
@@ -71,10 +71,10 @@ Die ___ des Penis …
   it('markiert unplausible Wortliste (2 Zeilen statt 9 Begriffe) als malformed', () => {
     const text = `
 Wortliste:
-Eichel / Erektion / Hautschichten / lang / Nervenenden /
-Schleimhaut / Spitze / unterschiedlich / Unterseite
+Blattstiel / Spaltöffnung / Zellschichten / lang / Leitbündel /
+Wachsschicht / Spitze / unterschiedlich / Unterseite
 Fülle die Lücken mit Wörtern aus der Wortliste.
-Die ___ des Penis …
+Die ___ des Blattes …
 `
     const blanks = Array.from({ length: 9 }, (_, i) => blank(i, `left${i}`, `right${i}`))
     // Simuliere den alten Extraktionsfehler: zwei unzerlegte Zeilen.
@@ -83,13 +83,13 @@ Die ___ des Penis …
       candidates: [
         {
           id: 'c0',
-          value: 'Eichel / Erektion / Hautschichten / lang / Nervenenden /',
-          normalized: 'eichel / erektion / hautschichten / lang / nervenenden /',
+          value: 'Blattstiel / Spaltöffnung / Zellschichten / lang / Leitbündel /',
+          normalized: 'blattstiel / spaltöffnung / zellschichten / lang / leitbündel /',
         },
         {
           id: 'c1',
-          value: 'Schleimhaut / Spitze / unterschiedlich / Unterseite',
-          normalized: 'schleimhaut / spitze / unterschiedlich / unterseite',
+          value: 'Wachsschicht / Spitze / unterschiedlich / Unterseite',
+          normalized: 'wachsschicht / spitze / unterschiedlich / unterseite',
         },
       ],
       reusePolicy: 'repeatable' as const,

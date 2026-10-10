@@ -141,7 +141,7 @@ function extractFromSingleText(text: string, blankCount: number): CandidateBank 
   }
 }
 
-/** „Ordne … zu: Harnröhre, Hoden, …“ ohne zwingend „Bild“. */
+/** „Ordne … zu: Blattstiel, Blattader, …“ ohne zwingend „Bild“. */
 function extractFromAssignColonList(text: string): CandidateTerm[] {
   const m = text.match(
     /ordn\w*.{0,80}begriffe[^:]{0,40}:\s*((?:[\p{Lu}][\p{L}\p{N}-]*)(?:\s*,\s*[\p{Lu}][\p{L}\p{N}-]*){1,12})/iu,

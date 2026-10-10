@@ -28,13 +28,13 @@ function task(overrides: Partial<TaskBlock> = {}): TaskBlock {
 }
 
 describe('assessPdfLayoutPlan', () => {
-  const rasierenText =
-    'Worauf sollten Mädchen und Jungen dabei achten? Erkläre kurz, wie Epilieren und Wachsen funktioniert. Erläutere auch die Vor- und Nachteile.'
+  const pflegeText =
+    'Worauf sollte man dabei achten? Erkläre kurz, wie Umtopfen und Düngen funktioniert. Erläutere auch die Vor- und Nachteile.'
 
   it('fordert Vision bei offenen Aufgaben ohne Antwortziele an', () => {
     const assessment = assessPdfLayoutPlan({
-      documentText: rasierenText,
-      tasks: [task(), task({ id: 'p1-t2', instruction: 'Erkläre Epilieren.' })],
+      documentText: pflegeText,
+      tasks: [task(), task({ id: 'p1-t2', instruction: 'Erkläre Umtopfen.' })],
     })
 
     expect(assessment.shouldCheck).toBe(true)
@@ -68,7 +68,7 @@ describe('assessPdfLayoutPlan', () => {
       source: 'native',
     }
     const assessment = assessPdfLayoutPlan({
-      documentText: rasierenText,
+      documentText: pflegeText,
       tasks: [
         task({
           kind: 'free_text_inplace',
@@ -78,7 +78,7 @@ describe('assessPdfLayoutPlan', () => {
         }),
         task({
           id: 'p1-t2',
-          instruction: 'Erkläre Epilieren.',
+          instruction: 'Erkläre Umtopfen.',
           kind: 'free_text_inplace',
           renderMode: 'overlay',
           renderConfidence: 'high',
@@ -146,7 +146,7 @@ describe('parsePdfLayoutVisionResponse', () => {
             ],
           },
           {
-            instruction: 'Erkläre Epilieren und Wachsen.',
+            instruction: 'Erkläre Umtopfen und Düngen.',
             kind: 'open_response',
             page: 1,
             confidence: 0.93,

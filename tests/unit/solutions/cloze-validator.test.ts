@@ -21,23 +21,23 @@ import {
   solutionSystemPromptForMode,
 } from '../../../server/services/ai/prompts'
 
-/** Erwartete Wortliste des AB „Die Vorhaut“. */
-const VORHAUT_WORDS = [
+/** Erwartete Wortliste des AB „Das Blatt“. */
+const BLATT_WORDS = [
   'Spitze',
   'unterschiedlich',
   'lang',
-  'Hautschichten',
-  'Schleimhaut',
-  'Erektion',
-  'Nervenenden',
+  'Zellschichten',
+  'Wachsschicht',
+  'Spaltöffnung',
+  'Leitbündel',
   'Unterseite',
-  'Eichel',
+  'Blattstiel',
 ]
 
-function vorhautBank(): CandidateBank {
+function blattBank(): CandidateBank {
   return {
     id: 'bank-1',
-    candidates: VORHAUT_WORDS.map((value, i) => ({
+    candidates: BLATT_WORDS.map((value, i) => ({
       id: `c${i}`,
       value,
       normalized: normalizeCandidate(value),
@@ -49,7 +49,7 @@ function vorhautBank(): CandidateBank {
 
 function solutionFromWords(words: string[]): StructuredSolution {
   return {
-    summary: 'Lückentext Vorhaut',
+    summary: 'Lückentext Blatt',
     answers: words.map((answer, i) => ({
       id: String(i + 1),
       label: `Lücke ${i + 1}`,
@@ -67,25 +67,25 @@ describe('extractCandidateBank', () => {
   it('extrahiert Wortliste aus Abschnitt und setzt reusePolicy once', () => {
     const text = `
 Wortliste:
-Spitze, unterschiedlich, lang, Hautschichten, Schleimhaut, Erektion, Nervenenden, Unterseite, Eichel
+Spitze, unterschiedlich, lang, Zellschichten, Wachsschicht, Spaltöffnung, Leitbündel, Unterseite, Blattstiel
 
-Die ___ des Penis ist in der Regel …
+Die ___ des Blattes ist in der Regel …
 `
     const bank = extractCandidateBank(text, 9)
     expect(bank).not.toBeNull()
     expect(bank!.candidates).toHaveLength(9)
     expect(bank!.reusePolicy).toBe('once')
     expect(bank!.candidates.map((c) => c.value)).toEqual(
-      expect.arrayContaining(['Spitze', 'Eichel', 'Hautschichten']),
+      expect.arrayContaining(['Spitze', 'Blattstiel', 'Zellschichten']),
     )
   })
 
   it('extrahiert Schrägstrich-Wortliste ohne Überschrift (PDF-Textebene)', () => {
     const text = `
-05_Arbeitsblatt: Die Vorhaut
-Eichel / Erektion / Hautschichten / lang / Nervenenden / Schleimhaut / Spitze / unterschiedlich / Unterseite
+05_Arbeitsblatt: Das Blatt
+Blattstiel / Spaltöffnung / Zellschichten / lang / Leitbündel / Wachsschicht / Spitze / unterschiedlich / Unterseite
 Fülle die Lücken mit Wörtern aus der Wortliste.
-Die ___ des Penis …
+Die ___ des Blattes …
 `
     const bank = extractCandidateBank({ documentText: '', pdfText: text, blankCount: 9 })
     expect(bank).not.toBeNull()
@@ -93,13 +93,13 @@ Die ___ des Penis …
     expect(bank!.reusePolicy).toBe('once')
   })
 
-  it('tokenisiert mehrzeilige Schrägstrich-Wortliste unter Überschrift (Vorhaut-Regression)', () => {
+  it('tokenisiert mehrzeilige Schrägstrich-Wortliste unter Überschrift (Blatt-Regression)', () => {
     const text = `
 Wortliste:
-Eichel / Erektion / Hautschichten / lang / Nervenenden /
-Schleimhaut / Spitze / unterschiedlich / Unterseite
+Blattstiel / Spaltöffnung / Zellschichten / lang / Leitbündel /
+Wachsschicht / Spitze / unterschiedlich / Unterseite
 Fülle die Lücken mit Wörtern aus der Wortliste.
-Die ___ des Penis …
+Die ___ des Blattes …
 `
     const bank = extractCandidateBank({ documentText: '', pdfText: text, blankCount: 9 })
     expect(bank).not.toBeNull()
@@ -107,12 +107,12 @@ Die ___ des Penis …
     expect(bank!.reusePolicy).toBe('once')
     expect(bank!.candidates.map((c) => c.value)).toEqual(
       expect.arrayContaining([
-        'Eichel',
-        'Erektion',
-        'Hautschichten',
+        'Blattstiel',
+        'Spaltöffnung',
+        'Zellschichten',
         'lang',
-        'Nervenenden',
-        'Schleimhaut',
+        'Leitbündel',
+        'Wachsschicht',
         'Spitze',
         'unterschiedlich',
         'Unterseite',
@@ -121,42 +121,42 @@ Die ___ des Penis …
   })
 })
 
-describe('validateClozeAnswers – Vorhaut-Regression', () => {
-  const bank = vorhautBank()
+describe('validateClozeAnswers – Blatt-Regression', () => {
+  const bank = blattBank()
 
   it('lehnt typische Modell-Fehlantwort ab (outOfBank, Duplikate, unused)', () => {
     const bad = solutionFromWords([
-      'Vorhaut',
+      'Blatt',
       'unbeweglich',
       'sensibel',
       'Schichten',
       'Drüse',
-      'Erektion',
-      'Nervenenden',
-      'Vorhaut',
-      'Eichel',
+      'Spaltöffnung',
+      'Leitbündel',
+      'Blatt',
+      'Blattstiel',
     ])
     const result = validateClozeAnswers(bad, bank, 9)
     expect(result.valid).toBe(false)
     expect(result.violations.outOfBank).toEqual(
-      expect.arrayContaining(['Vorhaut', 'unbeweglich', 'sensibel', 'Schichten', 'Drüse']),
+      expect.arrayContaining(['Blatt', 'unbeweglich', 'sensibel', 'Schichten', 'Drüse']),
     )
-    // „Vorhaut“ steht nicht in der Bank → erscheint in outOfBank (auch mehrfach), nicht als Bank-Duplikat.
-    expect(result.violations.outOfBank.filter((w) => w === 'Vorhaut').length).toBeGreaterThanOrEqual(2)
+    // „Blatt“ steht nicht in der Bank → erscheint in outOfBank (auch mehrfach), nicht als Bank-Duplikat.
+    expect(result.violations.outOfBank.filter((w) => w === 'Blatt').length).toBeGreaterThanOrEqual(2)
     expect(result.violations.unusedCandidates).toEqual(
       expect.arrayContaining([
         'Spitze',
         'unterschiedlich',
         'lang',
-        'Hautschichten',
-        'Schleimhaut',
+        'Zellschichten',
+        'Wachsschicht',
         'Unterseite',
       ]),
     )
   })
 
   it('akzeptiert die korrekte bijektive Zuordnung', () => {
-    const good = solutionFromWords(VORHAUT_WORDS)
+    const good = solutionFromWords(BLATT_WORDS)
     const result = validateClozeAnswers(good, bank, 9)
     expect(result.valid).toBe(true)
     expect(result.violations.outOfBank).toHaveLength(0)
@@ -165,38 +165,38 @@ describe('validateClozeAnswers – Vorhaut-Regression', () => {
   })
 
   it('ersetzt out-of-bank Antworten durch ???', () => {
-    const bad = solutionFromWords(['Vorhaut', ...VORHAUT_WORDS.slice(1)])
+    const bad = solutionFromWords(['Blatt', ...BLATT_WORDS.slice(1)])
     const validation = validateClozeAnswers(bad, bank, 9)
     const sanitized = sanitizeOutOfBankAnswers(bad, bank, validation)
     expect(sanitized.answers[0]!.answer).toBe('???')
-    expect(sanitized.uncertainties).toMatch(/Vorhaut/)
+    expect(sanitized.uncertainties).toMatch(/Blatt/)
   })
 })
 
 describe('assignCandidatesGlobally', () => {
-  it('erzwingt einmalige Nutzung der Vorhaut-Wortliste', () => {
-    const bank = vorhautBank()
+  it('erzwingt einmalige Nutzung der Blatt-Wortliste', () => {
+    const bank = blattBank()
     const messy = solutionFromWords([
-      'Eichel',
-      'Eichel',
+      'Blattstiel',
+      'Blattstiel',
       'lang',
-      'Hautschichten',
-      'Schleimhaut',
-      'Erektion',
-      'Nervenenden',
+      'Zellschichten',
+      'Wachsschicht',
+      'Spaltöffnung',
+      'Leitbündel',
       'Unterseite',
       'Spitze',
     ])
-    const blanks = VORHAUT_WORDS.map((_, i) => ({
+    const blanks = BLATT_WORDS.map((_, i) => ({
       blankIndex: i,
       leftText: i === 0 ? 'Die' : 'Kontext',
-      rightText: i === 0 ? 'des Penis' : '.',
+      rightText: i === 0 ? 'des Blattes' : '.',
       page: 1,
     }))
     const assigned = assignCandidatesGlobally(messy, bank, blanks)
     const used = assigned.answers.map((a) => normalizeCandidate(a.answer))
     expect(new Set(used).size).toBe(9)
-    for (const word of VORHAUT_WORDS) {
+    for (const word of BLATT_WORDS) {
       expect(used).toContain(normalizeCandidate(word))
     }
     const validation = validateClozeAnswers(assigned, bank, 9)
@@ -204,19 +204,19 @@ describe('assignCandidatesGlobally', () => {
   })
 
   it('füllt fehlende Modellantworten nicht willkürlich mit Restwörtern auf', () => {
-    const bank = vorhautBank()
+    const bank = blattBank()
     const incomplete = solutionFromWords([
       'Spitze',
       'unterschiedlich',
       'lang',
-      'Hautschichten',
-      'Schleimhaut',
+      'Zellschichten',
+      'Wachsschicht',
       '???',
       '???',
       '???',
       '???',
     ])
-    const blanks = VORHAUT_WORDS.map((_, i) => ({
+    const blanks = BLATT_WORDS.map((_, i) => ({
       blankIndex: i,
       leftText: 'Kontext',
       rightText: '.',
@@ -246,20 +246,20 @@ describe('maximumWeightAssignment', () => {
 })
 
 describe('prompts – Candidate Bank', () => {
-  it('enthält verbindliche Wortliste und kein Eichel-Beispiel mehr', () => {
-    expect(SOLUTION_SYSTEM_PROMPT_LUECKENTEXT).not.toMatch(/Die ___ des Penis/)
+  it('enthält verbindliche Wortliste und kein Blattstiel-Beispiel mehr', () => {
+    expect(SOLUTION_SYSTEM_PROMPT_LUECKENTEXT).not.toMatch(/Die ___ des Blattes/)
     expect(SOLUTION_SYSTEM_PROMPT_LUECKENTEXT).toMatch(/AUSSCHLIESSLICH/)
 
-    const bank = vorhautBank()
+    const bank = blattBank()
     const prompt = buildSolutionPrompt({
-      title: 'AB Vorhaut',
+      title: 'AB Blatt',
       subjects: ['Biologie'],
       gradeLevels: [],
       topics: [],
       competencies: [],
       learningObjectives: [],
       fillMode: 'lueckentext',
-      blankInventory: '0: „Die ___ des Penis“',
+      blankInventory: '0: „Die ___ des Blattes“',
       detectedBlankCount: 9,
       candidateBank: bank,
     })
@@ -271,7 +271,7 @@ describe('prompts – Candidate Bank', () => {
 
   it('behandelt offene Aufgaben auf Schreiblinien nicht als Lückentext', () => {
     const prompt = buildSolutionPrompt({
-      title: 'AB Rasieren',
+      title: 'AB Pflanzenpflege',
       subjects: ['Biologie'],
       gradeLevels: [],
       topics: [],
@@ -280,7 +280,7 @@ describe('prompts – Candidate Bank', () => {
       fillMode: 'offen',
       answerLineCount: 2,
       inplaceOpenAnswers: true,
-      taskInventory: '1. Intimrasur\n2. Epilieren und Wachsen',
+      taskInventory: '1. Gießen\n2. Umtopfen und Düngen',
     })
 
     expect(prompt).toContain('vorgesehenen Schreibbereichen')

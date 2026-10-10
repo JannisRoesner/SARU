@@ -10,11 +10,11 @@ describe('Materialbeschreibungen', () => {
     expect(isBoilerplateDescription('Aus dem Schulportal importiert (Termin 2025-05-20).')).toBe(
       true,
     )
-    expect(isBoilerplateDescription('Manuell geprüfter KI-Entwurf zum Material „AB Vorhaut“.')).toBe(
+    expect(isBoilerplateDescription('Manuell geprüfter KI-Entwurf zum Material „AB Blatt“.')).toBe(
       true,
     )
     expect(
-      isBoilerplateDescription('Automatisch erstellte Musterlösung zum Material „AB Vorhaut“.'),
+      isBoilerplateDescription('Automatisch erstellte Musterlösung zum Material „AB Blatt“.'),
     ).toBe(true)
     expect(isBoilerplateDescription('  ')).toBe(true)
     expect(isBoilerplateDescription('Lücken-AB zur Mitose in Klasse 9.')).toBe(false)

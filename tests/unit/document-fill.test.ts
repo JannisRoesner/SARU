@@ -129,7 +129,7 @@ describe('parseStructuredSolution', () => {
             page: 1,
             blankIndex: 0,
             leftContext: 'Die',
-            rightContext: 'des Penis',
+            rightContext: 'des Blattes',
             bbox: { x: 0.4, y: 0.25, w: 0.3, h: 0.03 },
           },
           {
@@ -147,7 +147,7 @@ describe('parseStructuredSolution', () => {
     )
     expect(result.answers[0]!.bbox).toEqual({ x: 0.4, y: 0.25, w: 0.3, h: 0.03 })
     expect(result.answers[0]!.leftContext).toBe('Die')
-    expect(result.answers[0]!.rightContext).toBe('des Penis')
+    expect(result.answers[0]!.rightContext).toBe('des Blattes')
     expect(result.answers[1]!.bbox?.x).toBeCloseTo(0.45)
     expect(result.answers[1]!.bbox?.y).toBeCloseTo(0.3)
   })
@@ -411,13 +411,13 @@ describe('fillDocxDocument', () => {
   })
 
   it('füllt Unterstriche, die Word auf mehrere Runs aufteilt', () => {
-    // Typisch: „Die“ | „___“ | „___“ | „ des Penis“ in getrennten <w:t>.
+    // Typisch: „Die“ | „___“ | „___“ | „ des Blattes“ in getrennten <w:t>.
     const blanked = minimalDocxWithBody(`
       <w:p>
         <w:r><w:t>Die </w:t></w:r>
         <w:r><w:t>___</w:t></w:r>
         <w:r><w:t>___</w:t></w:r>
-        <w:r><w:t> des Penis</w:t></w:r>
+        <w:r><w:t> des Blattes</w:t></w:r>
       </w:p>
       <w:p>
         <w:r><w:t>ist sie sehr </w:t></w:r>
@@ -434,7 +434,7 @@ describe('fillDocxDocument', () => {
     const filled = fillDocxDocument(blanked, {
       summary: 'Test',
       answers: [
-        { id: '1', label: '1', answer: 'Eichel', blankIndex: 0 },
+        { id: '1', label: '1', answer: 'Blattstiel', blankIndex: 0 },
         { id: '2', label: '2', answer: 'lang', blankIndex: 1 },
       ],
       formFields: [],
@@ -443,7 +443,7 @@ describe('fillDocxDocument', () => {
     expect(filled.strategy).toBe('docx_inplace')
     expect(filled.filled).toBeGreaterThanOrEqual(2)
     const xml = strFromU8(unzipSync(new Uint8Array(filled.buffer))['word/document.xml']!)
-    expect(xml).toContain('Eichel')
+    expect(xml).toContain('Blattstiel')
     expect(xml).toContain('lang')
     expect(xml).toContain('w:val="1F4E9B"')
     expect(xml).not.toMatch(/_{3,}/)
@@ -623,7 +623,7 @@ describe('detectPdfBlankRegions', () => {
     const page = pdf.addPage([595.28, 841.89])
     page.drawText('Die', { x: 50, y: 500, size: 14, font })
     // Große Lücke, dann Fortsetzung – typischer Lückentext ohne Unterstriche.
-    page.drawText('des Penis ist bedeckt.', { x: 180, y: 500, size: 14, font })
+    page.drawText('des Blattes ist bedeckt.', { x: 180, y: 500, size: 14, font })
     page.drawText('ist sie sehr', { x: 50, y: 470, size: 14, font })
     page.drawText('und steht vorne.', { x: 200, y: 470, size: 14, font })
     const source = Buffer.from(await pdf.save())
@@ -635,7 +635,7 @@ describe('detectPdfBlankRegions', () => {
     expect(blanks[0]!.x).toBeLessThan(180)
     expect(blanks[0]!.width).toBeGreaterThan(50)
     expect(blanks[0]!.leftText).toContain('Die')
-    expect(blanks[0]!.rightText).toContain('des Penis')
+    expect(blanks[0]!.rightText).toContain('des Blattes')
     expect(classifySolutionFillMode(blanks)).toBe('lueckentext')
   })
 
@@ -643,10 +643,10 @@ describe('detectPdfBlankRegions', () => {
     const pdf = await PDFDocument.create()
     const font = await pdf.embedFont(StandardFonts.Helvetica)
     const page = pdf.addPage([595.28, 841.89])
-    // Zeile 1: Die ______ des Penis (Unterstriche als ein String – und zusätzlich gesplittet)
+    // Zeile 1: Die ______ des Blattes (Unterstriche als ein String – und zusätzlich gesplittet)
     page.drawText('Die ', { x: 50, y: 500, size: 12, font })
     page.drawText('______', { x: 72, y: 500, size: 12, font })
-    page.drawText(' des Penis', { x: 120, y: 500, size: 12, font })
+    page.drawText(' des Blattes', { x: 120, y: 500, size: 12, font })
 
     // Zeile 2: zwei Abstands-Lücken auf einer Zeile (ohne Unterstrich-Glyphen)
     page.drawText('bei allen Jungen', { x: 50, y: 470, size: 12, font })
@@ -817,7 +817,7 @@ describe('isLikelyLayoutGap / filterColumnGutterGaps', () => {
           x: 80,
           width: 90,
           leftText: 'Die',
-          rightText: 'des Penis ist bedeckt.',
+          rightText: 'des Blattes ist bedeckt.',
         },
         595,
       ),
@@ -855,7 +855,7 @@ describe('classifySolutionFillMode', () => {
         'Beschreiben Sie die GUI im Sachzusammenhang.',
       ),
     ).toBe('lueckentext')
-    expect(classifySolutionFillMode([{ kind: 'gap' }], 'Wortliste: Eichel, lang')).toBe(
+    expect(classifySolutionFillMode([{ kind: 'gap' }], 'Wortliste: Blattstiel, lang')).toBe(
       'lueckentext',
     )
   })
@@ -941,11 +941,11 @@ describe('solution fill mode prompts', () => {
       competencies: [],
       learningObjectives: [],
       fillMode: 'lueckentext',
-      blankInventory: '0: „Die ___ des Penis“ (Seite 1)',
+      blankInventory: '0: „Die ___ des Blattes“ (Seite 1)',
       detectedBlankCount: 1,
     })
     expect(prompt).toContain('verbindliche blankIndex-Liste')
-    expect(prompt).toContain('Die ___ des Penis')
+    expect(prompt).toContain('Die ___ des Blattes')
     expect(solutionSystemPromptForMode('lueckentext')).toContain('in die Lücken gelegt')
   })
 })
@@ -961,7 +961,7 @@ describe('alignAnswersToBlanks', () => {
       height: 14,
       kind: 'gap',
       leftText: 'Die',
-      rightText: 'des Penis ist',
+      rightText: 'des Blattes ist',
     },
     {
       pageIndex: 0,
@@ -1003,10 +1003,10 @@ describe('alignAnswersToBlanks', () => {
           {
             id: '2',
             label: '2',
-            answer: 'Eichel',
+            answer: 'Blattstiel',
             blankIndex: 2,
             leftContext: 'Die',
-            rightContext: 'des Penis',
+            rightContext: 'des Blattes',
           },
           {
             id: '3',
@@ -1022,7 +1022,7 @@ describe('alignAnswersToBlanks', () => {
       blanks,
     )
 
-    expect(aligned.answers.find((a) => a.answer === 'Eichel')?.blankIndex).toBe(0)
+    expect(aligned.answers.find((a) => a.answer === 'Blattstiel')?.blankIndex).toBe(0)
     expect(aligned.answers.find((a) => a.answer === 'unterschiedlich')?.blankIndex).toBe(1)
     expect(aligned.answers.find((a) => a.answer === 'lang')?.blankIndex).toBe(2)
     // Geometrie-Kontext überschreibt Modell-Kontext; Labels folgen Dokumentreihenfolge.
@@ -1039,18 +1039,18 @@ describe('alignAnswersToBlanks', () => {
           {
             id: 'x',
             label: 'Aufgabe 1d',
-            answer: 'Schleimhaut',
+            answer: 'Wachsschicht',
             blankIndex: 0,
-            leftContext: 'Die innere Vorhaut ist eine',
+            leftContext: 'Die innere Blattoberhaut ist eine',
             rightContext: 'Sie bildet ein',
           },
           {
             id: 'y',
             label: 'Aufgabe 1a',
-            answer: 'Eichel',
+            answer: 'Blattstiel',
             blankIndex: 1,
             leftContext: 'Die',
-            rightContext: 'des Penis',
+            rightContext: 'des Blattes',
           },
         ],
         formFields: [],
@@ -1065,7 +1065,7 @@ describe('alignAnswersToBlanks', () => {
           height: 14,
           kind: 'gap',
           leftText: 'Die',
-          rightText: 'des Penis ist',
+          rightText: 'des Blattes ist',
         },
         {
           pageIndex: 0,
@@ -1081,10 +1081,10 @@ describe('alignAnswersToBlanks', () => {
       ],
     )
 
-    expect(aligned.answers[0]!.answer).toBe('Eichel')
+    expect(aligned.answers[0]!.answer).toBe('Blattstiel')
     expect(aligned.answers[0]!.label).toBe('Lücke 1')
     expect(aligned.answers[0]!.leftContext).toBe('Die')
-    expect(aligned.answers[1]!.answer).toBe('Schleimhaut')
+    expect(aligned.answers[1]!.answer).toBe('Wachsschicht')
     expect(aligned.answers[1]!.label).toBe('Lücke 2')
     expect(aligned.answers[1]!.leftContext).toBe('ist eine')
   })
@@ -1093,7 +1093,7 @@ describe('alignAnswersToBlanks', () => {
     const text = formatBlankInventory(blanks)
     expect(text).toContain('0:')
     expect(text).toContain('Die')
-    expect(text).toContain('des Penis')
+    expect(text).toContain('des Blattes')
     expect(text).toContain('___')
   })
 })

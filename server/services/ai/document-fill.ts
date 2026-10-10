@@ -978,7 +978,7 @@ export function highlightDocxPrefilledClozeAnswers(source: Buffer): {
     for (let i = runs.length - 1; i >= 0; i--) {
       const run = runs[i]!
       if (!isShortAnswer(run)) continue
-      // Typisch: „   Hoden      “ – Antwortwort zwischen Space-Polstern.
+      // Typisch: „   Pollen      “ – Antwortwort zwischen Space-Polstern.
       if (!isSpacePad(runs[i - 1]) || !isSpacePad(runs[i + 1])) continue
       const original = next.slice(run.xmlStart, run.xmlEnd)
       if (/w:val="1F4E9B"/i.test(original)) continue

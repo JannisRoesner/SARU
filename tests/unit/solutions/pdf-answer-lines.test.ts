@@ -76,18 +76,18 @@ async function writingLinesPdf(opts?: {
   return Buffer.from(await pdf.save())
 }
 
-async function rasierenWritingLinesPdf(): Promise<Buffer> {
+async function pflegeWritingLinesPdf(): Promise<Buffer> {
   const pdf = await PDFDocument.create()
   const page = pdf.addPage([595.28, 841.89])
   const font = await pdf.embedFont(StandardFonts.Helvetica)
-  page.drawText('Worauf sollten Mädchen und Jungen dabei achten?', {
+  page.drawText('Worauf sollte man dabei achten?', {
     x: 30,
     y: 500,
     size: 12,
     font,
   })
   page.drawText(
-    'Erkläre kurz, wie Epilieren und Wachsen funktioniert. Erläutere auch die Vor- und Nachteile.',
+    'Erkläre kurz, wie Umtopfen und Düngen funktioniert. Erläutere auch die Vor- und Nachteile.',
     { x: 30, y: 260, size: 10, font, maxWidth: 535 },
   )
 
@@ -213,8 +213,8 @@ describe('detectPdfAnswerLines', () => {
     expect(await detectPdfDiagramLabelTargets(source, { page: 1, expectedCount: 4 })).toEqual([])
   })
 
-  it('erkennt die transformierten breiten Schreiblinien aus AB-Rasieren', async () => {
-    const source = await rasierenWritingLinesPdf()
+  it('erkennt die transformierten breiten Schreiblinien aus AB-Pflege', async () => {
+    const source = await pflegeWritingLinesPdf()
     const detected = await detectPdfAnswerLines(source)
     const extracted = await extractPdfHorizontalStrokes(source)
     const clusters = clusterPdfAnswerLines(extracted.lines, extracted.pageSizes)
@@ -370,12 +370,12 @@ describe('detectPdfAnswerLines', () => {
     }
   })
 
-  it('modelliert AB-Rasieren als zwei offene Overlay-Tasks', async () => {
-    const source = await rasierenWritingLinesPdf()
+  it('modelliert AB-Pflege als zwei offene Overlay-Tasks', async () => {
+    const source = await pflegeWritingLinesPdf()
     const detected = await detectPdfAnswerLines(source)
     const plan = buildSolutionPlan({
       documentText:
-        'Worauf sollten Mädchen und Jungen dabei achten? Erkläre kurz, wie Epilieren und Wachsen funktioniert. Erläutere auch die Vor- und Nachteile.',
+        'Worauf sollte man dabei achten? Erkläre kurz, wie Umtopfen und Düngen funktioniert. Erläutere auch die Vor- und Nachteile.',
       pdfBlanks: [],
       shapes: detected.shapes,
       answerTargets: detected.targets,
@@ -389,25 +389,25 @@ describe('detectPdfAnswerLines', () => {
   })
 
   it('bindet vertauschte Freitextantworten anhand ihres Aufgabenbezugs an native Linien', async () => {
-    const source = await rasierenWritingLinesPdf()
+    const source = await pflegeWritingLinesPdf()
     const detected = await detectPdfAnswerLines(source)
     const plan = buildSolutionPlan({
       documentText:
-        'Worauf sollten Mädchen und Jungen dabei achten? Erkläre kurz, wie Epilieren und Wachsen funktioniert. Erläutere auch die Vor- und Nachteile.',
+        'Worauf sollte man dabei achten? Erkläre kurz, wie Umtopfen und Düngen funktioniert. Erläutere auch die Vor- und Nachteile.',
       pdfBlanks: [],
       shapes: detected.shapes,
       answerTargets: detected.targets,
     })
     const positioned = applyFreeTextTaskMeta(
       {
-        summary: 'Rasieren',
+        summary: 'Pflanzenpflege',
         answers: [
           {
             id: '1',
-            label: 'Epilieren und Wachsen',
-            answer: 'Epilieren entfernt Haare an der Wurzel.',
+            label: 'Umtopfen und Düngen',
+            answer: 'Umtopfen gibt den Wurzeln neuen Platz.',
             blankIndex: null,
-            leftContext: 'Erkläre kurz, wie Epilieren und Wachsen funktioniert.',
+            leftContext: 'Erkläre kurz, wie Umtopfen und Düngen funktioniert.',
             bbox: { x: 0.7, y: 0.1, w: 0.1, h: 0.1 },
           },
           {
@@ -415,7 +415,7 @@ describe('detectPdfAnswerLines', () => {
             label: 'Sicherheit im Intimbereich',
             answer: 'Saubere Klinge verwenden und Haut schonen.',
             blankIndex: null,
-            leftContext: 'Worauf sollten Mädchen und Jungen dabei achten?',
+            leftContext: 'Worauf sollte man dabei achten?',
             bbox: { x: 0.7, y: 0.2, w: 0.1, h: 0.1 },
           },
         ],
@@ -495,19 +495,19 @@ describe('detectPdfAnswerLines', () => {
     expect(rendered.strategy).toBe('pdf_overlay')
   })
 
-  it('hält langen Lösungstext innerhalb des Rasieren-Linienblocks', async () => {
-    const source = await rasierenWritingLinesPdf()
+  it('hält langen Lösungstext innerhalb des Pflege-Linienblocks', async () => {
+    const source = await pflegeWritingLinesPdf()
     const detected = await detectPdfAnswerLines(source)
     const plan = buildSolutionPlan({
       documentText:
-        'Worauf sollten Mädchen und Jungen dabei achten? Erkläre kurz, wie Epilieren und Wachsen funktioniert. Erläutere auch die Vor- und Nachteile.',
+        'Worauf sollte man dabei achten? Erkläre kurz, wie Umtopfen und Düngen funktioniert. Erläutere auch die Vor- und Nachteile.',
       pdfBlanks: [],
       shapes: detected.shapes,
       answerTargets: detected.targets,
     })
     const solution = applyFreeTextTaskMeta(
       {
-        summary: 'Rasieren',
+        summary: 'Pflanzenpflege',
         answers: [
           { id: '1', label: 'Aufgabe 1', answer: 'FITCHECK1 Hygiene beachten.' },
           {
@@ -522,7 +522,7 @@ describe('detectPdfAnswerLines', () => {
     )
     const rendered = await renderPdfSolution(source, solution, {
       title: 'Musterlösung',
-      sourceFileName: 'AB-Rasieren.pdf',
+      sourceFileName: 'AB-Pflege.pdf',
       tasks: plan.tasks,
     })
 
