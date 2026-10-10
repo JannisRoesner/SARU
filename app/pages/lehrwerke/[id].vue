@@ -247,14 +247,11 @@ async function zuordnungLoesen(relationId: string) {
             @click="favoritSetzen(data.id, !data.isFavorite)"
           />
           <UiButton
-            v-if="darfBearbeiten"
+            v-if="!darfBearbeiten || bearbeiten"
+            :to="`/materialien/${data.id}`"
             variante="sekundaer"
-            icon="plus"
-            @click="pickerOffen = true"
+            icon="pen-to-square"
           >
-            Material zuordnen
-          </UiButton>
-          <UiButton :to="`/materialien/${data.id}`" variante="still" icon="pen-to-square">
             Angaben
           </UiButton>
           <UiButton
@@ -392,13 +389,13 @@ async function zuordnungLoesen(relationId: string) {
                 <UiInput
                   v-model="inhaltSuche"
                   icon="magnifying-glass"
-                  placeholder="Zugeordnete Materialien eingrenzen …"
-                  aria-label="Lehrwerkinhalt eingrenzen"
+                  placeholder="Lehrwerk durchsuchen …"
+                  aria-label="Lehrwerk durchsuchen"
                 />
               </UiField>
             </div>
             <UiButton
-              v-if="darfBearbeiten"
+              v-if="darfBearbeiten && bearbeiten"
               variante="sekundaer"
               icon="plus"
               @click="pickerOffen = true"
@@ -406,7 +403,7 @@ async function zuordnungLoesen(relationId: string) {
               Zuordnen
             </UiButton>
             <UiButton
-              v-if="darfBearbeiten"
+              v-if="darfBearbeiten && bearbeiten"
               variante="sekundaer"
               icon="chalkboard-user"
               :to="`/materialien/neu/ki?typ=serviceband&lehrwerk=${data.id}`"
@@ -414,7 +411,7 @@ async function zuordnungLoesen(relationId: string) {
               Serviceband
             </UiButton>
             <UiButton
-              v-if="darfBearbeiten"
+              v-if="darfBearbeiten && bearbeiten"
               variante="sekundaer"
               icon="book-bookmark"
               :to="`/materialien/neu/ki?typ=loesungsbuch&lehrwerk=${data.id}`"
@@ -427,17 +424,12 @@ async function zuordnungLoesen(relationId: string) {
             v-if="!inhalt.length"
             icon="layer-group"
             titel="Noch nichts zugeordnet"
-            text="Noch keine Zuordnungen."
-          >
-            <UiButton
-              v-if="darfBearbeiten"
-              variante="primaer"
-              icon="plus"
-              @click="pickerOffen = true"
-            >
-              Material zuordnen
-            </UiButton>
-          </UiLeerzustand>
+            :text="
+              darfBearbeiten
+                ? 'Noch keine Zuordnungen. Schalte „Bearbeiten“ ein, um Material zuzuordnen.'
+                : 'Noch keine Zuordnungen.'
+            "
+          />
 
           <UiLeerzustand
             v-else-if="!gruppen.length"
