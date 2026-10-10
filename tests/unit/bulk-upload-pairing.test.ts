@@ -106,4 +106,62 @@ describe('Stapel-Paarung', () => {
     expect(versuch.proposedLinks[0]!.targetClusterId).toBe(gfb.clusterId)
     expect(versuch.proposedLinks[0]!.relationType).toBe('gehoert_zu')
   })
+
+  it('paart Klausur und Lösung auch bei gleichem Dateiformat anhand des Namens', () => {
+    const clusters = clusterBulkFiles([
+      {
+        sourceRef: 'lsg',
+        fileName: 'Klausur 01 Fische mit und ohne Kiefer - Lösung.doc',
+        relativePath: 'Klausuren/1 Belege/Klausur 01 Fische mit und ohne Kiefer - Lösung.doc',
+        extension: 'doc',
+      },
+      {
+        sourceRef: 'ka',
+        fileName: 'Klausur 01 Fische mit und ohne Kiefer.doc',
+        relativePath: 'Klausuren/1 Belege/Klausur 01 Fische mit und ohne Kiefer.doc',
+        extension: 'doc',
+      },
+      {
+        sourceRef: 'ka2',
+        fileName: 'Klausur 02 Insulin.doc',
+        relativePath: 'Klausuren/1 Belege/Klausur 02 Insulin.doc',
+        extension: 'doc',
+      },
+    ])
+
+    expect(clusters).toHaveLength(2)
+    const paar = clusters.find((c) => c.kind === 'paar')!
+    expect(paar.suggestions.materialType).toBe('klausur')
+    expect(paar.suggestions.title).toBe('Klausur 01 Fische mit und ohne Kiefer')
+    expect(paar.suggestedRoles.ka).toBe('schueler')
+    expect(paar.suggestedRoles.lsg).toBe('loesung')
+    expect(clusters.find((c) => c.kind === 'einzeln')!.fileRefs).toEqual(['ka2'])
+  })
+
+  it('erkennt Lösungs-Endungen wie _Loesung und _lsg, auch außerhalb von Klausurordnern', () => {
+    const clusters = clusterBulkFiles([
+      { sourceRef: 'a', fileName: 'AB-Zellatmung.docx', extension: 'docx' },
+      { sourceRef: 'b', fileName: 'AB-Zellatmung_Loesung.docx', extension: 'docx' },
+      { sourceRef: 'c', fileName: 'mel_740449.doc', extension: 'doc' },
+      { sourceRef: 'd', fileName: 'mel_740449_lsg.doc', extension: 'doc' },
+    ])
+    expect(clusters).toHaveLength(2)
+    for (const c of clusters) expect(c.kind).toBe('paar')
+    expect(clusters[0]!.suggestedRoles).toEqual({ a: 'schueler', b: 'loesung' })
+    expect(clusters[1]!.suggestedRoles).toEqual({ c: 'schueler', d: 'loesung' })
+  })
+
+  it('lässt eine einzelne Lösungsdatei allein und paart nicht aus Versehen', () => {
+    const allein = clusterBulkFiles([
+      { sourceRef: 'x', fileName: 'Lösung.docx', extension: 'docx' },
+    ])
+    expect(allein).toHaveLength(1)
+    expect(allein[0]!.kind).toBe('einzeln')
+
+    const unklar = clusterBulkFiles([
+      { sourceRef: 'a', fileName: 'Test.docx', extension: 'docx' },
+      { sourceRef: 'b', fileName: 'Test.docx', extension: 'docx' },
+    ])
+    expect(unklar[0]!.kind).toBe('unklar')
+  })
 })

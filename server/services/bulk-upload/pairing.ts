@@ -50,6 +50,21 @@ function fold(value: string): string {
     .replace(/\p{M}/gu, '')
 }
 
+/** Endung im Dateinamen, die eine Lösungsdatei kennzeichnet („… - Lösung“, „…_lsg“). */
+const SOLUTION_SUFFIX = /[\s._-]*(?:(?:muster)?(?:loesung|losung)(?:en)?|lsg)$/
+
+/** Stamm ohne Lösungs-Endung (gefaltet); bleibt unverändert, wenn dann nichts übrig wäre. */
+function solutionBaseStem(stem: string): string {
+  const folded = fold(stem)
+  const base = folded.replace(SOLUTION_SUFFIX, '')
+  return base ? base : folded
+}
+
+function hasSolutionSuffix(stem: string): boolean {
+  const folded = fold(stem)
+  return SOLUTION_SUFFIX.test(folded) && folded.replace(SOLUTION_SUFFIX, '') !== ''
+}
+
 function posixPath(value: string): string {
   return value.replace(/\\/g, '/').replace(/\/+/g, '/')
 }
@@ -150,11 +165,20 @@ function defaultRoles(
   files: PairingInputFile[],
   kind: BulkClusterKind,
   folderRole: BulkFolderRole,
+  solutionRefs: ReadonlySet<string> | null = null,
 ): Record<string, BulkFileRole> {
   const roles: Record<string, BulkFileRole> = {}
   if (kind !== 'paar') {
     const einzel = folderRole === 'abbildungen' ? 'abbildung' : 'einzeln'
     for (const file of files) roles[file.sourceRef] = einzel
+    return roles
+  }
+
+  // Dateiname verrät die Lösung („… - Lösung.doc“) – unabhängig vom Dateiformat.
+  if (solutionRefs?.size === 1) {
+    for (const file of files) {
+      roles[file.sourceRef] = solutionRefs.has(file.sourceRef) ? 'loesung' : 'schueler'
+    }
     return roles
   }
 
@@ -227,7 +251,7 @@ export function clusterBulkFiles(
   for (const file of files) {
     const path = posixPath(file.relativePath || file.fileName)
     const folder = parentFolder(path)
-    const stem = fold(stemOf(file.fileName))
+    const stem = solutionBaseStem(stemOf(file.fileName))
     const key = `${fold(folder)}::${stem}`
     const list = groups.get(key)
     if (list) list.push(file)
@@ -237,22 +261,37 @@ export function clusterBulkFiles(
   const clusters: BulkUploadDetectedCluster[] = []
   let index = 0
   for (const group of groups.values()) {
-    const first = group[0]!
+    // Klausur.doc + „Klausur - Lösung.doc“: die Lösungsdatei erkennt man am Namen.
+    const solutionRefs = new Set(
+      group
+        .filter((file) => hasSolutionSuffix(stemOf(file.fileName)))
+        .map((file) => file.sourceRef),
+    )
+    const namedSolutionPair = group.length === 2 && solutionRefs.size === 1
+    const first = namedSolutionPair
+      ? group.find((file) => !solutionRefs.has(file.sourceRef))!
+      : group[0]!
     const folderRole = detectFolderRole(first.relativePath, first.fileName)
     const stem = stemOf(first.fileName)
     const extensions = new Set(group.map((file) => file.extension))
     const isPair =
       group.length === 2 &&
-      extensions.size === 2 &&
-      (folderRole === 'kopiervorlagen' ||
-        folderRole === 'klausuren' ||
-        (OFFICE_EXTENSIONS.has(group[0]!.extension) && SOLUTION_EXTENSIONS.has(group[1]!.extension)) ||
-        (SOLUTION_EXTENSIONS.has(group[0]!.extension) && OFFICE_EXTENSIONS.has(group[1]!.extension)))
+      (namedSolutionPair ||
+        (extensions.size === 2 &&
+          (folderRole === 'kopiervorlagen' ||
+            folderRole === 'klausuren' ||
+            (OFFICE_EXTENSIONS.has(group[0]!.extension) &&
+              SOLUTION_EXTENSIONS.has(group[1]!.extension)) ||
+            (SOLUTION_EXTENSIONS.has(group[0]!.extension) &&
+              OFFICE_EXTENSIONS.has(group[1]!.extension)))))
 
     const kind: BulkClusterKind = isPair ? 'paar' : group.length === 1 ? 'einzeln' : 'unklar'
     const fileRefs = group.map((file) => file.sourceRef)
     const clusterId = group.length === 1 ? first.sourceRef : `cluster:${index}:${fold(stem).slice(0, 40)}`
-    const paths = group.map((file) => posixPath(file.relativePath || file.fileName))
+    // Bei benannten Lösungspaaren bestimmt nur die Aufgabenfassung den Materialtyp.
+    const paths = group
+      .filter((file) => !(namedSolutionPair && solutionRefs.has(file.sourceRef)))
+      .map((file) => posixPath(file.relativePath || file.fileName))
     const materialType = materialTypeForCluster(folderRole, paths, fallbackType)
     const warnings: string[] = []
     if (kind === 'unklar') {
@@ -265,7 +304,7 @@ export function clusterBulkFiles(
       folderRole,
       stem,
       fileRefs,
-      suggestedRoles: defaultRoles(group, kind, folderRole),
+      suggestedRoles: defaultRoles(group, kind, folderRole, namedSolutionPair ? solutionRefs : null),
       suggestions: {
         title: clusterTitleFromStem(stem, folderRole),
         materialType,
