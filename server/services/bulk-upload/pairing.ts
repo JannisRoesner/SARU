@@ -1,10 +1,13 @@
 import type { MaterialType } from '#shared/types/domain'
 import { guessMaterialType } from '#shared/utils/material-type-guess'
-import type { BulkFileRole, BulkFolderRole } from '#shared/utils/bulk-upload'
+import type { BulkFileRole, BulkFolderRole, BulkLernzirkelRef } from '#shared/utils/bulk-upload'
 import type { BulkClusterKind, BulkUploadDetectedCluster } from './types'
 
 const OFFICE_EXTENSIONS = new Set(['doc', 'docx', 'odt', 'ppt', 'pptx', 'odp', 'xls', 'xlsx', 'ods'])
 const SOLUTION_EXTENSIONS = new Set(['pdf'])
+/** Lehrkraft-Zubehör eines Lernzirkels (kein Schülerblatt). */
+const LERNZIRKEL_ZUBEHOER = /handreichung|hinweise fur die lehr|materialliste|kontrollliste|aufbauplan/
+const BUCH_TYPEN = new Set<MaterialType>(['lehrwerk', 'serviceband', 'loesungsbuch'])
 
 const STOP_TOKENS = new Set([
   'versuch',
@@ -119,7 +122,102 @@ export function detectFolderRole(
   ) {
     return 'versuche'
   }
+  if (detectLernzirkelOrdner(relativePath, fileName)) return 'lernzirkel'
   return 'sonstiges'
+}
+
+/** Ordnername, der eine Stationenarbeit kennzeichnet („Lernzirkel Katze“, „Stationenlernen“). */
+const LERNZIRKEL_ORDNER =
+  /lernzirkel|lernstation|(?:^|[^a-z])stationen(?:arbeit|lernen|lauf|betrieb)?(?:[^a-z]|$)|lernwerkstatt|zirkeltraining/
+/** Blatt einer Station: „Station 3 – …“, „Station A“, „Ergänzungsstation“, „Pflichtstation 2“. */
+const STATIONS_DATEI = /(?:^|[\s_.-])(?:erganzungs|pflicht|wahl|zusatz)?station\s*(?:[0-9]{1,2}|[a-z])(?:[\s_.:-]|$)/
+/** Ab so vielen Stationsblättern in einem Ordner gilt dieser auch ohne sprechenden Namen als Lernzirkel. */
+const MIN_STATIONS_DATEIEN = 3
+
+function ordnerSegmente(path: string): string[] {
+  const parts = posixPath(path).split('/').filter(Boolean)
+  return parts.slice(0, -1)
+}
+
+function aufraeumenOrdnername(name: string): string {
+  return name
+    .replace(/^\d{1,3}[\s._-]+/, '')
+    .replace(/[_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * Lernzirkel, zu dem die Datei per Ordnerstruktur gehört: der tiefste Ordner mit „Lernzirkel“/„Stationen“
+ * im Namen, sonst `null`. Ein Ordner ohne eigenes Thema („Stationenarbeit“) bekommt den Elternordner
+ * als Thema. Der Dateiname allein reicht hier nicht – das prüft `markiereLernzirkel` pro Ordner.
+ */
+export function detectLernzirkelOrdner(
+  relativePath: string | null | undefined,
+  fileName: string,
+): BulkLernzirkelRef | null {
+  const segmente = ordnerSegmente(relativePath || fileName)
+  for (let i = segmente.length - 1; i >= 0; i -= 1) {
+    const segment = segmente[i]!
+    if (!LERNZIRKEL_ORDNER.test(fold(segment))) continue
+    let titel = aufraeumenOrdnername(segment)
+    // „Stationenarbeit“ allein sagt nichts – das Thema steht im Ordner darüber.
+    if (/^(lernzirkel|stationen\w*|lernstationen)$/i.test(titel) && i > 0) {
+      titel = `${titel} ${aufraeumenOrdnername(segmente[i - 1]!)}`
+    }
+    return { id: fold(segmente.slice(0, i + 1).join('/')), title: titel }
+  }
+  return null
+}
+
+/**
+ * Setzt `cluster.lernzirkel` für alle Bündel, die zu einer Stationenarbeit gehören:
+ * Ordner mit „Lernzirkel“ im Namen, oder ein Ordner mit mindestens drei Stationsblättern.
+ * Ein einzelnes Bündel macht noch keinen Lernzirkel.
+ */
+function markiereLernzirkel(
+  clusters: BulkUploadDetectedCluster[],
+  pfadNachRef: ReadonlyMap<string, string>,
+): void {
+  const proOrdner = new Map<string, BulkUploadDetectedCluster[]>()
+  const nachOrdnername = new Map<string, BulkLernzirkelRef>()
+
+  for (const cluster of clusters) {
+    const pfad = pfadNachRef.get(cluster.fileRefs[0] ?? '') ?? ''
+    const ref = detectLernzirkelOrdner(pfad, basename(pfad))
+    if (ref) {
+      cluster.lernzirkel = ref
+      continue
+    }
+    const stationsBlatt = cluster.fileRefs.some((fileRef) =>
+      STATIONS_DATEI.test(fold(stemOf(pfadNachRef.get(fileRef) ?? ''))),
+    )
+    if (!stationsBlatt) continue
+    const segmente = ordnerSegmente(pfad)
+    if (!segmente.length) continue
+    const id = fold(segmente.join('/'))
+    const liste = proOrdner.get(id)
+    if (liste) liste.push(cluster)
+    else proOrdner.set(id, [cluster])
+    nachOrdnername.set(id, {
+      id,
+      title: `Lernzirkel ${aufraeumenOrdnername(segmente[segmente.length - 1]!)}`,
+    })
+  }
+
+  for (const [id, liste] of proOrdner) {
+    if (liste.length < MIN_STATIONS_DATEIEN) continue
+    for (const cluster of liste) cluster.lernzirkel = nachOrdnername.get(id)!
+  }
+
+  // Ein Lernzirkel aus nur einem Bündel ist keiner.
+  const anzahl = new Map<string, number>()
+  for (const cluster of clusters) {
+    if (cluster.lernzirkel) anzahl.set(cluster.lernzirkel.id, (anzahl.get(cluster.lernzirkel.id) ?? 0) + 1)
+  }
+  for (const cluster of clusters) {
+    if (cluster.lernzirkel && (anzahl.get(cluster.lernzirkel.id) ?? 0) < 2) delete cluster.lernzirkel
+  }
 }
 
 export function clusterTitleFromStem(stem: string, folderRole: BulkFolderRole): string {
@@ -173,6 +271,7 @@ function materialTypeForCluster(
     case 'versuche':
       return 'zusatzmaterial'
     case 'kopiervorlagen':
+    case 'lernzirkel':
       return 'arbeitsblatt'
     default:
       return fromNames[0] ?? fallback
@@ -366,6 +465,17 @@ export function clusterBulkFiles(
   }
 
   proposeGfbVersuchLinks(clusters)
+  markiereLernzirkel(
+    clusters,
+    new Map(files.map((file) => [file.sourceRef, posixPath(file.relativePath || file.fileName)])),
+  )
+  for (const cluster of clusters) {
+    // Handreichung o. Ä. innerhalb eines Lernzirkels ist Zubehör, kein eigenes Buch.
+    if (!cluster.lernzirkel) continue
+    if (BUCH_TYPEN.has(cluster.suggestions.materialType) || LERNZIRKEL_ZUBEHOER.test(fold(cluster.stem))) {
+      cluster.suggestions.materialType = 'zusatzmaterial'
+    }
+  }
   return clusters
 }
 

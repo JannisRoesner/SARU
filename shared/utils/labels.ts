@@ -50,6 +50,7 @@ export const materialTypes = definitions<MaterialType>({
   lehrbuchseite: { label: 'Lehrbuchseite', icon: 'book-open', tone: 'neutral' },
   loesungsbuch: { label: 'Lösungsbuch', icon: 'book-bookmark', tone: 'gruen' },
   serviceband: { label: 'Serviceband', icon: 'chalkboard-user', tone: 'accent' },
+  lernzirkel: { label: 'Lernzirkel', icon: 'map-location-dot', tone: 'accent' },
   unterrichtsentwurf: { label: 'Unterrichtsentwurf', icon: 'clipboard-list', tone: 'accent' },
   praesentation: { label: 'Präsentation', icon: 'display', tone: 'accent' },
   bild: { label: 'Abbildung', icon: 'image', tone: 'violett' },

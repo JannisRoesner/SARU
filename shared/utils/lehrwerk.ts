@@ -49,6 +49,13 @@ export const LEHRWERK_GRUPPEN: LehrwerkGruppe[] = [
     types: ['lehrbuchseite'],
   },
   {
+    id: 'lernzirkel',
+    label: 'Lernzirkel & Stationenarbeit',
+    icon: 'map-location-dot',
+    types: ['lernzirkel'],
+    titleMatch: /lernzirkel|stationenarbeit|stationenlernen/i,
+  },
+  {
     id: 'kopiervorlagen',
     label: 'Kopiervorlagen & Aufgaben',
     icon: 'file-lines',

@@ -10,6 +10,7 @@ export type BulkFolderRole =
   | 'abbildungen'
   | 'gefaehrdungsbeurteilung'
   | 'versuche'
+  | 'lernzirkel'
   | 'sonstiges'
 
 export type BulkFileRole = 'schueler' | 'loesung' | 'einzeln' | 'abbildung' | 'anhaengsel' | 'fassung'
@@ -20,6 +21,7 @@ export const BULK_FOLDER_ROLE_LABELS: Record<BulkFolderRole, string> = {
   abbildungen: 'Abbildungen',
   gefaehrdungsbeurteilung: 'Gefährdungsbeurteilungen',
   versuche: 'Versuche',
+  lernzirkel: 'Stationen & Zubehör',
   sonstiges: 'Weitere Dateien',
 }
 
@@ -30,6 +32,21 @@ export const BULK_FILE_ROLE_LABELS: Record<BulkFileRole, string> = {
   abbildung: 'Abbildung',
   anhaengsel: 'Anhang',
   fassung: 'Weitere Fassung',
+}
+
+/** Über-Material, das der Stapel aus einem Lernzirkel-Ordner bildet. */
+export interface BulkLernzirkelRef {
+  /** Stabile Kennung (gefalteter Ordnerpfad). */
+  id: string
+  /** Vorschlag für den Titel des Lernzirkels. */
+  title: string
+}
+
+/** Entscheidung zu einem erkannten Lernzirkel in `mapping.lernzirkel`. */
+export interface BulkLernzirkelDecision {
+  /** `false`: keinen Lernzirkel anlegen, die Blätter einzeln dem Lehrwerk zuordnen. */
+  enabled?: boolean
+  title?: string
 }
 
 /** Mehrfachauswahl; `gradeLevel` nur noch für ältere Stapel-Läufe. */

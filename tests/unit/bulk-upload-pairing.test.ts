@@ -238,3 +238,76 @@ describe('Stapel-Paarung', () => {
     expect(Object.values(clusters[0]!.suggestedRoles).sort()).toEqual(['fassung', 'fassung', 'schueler'])
   })
 })
+
+describe('Lernzirkel-Erkennung', () => {
+  const datei = (ref: string, pfad: string) => ({
+    sourceRef: ref,
+    fileName: pfad.split('/').pop()!,
+    relativePath: pfad,
+    extension: pfad.split('.').pop()!,
+  })
+
+  it('erkennt einen Ordner „Lernzirkel …“ und fasst Stationen samt Lösung zusammen', () => {
+    const cluster = clusterBulkFiles([
+      datei('s1', 'Katze/Lernzirkel Katze/Station 1 - Knochen.pdf'),
+      datei('s1l', 'Katze/Lernzirkel Katze/Station 1 - Knochen - Lösung.pdf'),
+      datei('s2', 'Katze/Lernzirkel Katze/Station 2 - Auge.pdf'),
+      datei('lz', 'Katze/Lernzirkel Katze/Laufzettel.pdf'),
+    ])
+    expect(cluster).toHaveLength(3)
+    for (const c of cluster) {
+      expect(c.lernzirkel?.title).toBe('Lernzirkel Katze')
+      expect(c.folderRole).toBe('lernzirkel')
+      expect(c.suggestions.materialType).toBe('arbeitsblatt')
+    }
+    expect(new Set(cluster.map((c) => c.lernzirkel!.id)).size).toBe(1)
+    expect(cluster.find((c) => c.fileRefs.includes('s1'))!.kind).toBe('paar')
+  })
+
+  it('gibt einem Ordner „Stationenarbeit“ das Thema des Elternordners', () => {
+    const [a] = clusterBulkFiles([
+      datei('a', 'Skelett/Stationenarbeit/Station A.pdf'),
+      datei('b', 'Skelett/Stationenarbeit/Station B.pdf'),
+    ])
+    expect(a!.lernzirkel?.title).toBe('Stationenarbeit Skelett')
+  })
+
+  it('erkennt Stationsblätter in einem Ordner ohne sprechenden Namen ab drei Blättern', () => {
+    const drei = clusterBulkFiles([
+      datei('1', 'Ernaehrung/Zirkel 7/Station 1 Fette.pdf'),
+      datei('2', 'Ernaehrung/Zirkel 7/Station 2 Zucker.pdf'),
+      datei('3', 'Ernaehrung/Zirkel 7/Station 3 Eiweiß.pdf'),
+    ])
+    expect(drei.every((c) => c.lernzirkel?.title === 'Lernzirkel Zirkel 7')).toBe(true)
+
+    const zwei = clusterBulkFiles([
+      datei('1', 'Ernaehrung/Zirkel 7/Station 1 Fette.pdf'),
+      datei('2', 'Ernaehrung/Zirkel 7/Station 2 Zucker.pdf'),
+    ])
+    expect(zwei.every((c) => !c.lernzirkel)).toBe(true)
+  })
+
+  it('macht aus einem einzelnen Bündel keinen Lernzirkel', () => {
+    const [einzeln] = clusterBulkFiles([datei('a', 'Lernzirkel Katze/Station 1.pdf')])
+    expect(einzeln!.lernzirkel).toBeUndefined()
+  })
+
+  it('hält normale Arbeitsblätter und Wörter wie „Wetterstation“ aus dem Lernzirkel heraus', () => {
+    const cluster = clusterBulkFiles([
+      datei('a', 'Kapitel 1/Arbeitsblätter/Der Hund.pdf'),
+      datei('b', 'Kapitel 1/Arbeitsblätter/Die Katze.pdf'),
+      datei('c', 'Wetterstation/Messung.pdf'),
+    ])
+    expect(cluster.every((c) => !c.lernzirkel)).toBe(true)
+  })
+
+  it('stuft eine Handreichung im Lernzirkel nicht als Serviceband ein', () => {
+    const cluster = clusterBulkFiles([
+      datei('h', 'Lernzirkel Vögel/Handreichungen für die Lehrerin und den Lehrer.pdf'),
+      datei('s', 'Lernzirkel Vögel/Station 1 Federn.pdf'),
+    ])
+    const handreichung = cluster.find((c) => c.fileRefs.includes('h'))!
+    expect(handreichung.lernzirkel).toBeDefined()
+    expect(handreichung.suggestions.materialType).toBe('zusatzmaterial')
+  })
+})

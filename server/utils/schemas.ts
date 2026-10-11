@@ -368,6 +368,15 @@ export const bulkUploadMappingSchema = z.object({
       }),
     )
     .optional(),
+  lernzirkel: z
+    .record(
+      z.string(),
+      z.object({
+        enabled: z.boolean().optional(),
+        title: z.string().max(300).optional(),
+      }),
+    )
+    .optional(),
 })
 
 export const aiMaterialCreateCommitSchema = z.object({

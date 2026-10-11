@@ -58,6 +58,7 @@ interface DetectedCluster {
     reason: string
     confidence: 'hoch' | 'mittel'
   }>
+  lernzirkel?: { id: string; title: string }
   warnings: string[]
 }
 
@@ -80,6 +81,7 @@ interface RunOverview {
     createLehrwerk?: boolean
     lehrwerkTitle?: string
     lehrwerkId?: string | null
+    lernzirkel?: Record<string, { enabled?: boolean; title?: string }>
     records?: Record<
       string,
       {
@@ -122,6 +124,7 @@ const mapping = reactive({
   createLehrwerk: false,
   lehrwerkTitle: '',
   lehrwerkId: null as string | null,
+  lernzirkel: {} as Record<string, { enabled: boolean; title: string }>,
   records: {} as Record<
     string,
     {
@@ -196,6 +199,18 @@ watch(
       }
     }
     mapping.records = records
+
+    const lernzirkel: typeof mapping.lernzirkel = {}
+    for (const cluster of wert.clusters ?? []) {
+      const ref = cluster.lernzirkel
+      if (!ref || lernzirkel[ref.id]) continue
+      const gespeichert = m.lernzirkel?.[ref.id]
+      lernzirkel[ref.id] = {
+        enabled: gespeichert?.enabled ?? true,
+        title: gespeichert?.title ?? ref.title,
+      }
+    }
+    mapping.lernzirkel = lernzirkel
     nextTick(() => {
       geladen.value = true
       autosave.alsGespeichertMarkieren()
@@ -239,8 +254,25 @@ const ausgewaehlt = computed(
   () => Object.values(mapping.records).filter((r) => r.include).length,
 )
 
+/** Erkannte Lernzirkel mit der Zahl ihrer ausgewählten Stationen. */
+const lernzirkelListe = computed(() => {
+  const nachId = new Map<string, { id: string; stationen: number; ausgewaehlt: number }>()
+  for (const cluster of data.value?.clusters ?? []) {
+    const ref = cluster.lernzirkel
+    if (!ref) continue
+    const eintrag = nachId.get(ref.id) ?? { id: ref.id, stationen: 0, ausgewaehlt: 0 }
+    eintrag.stationen += 1
+    if (mapping.records[cluster.clusterId]?.include) eintrag.ausgewaehlt += 1
+    nachId.set(ref.id, eintrag)
+  }
+  return [...nachId.values()]
+})
+
 const materialzahl = computed(() => {
   let n = Object.keys(mapping.records).reduce((sum, id) => sum + clusterMaterialzahl(id), 0)
+  n += lernzirkelListe.value.filter(
+    (zirkel) => mapping.lernzirkel[zirkel.id]?.enabled && zirkel.ausgewaehlt >= 2,
+  ).length
   if (
     mapping.createLehrwerk
     && ausgewaehlt.value
@@ -260,6 +292,7 @@ const gruppen = computed(() => {
     'versuche',
     'gefaehrdungsbeurteilung',
     'abbildungen',
+    'lernzirkel',
     'sonstiges',
   ]
   return order
@@ -510,6 +543,48 @@ function hatLoesung(clusterId: string): boolean {
               </div>
             </div>
 
+            <section v-if="lernzirkelListe.length" class="mb-6 space-y-3">
+              <h3 class="text-sm font-semibold text-ink">
+                Lernzirkel
+                <span class="font-normal text-ink-subtle">· {{ lernzirkelListe.length }}</span>
+              </h3>
+              <p class="text-xs text-ink-muted">
+                Stationenarbeit erkannt: Die Blätter werden einem eigenen Lernzirkel-Material zugeordnet,
+                und nur dieses hängt am Lehrwerk. Die Blätter bleiben einzeln auffindbar.
+              </p>
+              <div
+                v-for="zirkel in lernzirkelListe"
+                :key="zirkel.id"
+                class="rounded-xl border border-line p-3"
+              >
+                <div v-if="mapping.lernzirkel[zirkel.id]" class="flex flex-wrap items-start gap-3">
+                  <label v-if="data.canCommit" class="mt-2">
+                    <input
+                      v-model="mapping.lernzirkel[zirkel.id]!.enabled"
+                      type="checkbox"
+                      class="accent-[var(--color-primary)]"
+                    >
+                  </label>
+                  <div class="min-w-0 flex-1 space-y-2">
+                    <UiField v-if="data.canCommit" label="Titel des Lernzirkels">
+                      <UiInput
+                        v-model="mapping.lernzirkel[zirkel.id]!.title"
+                        :disabled="!mapping.lernzirkel[zirkel.id]!.enabled"
+                      />
+                    </UiField>
+                    <p v-else class="font-medium text-ink">{{ mapping.lernzirkel[zirkel.id]!.title }}</p>
+                    <p class="text-xs text-ink-subtle">
+                      {{ zirkel.ausgewaehlt }} von {{ zirkel.stationen }} Bündeln ausgewählt ·
+                      <template v-if="mapping.lernzirkel[zirkel.id]!.enabled">
+                        als Lernzirkel zusammengefasst
+                      </template>
+                      <template v-else>nicht zusammengefasst – Blätter hängen einzeln am Lehrwerk</template>
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </section>
+
             <div class="space-y-6">
               <section v-for="gruppe in gruppen" :key="gruppe.role">
                 <h3 class="mb-2 text-sm font-semibold text-ink">
@@ -544,6 +619,9 @@ function hatLoesung(clusterId: string): boolean {
                             }}
                             · {{ cluster.fileRefs.length }} Datei{{ cluster.fileRefs.length === 1 ? '' : 'en' }}
                             <template v-if="cluster.suggestions.aiUsed"> · KI</template>
+                            <template v-if="cluster.lernzirkel && mapping.lernzirkel[cluster.lernzirkel.id]?.enabled">
+                              · Station in „{{ mapping.lernzirkel[cluster.lernzirkel.id]!.title }}“
+                            </template>
                           </p>
                           <ul class="mt-1 space-y-0.5">
                             <li

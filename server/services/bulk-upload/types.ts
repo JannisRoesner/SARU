@@ -1,8 +1,13 @@
 import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
 import type { MaterialType } from '#shared/types/domain'
-import type { BulkFileRole, BulkFolderRole } from '#shared/utils/bulk-upload'
+import type {
+  BulkFileRole,
+  BulkFolderRole,
+  BulkLernzirkelDecision,
+  BulkLernzirkelRef,
+} from '#shared/utils/bulk-upload'
 
-export type { BulkFileRole, BulkFolderRole }
+export type { BulkFileRole, BulkFolderRole, BulkLernzirkelDecision, BulkLernzirkelRef }
 
 /** Kennung in `import_runs.adapter_id` – getrennt vom Schulportal-Import. */
 export const BULK_PDF_ADAPTER_ID = 'bulk-pdf-materials'
@@ -70,6 +75,8 @@ export interface BulkUploadDetectedCluster {
   suggestedRoles: Record<string, BulkFileRole>
   suggestions: BulkUploadFileSuggestion
   proposedLinks: BulkProposedLink[]
+  /** Gehört zu einem erkannten Lernzirkel (Stationenarbeit) – wird dort statt direkt am Lehrwerk einsortiert. */
+  lernzirkel?: BulkLernzirkelRef
   warnings: string[]
 }
 
@@ -113,6 +120,8 @@ export interface BulkUploadMapping {
   /** Bestehendes oder nach dem Anlegen gesetztes Lehrwerk. */
   lehrwerkId?: string | null
   records?: Record<string, BulkUploadRecordDecision>
+  /** Entscheidungen je erkanntem Lernzirkel (Schlüssel: `BulkLernzirkelRef.id`). */
+  lernzirkel?: Record<string, BulkLernzirkelDecision>
 }
 
 export interface BulkUploadInputFile {
@@ -126,6 +135,7 @@ export interface BulkUploadStats {
   dateien?: number
   verknuepft?: number
   fassungen?: number
+  lernzirkel?: number
   uebersprungen?: number
   fehlgeschlagen?: number
 }

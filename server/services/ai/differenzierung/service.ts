@@ -34,6 +34,7 @@ const log = createLogger('ai:differenzierung')
 const BLOCKED_TYPES = new Set([
   'lehrwerk',
   'serviceband',
+  'lernzirkel',
   'loesungsbuch',
   'lehrbuchseite',
   'moodle_kurs',

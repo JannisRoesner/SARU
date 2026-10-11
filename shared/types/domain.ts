@@ -28,6 +28,8 @@ export const MATERIAL_TYPES = [
   'lehrbuchseite',
   'loesungsbuch',
   'serviceband',
+  /** Stationenarbeit: Über-Material, dem die Stationsblätter per `gehoert_zu` angehören. */
+  'lernzirkel',
   'unterrichtsentwurf',
   'praesentation',
   'bild',

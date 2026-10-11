@@ -270,4 +270,102 @@ describe('PDF-Stapel-Upload', () => {
       expect(detail?.relations.some((r) => r.relationType === 'gehoert_zu' && r.material.id === lehrwerkId)).toBe(true)
     })
   })
+
+  describe('Lernzirkel', () => {
+    async function lernzirkelArchiv() {
+      const { zipSync } = await import('fflate')
+      return Buffer.from(
+        zipSync({
+          'Katze/Lernzirkel Katze/Station 1 - Knochen.pdf': new Uint8Array(pdf),
+          'Katze/Lernzirkel Katze/Station 2 - Auge.pdf': new Uint8Array(pdf),
+          'Katze/Lernzirkel Katze/Laufzettel.pdf': new Uint8Array(pdf),
+          'Katze/Arbeitsblatt Skelett.pdf': new Uint8Array(pdf),
+        }),
+      )
+    }
+
+    it('legt aus einem Lernzirkel-Ordner ein Über-Material an, das statt der Blätter am Lehrwerk hängt', async () => {
+      await withTempUploadDir(async () => {
+        const lehrwerkId = await createMaterial(
+          { title: 'Biologie heute 1', materialType: 'lehrwerk' },
+          userId,
+        )
+        const { runId } = await analyzeBulkPdfUpload(
+          [{ buffer: await lernzirkelArchiv(), fileName: 'Katze.zip' }],
+          userId,
+          { createLehrwerk: true, lehrwerkId },
+        )
+        const overview = await getBulkRunOverview(runId)
+        const stationen = overview.clusters.filter((c) => c.lernzirkel)
+        expect(stationen).toHaveLength(3)
+        expect(stationen[0]!.lernzirkel!.title).toBe('Lernzirkel Katze')
+
+        const commit = await commitBulkUpload(runId, userId)
+        // 4 Blätter + der Lernzirkel
+        expect(commit.stats.materialien).toBe(5)
+        expect(commit.stats.lernzirkel).toBe(1)
+
+        const alle = await listMaterials({ pageSize: 50, filters: { excludeMaterialTypes: ['lehrwerk'] } })
+        const lernzirkel = alle.items.find((m) => m.materialType === 'lernzirkel')!
+        expect(lernzirkel.title).toBe('Lernzirkel Katze')
+
+        const detail = await getMaterialDetail(lernzirkel.id)
+        expect(detail?.relations.some((r) => r.relationType === 'gehoert_zu' && r.material.id === lehrwerkId)).toBe(true)
+        expect(detail?.relations.filter((r) => r.relationType === 'gehoert_zu' && r.direction === 'eingehend')).toHaveLength(3)
+
+        const station = alle.items.find((m) => m.title.includes('Knochen'))!
+        const stationDetail = await getMaterialDetail(station.id)
+        const zugehoerig = stationDetail!.relations.filter((r) => r.relationType === 'gehoert_zu')
+        expect(zugehoerig.map((r) => r.material.id)).toEqual([lernzirkel.id])
+
+        // Das Blatt außerhalb des Lernzirkels hängt weiterhin direkt am Lehrwerk.
+        const lose = alle.items.find((m) => m.title.includes('Skelett'))!
+        const loseDetail = await getMaterialDetail(lose.id)
+        expect(loseDetail!.relations.some((r) => r.relationType === 'gehoert_zu' && r.material.id === lehrwerkId)).toBe(true)
+      })
+    })
+
+    it('hängt die Blätter einzeln ans Lehrwerk, wenn der Lernzirkel abgewählt wird, und macht alles rückgängig', async () => {
+      await withTempUploadDir(async () => {
+        const lehrwerkId = await createMaterial(
+          { title: 'Biologie heute 1', materialType: 'lehrwerk' },
+          userId,
+        )
+        const { runId } = await analyzeBulkPdfUpload(
+          [{ buffer: await lernzirkelArchiv(), fileName: 'Katze.zip' }],
+          userId,
+          { createLehrwerk: true, lehrwerkId },
+        )
+        const overview = await getBulkRunOverview(runId)
+        const zirkelId = overview.clusters.find((c) => c.lernzirkel)!.lernzirkel!.id
+        await updateBulkMapping(runId, { ...overview.mapping!, lernzirkel: { [zirkelId]: { enabled: false } } })
+
+        const commit = await commitBulkUpload(runId, userId)
+        expect(commit.stats.materialien).toBe(4)
+        expect(commit.stats.lernzirkel ?? 0).toBe(0)
+        const alle = await listMaterials({ pageSize: 50, filters: { excludeMaterialTypes: ['lehrwerk'] } })
+        expect(alle.items.some((m) => m.materialType === 'lernzirkel')).toBe(false)
+        const station = alle.items.find((m) => m.title.includes('Knochen'))!
+        const detail = await getMaterialDetail(station.id)
+        expect(detail!.relations.some((r) => r.relationType === 'gehoert_zu' && r.material.id === lehrwerkId)).toBe(true)
+
+        const undo = await undoBulkUpload(runId)
+        expect(undo.removed.materialien).toBe(4)
+      })
+    })
+
+    it('entfernt beim Rückgängigmachen auch das Lernzirkel-Material', async () => {
+      await withTempUploadDir(async () => {
+        const { runId } = await analyzeBulkPdfUpload(
+          [{ buffer: await lernzirkelArchiv(), fileName: 'Katze.zip' }],
+          userId,
+        )
+        await commitBulkUpload(runId, userId)
+        const undo = await undoBulkUpload(runId)
+        expect(undo.removed.materialien).toBe(5)
+        const rest = await listMaterials({ pageSize: 50 })
+        expect(rest.items).toHaveLength(0)
+      })
+    })
+  })
 })

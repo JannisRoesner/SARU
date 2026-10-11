@@ -23,6 +23,7 @@ export const materialTypeEnum = pgEnum('material_type', [
   'lehrbuchseite',
   'loesungsbuch',
   'serviceband',
+  'lernzirkel',
   'unterrichtsentwurf',
   'praesentation',
   'bild',

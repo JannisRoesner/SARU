@@ -42,7 +42,11 @@ import { getMaterialDetail } from '../../repositories/material.repository'
 import { getOrCreateSubject, resolveSubjectIds } from '../taxonomy.service'
 import { waitForIndex } from '../search/indexer'
 import { mapLimit } from '../../utils/async'
-import { BULK_FOLDER_ROLE_LABELS, resolveBulkGradeLevels } from '#shared/utils/bulk-upload'
+import {
+  BULK_FOLDER_ROLE_LABELS,
+  resolveBulkGradeLevels,
+  type BulkLernzirkelRef,
+} from '#shared/utils/bulk-upload'
 import { suggestFileMetadata, titleFromFileName } from './suggest-metadata'
 import { AI_CREATE_ADAPTER_ID } from '../ai/material-create'
 import { clusterBulkFiles, detectFolderRole, fassungLabel, filesAsSingletonClusters } from './pairing'
@@ -775,6 +779,54 @@ export async function commitBulkUpload(
     }
   }
 
+  // Stationenarbeit: Aus den erkannten Blättern wird ein Über-Material, das statt der einzelnen
+  // Blätter am Lehrwerk hängt. Die Blätter gehören dann nur dem Lernzirkel an.
+  const lernzirkelIds = new Map<string, string>()
+  const lernzirkelGruppen = new Map<string, { ref: BulkLernzirkelRef; stationen: number }>()
+  for (const cluster of clusters) {
+    if (!cluster.lernzirkel) continue
+    if (decisionForCluster(cluster, mapping)?.include === false) continue
+    const gruppe = lernzirkelGruppen.get(cluster.lernzirkel.id)
+    if (gruppe) gruppe.stationen += 1
+    else lernzirkelGruppen.set(cluster.lernzirkel.id, { ref: cluster.lernzirkel, stationen: 1 })
+  }
+  for (const [groupId, gruppe] of lernzirkelGruppen) {
+    const entscheidung = mapping.lernzirkel?.[groupId]
+    if (entscheidung?.enabled === false || gruppe.stationen < 2) continue
+    const lernzirkelTitel = (entscheidung?.title ?? gruppe.ref.title).trim()
+    if (!lernzirkelTitel) continue
+    try {
+      const lernzirkelId = await createMaterial(
+        {
+          title: lernzirkelTitel,
+          description: `Stationenarbeit mit ${gruppe.stationen} Bündeln aus dem Stapel-Upload.`,
+          materialType: 'lernzirkel',
+          origin: 'manuell',
+          schoolForm: mapping.schoolForm ?? null,
+          subjectIds: subjectId ? [subjectId] : [],
+          gradeLevels,
+        },
+        userId,
+      )
+      lernzirkelIds.set(groupId, lernzirkelId)
+      materialIds.push(lernzirkelId)
+      stats.materialien = (stats.materialien ?? 0) + 1
+      stats.lernzirkel = (stats.lernzirkel ?? 0) + 1
+      await track(`lernzirkel:${groupId}`, lernzirkelId, 'erstellt', 'Lernzirkel')
+      if (lehrwerkId) {
+        await addRelation(lernzirkelId, lehrwerkId, 'gehoert_zu', 'Lehrwerk-Paket')
+        stats.verknuepft = (stats.verknuepft ?? 0) + 1
+      }
+    } catch (error) {
+      // Ohne Lernzirkel-Material hängen die Blätter wie bisher einzeln am Lehrwerk.
+      await addLog(
+        runId,
+        'warnung',
+        `Lernzirkel „${lernzirkelTitel}“ nicht angelegt: ${oeffentlicheFehlermeldung(error, 'Der Lernzirkel konnte nicht angelegt werden.')}`,
+      )
+    }
+  }
+
   for (const cluster of clusters) {
     const decision = decisionForCluster(cluster, mapping)
     if (decision?.include === false) {
@@ -916,13 +968,13 @@ export async function commitBulkUpload(
         }
       }
 
-      if (lehrwerkId && primaryByCluster.get(cluster.clusterId)) {
-        await addRelation(
-          primaryByCluster.get(cluster.clusterId)!,
-          lehrwerkId,
-          'gehoert_zu',
-          'Lehrwerk-Paket',
-        )
+      const primaerId = primaryByCluster.get(cluster.clusterId)
+      const lernzirkelId = cluster.lernzirkel ? lernzirkelIds.get(cluster.lernzirkel.id) : undefined
+      if (primaerId && lernzirkelId) {
+        await addRelation(primaerId, lernzirkelId, 'gehoert_zu', 'Station im Lernzirkel')
+        stats.verknuepft = (stats.verknuepft ?? 0) + 1
+      } else if (lehrwerkId && primaerId) {
+        await addRelation(primaerId, lehrwerkId, 'gehoert_zu', 'Lehrwerk-Paket')
         stats.verknuepft = (stats.verknuepft ?? 0) + 1
       }
     } catch (error) {

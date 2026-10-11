@@ -107,3 +107,22 @@ describe('Lehrwerk-Hilfen', () => {
     expect(gruppen[0]!.id).toBe('medien')
   })
 })
+
+describe('Zurück-Ziel für Stationen eines Lernzirkels', () => {
+  it('führt eine Station zum Lernzirkel und den Lernzirkel zum Lehrwerk', () => {
+    const lernzirkel = { id: 'lz', title: 'Lernzirkel Katze', materialType: 'lernzirkel' }
+    const lehrwerk = { id: 'lw', title: 'Biologie heute 1', materialType: 'lehrwerk' }
+    expect(
+      materialZurueckZiel({
+        materialType: 'arbeitsblatt',
+        relations: [{ relationType: 'gehoert_zu', direction: 'ausgehend', material: lernzirkel }],
+      }),
+    ).toEqual({ to: '/materialien/lz', label: 'Lernzirkel' })
+    expect(
+      materialZurueckZiel({
+        materialType: 'lernzirkel',
+        relations: [{ relationType: 'gehoert_zu', direction: 'ausgehend', material: lehrwerk }],
+      }),
+    ).toEqual({ to: '/lehrwerke/lw', label: 'Lehrwerk' })
+  })
+})

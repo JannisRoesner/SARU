@@ -58,5 +58,16 @@ export function materialZurueckZiel(input: {
     return { to: `/lehrwerke/${lehrwerke[0].material.id}`, label: 'Lehrwerk' }
   }
 
+  // Station eines Lernzirkels: zurück zum Lernzirkel, der selbst wieder am Lehrwerk hängt.
+  const lernzirkel = (input.relations ?? []).find(
+    (relation) =>
+      relation.relationType === 'gehoert_zu'
+      && relation.direction === 'ausgehend'
+      && relation.material.materialType === 'lernzirkel',
+  )
+  if (lernzirkel) {
+    return { to: `/materialien/${lernzirkel.material.id}`, label: 'Lernzirkel' }
+  }
+
   return { to: '/materialien', label: 'Materialien' }
 }
