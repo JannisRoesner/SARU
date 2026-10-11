@@ -55,6 +55,8 @@ export default defineNuxtConfig({
     '/materialien/stapel': { redirect: { to: '/import/stapel', statusCode: 308 } },
     '/materialien/stapel/**': { redirect: { to: '/import/stapel/**', statusCode: 308 } },
     '/materialien/neu/moodle': { redirect: { to: '/import/moodle', statusCode: 308 } },
+    // Freigabe-Links: Schlüssel nicht über den Referrer weitergeben, nicht indexieren.
+    '/geteilt/**': { headers: { 'referrer-policy': 'no-referrer', 'x-robots-tag': 'noindex, nofollow' } },
   },
 
   runtimeConfig: {

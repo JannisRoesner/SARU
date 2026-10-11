@@ -1,0 +1,25 @@
+<script setup lang="ts">
+/** Layout für Freigabe-Links: kein Archiv, keine Navigation – nur das Geteilte. */
+const { recht, erstelltVon } = await useFreigabe()
+</script>
+
+<template>
+  <div class="min-h-screen bg-canvas">
+    <header class="border-b border-line bg-surface">
+      <div class="mx-auto flex max-w-5xl flex-wrap items-center gap-3 px-4 py-3">
+        <span class="flex items-center gap-2 font-semibold text-ink">
+          <UiIcon name="share-nodes" class="text-primary" fest />
+          Geteilter Zugang
+        </span>
+        <UiBadge v-if="recht" :icon="recht === 'bearbeiten' ? 'pen-to-square' : 'eye'">
+          {{ recht === 'bearbeiten' ? 'Bearbeiten' : 'Ansehen' }}
+        </UiBadge>
+        <span v-if="erstelltVon" class="text-sm text-ink-muted">geteilt von {{ erstelltVon }}</span>
+        <span class="ml-auto text-xs text-ink-subtle">SARU</span>
+      </div>
+    </header>
+    <main class="mx-auto max-w-5xl px-4 py-6">
+      <slot />
+    </main>
+  </div>
+</template>

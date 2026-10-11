@@ -43,6 +43,7 @@ const ROOT_TABLES = [
   'subjects',
   'app_settings',
   'audit_log',
+  'share_links',
   'sessions',
   'users',
 ]

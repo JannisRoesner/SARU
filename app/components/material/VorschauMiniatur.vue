@@ -16,8 +16,11 @@ const props = withDefaults(
     /** Kompakte Kachel in Listen. */
     groesse?: 'sm' | 'md' | 'lg'
     klickbar?: boolean
+    /** Adresse der Datei-Endpunkte; für Freigabe-Links `/api/geteilt/<schlüssel>/dateien`. */
+    apiBasis?: string
   }>(),
   {
+    apiBasis: '/api/assets',
     assetId: null,
     fileName: null,
     mimeType: null,
@@ -79,7 +82,7 @@ async function ladeMiniatur(assetId: string) {
   src.value = null
 
   try {
-    const response = await fetch(`/api/assets/${assetId}/thumbnail`, {
+    const response = await fetch(`${props.apiBasis}/${assetId}/thumbnail`, {
       credentials: 'same-origin',
     })
     if (!response.ok) {

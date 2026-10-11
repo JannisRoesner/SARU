@@ -103,7 +103,10 @@ export function useApi() {
     const { erfolgsmeldung, stumm, ...fetchOptions } = options
     laeuft.value = true
     try {
-      const ergebnis = (await $fetch(request, fetchOptions)) as T
+      // Schlichter Funktionstyp: Die Routentyp-Ableitung von Nitro wird bei beliebigen
+      // Adressen sonst zu tief für TypeScript („Excessive stack depth“). Laufzeit unverändert.
+      const holen = $fetch as unknown as (url: string, opts?: typeof fetchOptions) => Promise<unknown>
+      const ergebnis = (await holen(request, fetchOptions)) as T
       if (erfolgsmeldung) hinweise.erfolg(erfolgsmeldung)
       return ergebnis
     } catch (error) {

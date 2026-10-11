@@ -38,6 +38,11 @@ export function darfObjektBearbeiten(nutzer: Nutzer, ownerId: string | null | un
   return hatRecht(nutzer, 'bearbeiten') || (hatRecht(nutzer, 'anlegen') && istEigenes(nutzer, ownerId))
 }
 
+/** Per Link teilen: allgemeines Recht oder – wer anlegen darf – das eigene Objekt. */
+export function darfObjektTeilen(nutzer: Nutzer, ownerId: string | null | undefined): boolean {
+  return hatRecht(nutzer, 'teilen') || (hatRecht(nutzer, 'anlegen') && istEigenes(nutzer, ownerId))
+}
+
 /** Löschen: allgemeines Recht oder – wer anlegen darf – das eigene Objekt. */
 export function darfObjektLoeschen(nutzer: Nutzer, ownerId: string | null | undefined): boolean {
   return hatRecht(nutzer, 'loeschen') || (hatRecht(nutzer, 'anlegen') && istEigenes(nutzer, ownerId))

@@ -88,7 +88,7 @@ watch(
 const autosave = useAutosave(formular, {
   gueltig: () => geladen.value && Boolean(formular.title.trim()) && darfBearbeiten.value,
   speichern: (daten) =>
-    $fetch(`/api/lessons/${id.value}`, { method: 'PATCH', body: daten }),
+    $fetch<unknown>(`/api/lessons/${id.value}` as string, { method: 'PATCH', body: daten }),
 })
 
 useSortierbar(phasenBehaelter, {

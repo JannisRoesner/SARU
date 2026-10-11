@@ -10,6 +10,9 @@ export default defineNuxtRouteMiddleware(async (to) => {
 
   await laden()
 
+  // Freigabe-Links sind ohne Anmeldung erreichbar (eigenes Layout, eigene Endpunkte).
+  if (to.path.startsWith('/geteilt/')) return
+
   // Layout muss hier gesetzt werden (vor dem Rendern). setPageLayout in der Page
   // kommt zu spät und lässt Root-Klassen des default-Layouts stehen (lg:flex).
   if (to.path === '/') {

@@ -10,7 +10,9 @@ import type {
 
 const route = useRoute()
 const id = computed(() => String(route.params.id))
-const { darfObjekt } = useSitzung()
+const { darfObjekt, darfTeilen, darfAnlegen } = useSitzung()
+
+const teilenOffen = ref(false)
 const { aufruf } = useApi()
 
 const { data, status, error, refresh } = await useFetch<MaterialDetail>(
@@ -238,7 +240,7 @@ async function zuordnungLoesen(relationId: string) {
 
         <LayoutAktionen class="sm:ml-auto sm:justify-end">
           <UiToggle
-            v-if="darfBearbeiten"
+            v-if="darfBearbeiten || darfAnlegen"
             v-model="bearbeiten"
             label="Bearbeiten"
           />
@@ -249,6 +251,14 @@ async function zuordnungLoesen(relationId: string) {
             :title="data.isFavorite ? 'Favorit entfernen' : 'Als Favorit'"
             @click="favoritSetzen(data.id, !data.isFavorite)"
           />
+          <UiButton
+            v-if="darfTeilen(data.ownerId)"
+            variante="sekundaer"
+            icon="share-nodes"
+            @click="teilenOffen = true"
+          >
+            Teilen
+          </UiButton>
           <UiButton
             v-if="!darfBearbeiten || bearbeiten"
             :to="`/materialien/${data.id}`"
@@ -398,7 +408,7 @@ async function zuordnungLoesen(relationId: string) {
               </UiField>
             </div>
             <UiButton
-              v-if="darfBearbeiten && bearbeiten"
+              v-if="darfAnlegen && bearbeiten"
               variante="sekundaer"
               icon="plus"
               @click="pickerOffen = true"
@@ -406,7 +416,7 @@ async function zuordnungLoesen(relationId: string) {
               Zuordnen
             </UiButton>
             <UiButton
-              v-if="darfBearbeiten && bearbeiten"
+              v-if="darfAnlegen && bearbeiten"
               variante="sekundaer"
               icon="chalkboard-user"
               :to="`/materialien/neu/ki?typ=serviceband&lehrwerk=${data.id}`"
@@ -414,7 +424,7 @@ async function zuordnungLoesen(relationId: string) {
               Serviceband
             </UiButton>
             <UiButton
-              v-if="darfBearbeiten && bearbeiten"
+              v-if="darfAnlegen && bearbeiten"
               variante="sekundaer"
               icon="book-bookmark"
               :to="`/materialien/neu/ki?typ=loesungsbuch&lehrwerk=${data.id}`"
@@ -499,6 +509,13 @@ async function zuordnungLoesen(relationId: string) {
       text="Das Lehrwerk und die Buchdatei werden unwiderruflich entfernt. Zugeordnete Materialien (Lösungsheft, Arbeitsblätter …) bleiben erhalten, nur die Zuordnung entfällt."
       bestaetigen="Ja, ich will löschen"
       @bestaetigt="lehrwerkLoeschen"
+    />
+    <FreigabeDialog
+      v-if="data"
+      v-model="teilenOffen"
+      entity-type="material"
+      :entity-id="data.id"
+      :titel="data.title"
     />
   </div>
 </template>

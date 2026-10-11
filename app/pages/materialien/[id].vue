@@ -18,7 +18,9 @@ import type { StoredStructuredSolution } from '~~/server/database/schema/materia
 
 const route = useRoute()
 const id = computed(() => String(route.params.id))
-const { darfObjekt } = useSitzung()
+const { darfObjekt, darfTeilen } = useSitzung()
+
+const teilenOffen = ref(false)
 const { aufruf, laeuft } = useApi()
 const { schlagwortNamen } = useTaxonomie()
 const { optionenMitAktuell } = useSchulformen()
@@ -784,6 +786,14 @@ function loesungKorrigieren() {
             :title="data.isFavorite ? 'Favorit entfernen' : 'Als Favorit'"
             @click="favoritSetzen(data.id, !data.isFavorite)"
           />
+          <UiButton
+            v-if="darfTeilen(data.ownerId)"
+            variante="sekundaer"
+            icon="share-nodes"
+            @click="teilenOffen = true"
+          >
+            Teilen
+          </UiButton>
           <UiButton
             v-if="darfBearbeiten && !kiLoesungAktiv && !istMoodleKurs && !istLehrwerk"
             variante="sekundaer"
@@ -1592,6 +1602,13 @@ function loesungKorrigieren() {
       :darf-bearbeiten="darfBearbeiten"
       :bei-speichern="loesungSpeichern"
       @herunterladen="assetHerunterladen"
+    />
+    <FreigabeDialog
+      v-if="data"
+      v-model="teilenOffen"
+      entity-type="material"
+      :entity-id="data.id"
+      :titel="data.title"
     />
   </div>
 </template>

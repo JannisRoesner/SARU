@@ -30,12 +30,16 @@ const props = defineProps<{
   modellCredit?: string | null
   geprueft?: boolean
   darfBearbeiten?: boolean
+  /** Adresse der Datei-Endpunkte; für Freigabe-Links `/api/geteilt/<schlüssel>/dateien`. */
+  apiBasis?: string
   beiSpeichern?: (payload: {
     structuredSolution: StoredStructuredSolution
     reRender: boolean
     reviewed: boolean
   }) => void | Promise<void>
 }>()
+
+const dateiBasis = computed(() => props.apiBasis ?? '/api/assets')
 
 const emit = defineEmits<{
   herunterladen: [assetId: string]
@@ -80,7 +84,7 @@ const pdfSeitenSkala = computed(() => {
 
 const pdfSeitenBildUrl = computed(() => {
   if (!props.assetId || !pdfAlsSeitenbild.value || pdfSeitenFehler.value) return null
-  return `/api/assets/${props.assetId}/page?page=${pdfSeite.value}&scale=${pdfSeitenSkala.value}`
+  return `${dateiBasis.value}/${props.assetId}/page?page=${pdfSeite.value}&scale=${pdfSeitenSkala.value}`
 })
 
 const pdfLetzteSeite = computed(() => info.value?.pdfPageCount ?? null)
@@ -136,7 +140,7 @@ async function laden(bearbeiten = false) {
   textInhalt.value = null
   textFehler.value = false
   try {
-    info.value = await $fetch<AssetPreviewInfo>(`/api/assets/${props.assetId}/preview`, {
+    info.value = await $fetch<AssetPreviewInfo>(`${dateiBasis.value}/${props.assetId}/preview`, {
       query: bearbeiten ? { bearbeiten: '1' } : undefined,
     })
     if (info.value.mode === 'text' && info.value.inlineUrl) {
@@ -265,7 +269,7 @@ const seitenBildUrl = computed(() => {
     props.quellenAssetId,
   )
   if (!id) return null
-  return `/api/assets/${id}/page?page=${seite.value}`
+  return `${dateiBasis.value}/${id}/page?page=${seite.value}`
 })
 
 const antwortenAufSeite = computed(() => {
@@ -280,7 +284,7 @@ const antwortenAufSeite = computed(() => {
 function herunterladen() {
   if (!props.assetId) return
   emit('herunterladen', props.assetId)
-  window.open(`/api/assets/${props.assetId}/download`, '_blank')
+  window.open(`${dateiBasis.value}/${props.assetId}/download`, '_blank')
 }
 
 function beiTaste(event: KeyboardEvent) {

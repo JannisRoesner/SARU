@@ -9,7 +9,9 @@ import type { Paginated } from '#shared/types/domain'
 
 const route = useRoute()
 const id = computed(() => String(route.params.id))
-const { darfObjekt } = useSitzung()
+const { darfObjekt, darfTeilen } = useSitzung()
+
+const teilenOffen = ref(false)
 const { aufruf } = useApi()
 const { lerngruppenOptionen, themenOptionen, schlagwortNamen } = useTaxonomie()
 
@@ -72,7 +74,7 @@ watch(
 const autosave = useAutosave(formular, {
   gueltig: () => geladen.value && Boolean(formular.title.trim()) && darfBearbeiten.value,
   speichern: (daten) =>
-    $fetch(`/api/series/${id.value}`, { method: 'PATCH', body: daten }),
+    $fetch<unknown>(`/api/series/${id.value}` as string, { method: 'PATCH', body: daten }),
 })
 
 useSortierbar(stundenBehaelter, {
@@ -198,6 +200,14 @@ async function reiheLoeschen() {
             icon="print"
           >
             Drucken
+          </UiButton>
+          <UiButton
+            v-if="darfTeilen(data.ownerId)"
+            variante="sekundaer"
+            icon="share-nodes"
+            @click="teilenOffen = true"
+          >
+            Teilen
           </UiButton>
           <UiButton
             v-if="darfBearbeiten"
@@ -448,6 +458,13 @@ async function reiheLoeschen() {
       text="Die Reihe wird entfernt. Zugeordnete Stunden bleiben erhalten, verlieren aber die Reihenzuordnung."
       bestaetigen="Löschen"
       @bestaetigt="reiheLoeschen"
+    />
+    <FreigabeDialog
+      v-if="data"
+      v-model="teilenOffen"
+      entity-type="reihe"
+      :entity-id="data.id"
+      :titel="data.title"
     />
   </div>
 </template>

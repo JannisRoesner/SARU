@@ -1,5 +1,5 @@
 import type { Role } from '#shared/types/domain'
-import { darfObjektBearbeiten, darfObjektLoeschen, hatRecht } from '#shared/utils/rechte'
+import { darfObjektBearbeiten, darfObjektLoeschen, darfObjektTeilen, hatRecht } from '#shared/utils/rechte'
 
 export interface SitzungsBenutzer {
   id: string
@@ -31,11 +31,20 @@ export function useSitzung() {
     return darfObjektLoeschen(benutzer.value, ownerId)
   }
 
+  /** Per Link teilen: allgemeines Recht oder eigenes Objekt. */
+  function darfTeilen(ownerId: string | null | undefined): boolean {
+    return darfObjektTeilen(benutzer.value, ownerId)
+  }
+
   async function laden(erzwingen = false) {
     if (geladen.value && !erzwingen) return benutzer.value
 
     // Beim Rendern auf dem Server muss das Sitzungs-Cookie mitgereicht werden.
-    const anfrage = import.meta.server ? useRequestFetch() : $fetch
+    // Schlichter Funktionstyp – vermeidet zu tiefe Routentyp-Ableitung („Excessive stack depth“).
+    type Holen = <T>(url: string) => Promise<T>
+    const anfrage: Holen = import.meta.server
+      ? (useRequestFetch() as unknown as Holen)
+      : ($fetch as unknown as Holen)
     const antwort = await anfrage<{ user: SitzungsBenutzer | null }>('/api/auth/session').catch(
       () => null,
     )
@@ -94,6 +103,7 @@ export function useSitzung() {
     darfAnlegen,
     darfObjekt,
     darfObjektEntfernen,
+    darfTeilen,
     laden,
     anmelden,
     abmelden,

@@ -42,8 +42,16 @@ export interface AssetPreviewInfo {
   pdfPageCount: number | null
 }
 
+/** Wer auf die Datei zugreift: angemeldete Person oder Freigabe-Link. */
+export interface VorschauZugang {
+  userId: string
+  userName: string
+  /** Darf das zugehörige Material grundsätzlich bearbeitet werden? */
+  darfSchreiben: boolean
+}
+
 /**
- * Entscheidet, wie eine Datei in der App angezeigt werden kann.
+ * Entscheidet, wie eine Datei in der App angezeigt werden kann (angemeldete Nutzer).
  */
 export async function getAssetPreviewInfo(
   assetId: string,
@@ -51,6 +59,36 @@ export async function getAssetPreviewInfo(
   requestOrigin: string,
   options: { bearbeiten?: boolean } = {},
 ): Promise<AssetPreviewInfo | null> {
+  const [owner] = await useDatabase()
+    .select({ ownerId: materials.ownerId })
+    .from(materialAssets)
+    .innerJoin(materialVariants, eq(materialVariants.id, materialAssets.variantId))
+    .innerJoin(materials, eq(materials.id, materialVariants.materialId))
+    .where(eq(materialAssets.id, assetId))
+    .limit(1)
+  return getAssetPreviewInfoFuerZugang(
+    assetId,
+    {
+      userId: user.id,
+      userName: user.name || user.email,
+      darfSchreiben: darfObjektBearbeiten(user, owner?.ownerId),
+    },
+    requestOrigin,
+    options,
+  )
+}
+
+/**
+ * Gemeinsamer Kern für Nutzer und Freigabe-Links. `dateiBasis` bestimmt die Adressen
+ * für Download, Inline-Ansicht und Miniatur (z. B. `/api/geteilt/<schlüssel>/dateien`).
+ */
+export async function getAssetPreviewInfoFuerZugang(
+  assetId: string,
+  zugang: VorschauZugang,
+  requestOrigin: string,
+  options: { bearbeiten?: boolean; dateiBasis?: string } = {},
+): Promise<AssetPreviewInfo | null> {
+  const basis = options.dateiBasis ?? '/api/assets'
   const [asset] = await useDatabase()
     .select()
     .from(materialAssets)
@@ -60,14 +98,8 @@ export async function getAssetPreviewInfo(
   if (!asset) return null
 
   const title = asset.title || asset.fileName || asset.url || 'Anhang'
-  const downloadUrl = `/api/assets/${asset.id}/download`
-  const [owner] = await useDatabase()
-    .select({ ownerId: materials.ownerId })
-    .from(materialVariants)
-    .innerJoin(materials, eq(materials.id, materialVariants.materialId))
-    .where(eq(materialVariants.id, asset.variantId))
-    .limit(1)
-  const canWrite = darfObjektBearbeiten(user, owner?.ownerId)
+  const downloadUrl = `${basis}/${asset.id}/download`
+  const canWrite = zugang.darfSchreiben
   // Standard ist Nur-Lesen; Schreibrechte erst auf ausdrückliche Anforderung („Bearbeiten“-Button).
   const editing = officeSchreibzugriff(canWrite, options.bearbeiten === true)
   const base: Omit<
@@ -99,7 +131,7 @@ export async function getAssetPreviewInfo(
 
   const thumb =
     canHaveThumbnail(asset.mimeType, asset.fileName)
-      ? `/api/assets/${asset.id}/thumbnail`
+      ? `${basis}/${asset.id}/thumbnail`
       : null
 
   const mime = asset.mimeType ?? ''
@@ -154,8 +186,8 @@ export async function getAssetPreviewInfo(
     const wopiHost = settings.wopiHostUrl.trim() || requestOrigin
     const accessToken = createWopiAccessToken({
       assetId: asset.id,
-      userId: user.id,
-      userName: user.name || user.email,
+      userId: zugang.userId,
+      userName: zugang.userName,
       canWrite: editing,
     })
     const collaboraUrl = await buildCollaboraIframeUrl({
