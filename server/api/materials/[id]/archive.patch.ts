@@ -1,12 +1,12 @@
 import { z } from 'zod'
 import { setArchived } from '../../../services/material.service'
 import { recordAudit } from '../../../services/audit.service'
-import { requireEditor } from '../../../utils/auth'
+import { requireMaterialBearbeiten } from '../../../utils/permissions'
 import { parseOrThrow, readZodBody, uuidSchema } from '../../../utils/validation'
 
 export default defineEventHandler(async (event) => {
-  const user = await requireEditor(event)
   const id = parseOrThrow(uuidSchema, getRouterParam(event, 'id'))
+  const user = await requireMaterialBearbeiten(event, id)
   const { isArchived } = await readZodBody(event, z.object({ isArchived: z.boolean() }))
 
   await setArchived(id, isArchived)

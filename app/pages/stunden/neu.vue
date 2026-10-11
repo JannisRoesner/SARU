@@ -4,11 +4,11 @@ import type { LessonDetail } from '~~/server/repositories/lesson.repository'
 
 useHead({ title: 'Stunde planen' })
 
-const { darfBearbeiten } = useSitzung()
+const { darfAnlegen } = useSitzung()
 const { aufruf, laeuft } = useApi()
 const { lerngruppenOptionen, themenOptionen } = useTaxonomie()
 
-if (!darfBearbeiten.value) await navigateTo('/stunden')
+if (!darfAnlegen.value) await navigateTo('/stunden')
 
 const formular = reactive({
   title: '',

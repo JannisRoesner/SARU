@@ -1,12 +1,12 @@
 import { getLessonDetail } from '../../repositories/lesson.repository'
 import { createLesson } from '../../services/lesson.service'
 import { recordAudit } from '../../services/audit.service'
-import { requireEditor } from '../../utils/auth'
+import { requireRecht } from '../../utils/permissions'
 import { lessonCreateSchema } from '../../utils/schemas'
 import { readZodBody } from '../../utils/validation'
 
 export default defineEventHandler(async (event) => {
-  const user = await requireEditor(event)
+  const user = await requireRecht(event, 'anlegen')
   const input = await readZodBody(event, lessonCreateSchema)
 
   const id = await createLesson(input, user.id)

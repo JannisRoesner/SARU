@@ -1,9 +1,9 @@
 import { listAdapters } from '../../services/import/registry'
-import { requireEditor } from '../../utils/auth'
+import { requireRecht } from '../../utils/permissions'
 
 /** Die verfügbaren Importformate – die Liste wächst mit neuen Adaptern mit. */
 export default defineEventHandler(async (event) => {
-  await requireEditor(event)
+  await requireRecht(event, 'anlegen')
 
   return listAdapters().map((adapter) => ({
     id: adapter.id,

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 useHead({ title: 'Import' })
 
-const { darfBearbeiten } = useSitzung()
-if (!darfBearbeiten.value) await navigateTo('/')
+const { darfAnlegen } = useSitzung()
+if (!darfAnlegen.value) await navigateTo('/')
 
 /** Alles, was als Paket oder Archiv aus einem anderen System kommt – nach Quelle sortiert. */
 const quellen = [

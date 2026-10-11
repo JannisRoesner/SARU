@@ -1,10 +1,10 @@
 import { detachMaterialFromSeries } from '../../services/series.service'
-import { requireEditor } from '../../utils/auth'
+import { requireSeriesMaterialBearbeiten } from '../../utils/permissions'
 import { parseOrThrow, uuidSchema } from '../../utils/validation'
 
 export default defineEventHandler(async (event) => {
-  await requireEditor(event)
   const id = parseOrThrow(uuidSchema, getRouterParam(event, 'id'))
+  await requireSeriesMaterialBearbeiten(event, id)
 
   await detachMaterialFromSeries(id)
   return { erfolg: true }

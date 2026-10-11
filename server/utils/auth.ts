@@ -13,7 +13,7 @@ const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000
 const SESSION_REFRESH_AFTER_MS = 24 * 60 * 60 * 1000
 
 /** Höhere Zahl schließt alle Rechte der niedrigeren Rollen ein. */
-const roleRank: Record<Role, number> = { leser: 1, lehrkraft: 2, admin: 3 }
+const roleRank: Record<Role, number> = { leser: 1, beitragende: 2, lehrkraft: 3, admin: 4 }
 
 export type SafeUser = Omit<User, 'passwordHash'>
 
@@ -144,8 +144,7 @@ export async function requireRole(event: H3Event, minimum: Role): Promise<SafeUs
   return user
 }
 
-/** Schreibrechte haben Lehrkräfte und Administratoren, nicht aber Leser. */
-export const requireEditor = (event: H3Event) => requireRole(event, 'lehrkraft')
+/** Schreibrechte werden objektbezogen geprüft – siehe `server/utils/permissions.ts`. */
 export const requireAdmin = (event: H3Event) => requireRole(event, 'admin')
 
 export function hasRole(user: SafeUser | null | undefined, minimum: Role): boolean {

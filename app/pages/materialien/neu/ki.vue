@@ -10,12 +10,12 @@ import { isBookLikeMaterialType } from '#shared/utils/material-type-guess'
 definePageMeta({ middleware: [] })
 useHead({ title: 'Material mit KI anlegen' })
 
-const { darfBearbeiten } = useSitzung()
+const { darfAnlegen } = useSitzung()
 const { aufruf, laeuft } = useApi()
 const { schlagwortNamen } = useTaxonomie()
 const { optionen: schulformOptionen } = useSchulformen()
 
-if (!darfBearbeiten.value) {
+if (!darfAnlegen.value) {
   await navigateTo('/materialien')
 }
 

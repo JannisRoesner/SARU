@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { getMaterialDetail } from '../../../repositories/material.repository'
 import { updateSolutionStructure } from '../../../services/ai/solutions'
 import { recordAudit } from '../../../services/audit.service'
-import { requireEditor } from '../../../utils/auth'
+import { requireMaterialBearbeiten } from '../../../utils/permissions'
 import { parseOrThrow, readZodBody, uuidSchema } from '../../../utils/validation'
 
 const bboxSchema = z
@@ -47,8 +47,8 @@ const structuredSolutionSchema = z.object({
  * Speichert korrigierte KI-Antworten und zeichnet das Overlay-PDF neu.
  */
 export default defineEventHandler(async (event) => {
-  const user = await requireEditor(event)
   const id = parseOrThrow(uuidSchema, getRouterParam(event, 'id'))
+  const user = await requireMaterialBearbeiten(event, id)
   const body = await readZodBody(
     event,
     z.object({

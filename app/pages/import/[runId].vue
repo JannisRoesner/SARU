@@ -9,14 +9,14 @@ import { importStatuses, lessonStatuses } from '#shared/utils/labels'
 
 const route = useRoute()
 const runId = computed(() => String(route.params.runId))
-const { darfBearbeiten } = useSitzung()
+const { darfAnlegen } = useSitzung()
 const { aufruf, laeuft } = useApi()
 const { lerngruppenOptionen } = useTaxonomie()
 const { optionenMitAktuell } = useSchulformen()
 
 const jahrgangOptionen = jahrgangsstufenOptionen()
 
-if (!darfBearbeiten.value) await navigateTo('/')
+if (!darfAnlegen.value) await navigateTo('/')
 
 interface AnalyzedLesson {
   sourceRef: string

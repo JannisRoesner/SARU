@@ -1,4 +1,5 @@
 import type { Role } from '#shared/types/domain'
+import { darfObjektBearbeiten, darfObjektLoeschen, hatRecht } from '#shared/utils/rechte'
 
 export interface SitzungsBenutzer {
   id: string
@@ -16,10 +17,19 @@ export function useSitzung() {
 
   const angemeldet = computed(() => benutzer.value !== null)
   const istAdmin = computed(() => benutzer.value?.role === 'admin')
-  /** Leser dürfen alles sehen, aber nichts verändern. */
-  const darfBearbeiten = computed(
-    () => benutzer.value?.role === 'admin' || benutzer.value?.role === 'lehrkraft',
-  )
+  /** Alles bearbeiten und löschen (Lehrkraft, Administration). */
+  const darfBearbeiten = computed(() => hatRecht(benutzer.value, 'bearbeiten'))
+  /** Neues anlegen und hochladen (auch Beitragende). */
+  const darfAnlegen = computed(() => hatRecht(benutzer.value, 'anlegen'))
+
+  /** Ein bestimmtes Objekt bearbeiten: allgemeines Recht oder eigenes Objekt. */
+  function darfObjekt(ownerId: string | null | undefined): boolean {
+    return darfObjektBearbeiten(benutzer.value, ownerId)
+  }
+
+  function darfObjektEntfernen(ownerId: string | null | undefined): boolean {
+    return darfObjektLoeschen(benutzer.value, ownerId)
+  }
 
   async function laden(erzwingen = false) {
     if (geladen.value && !erzwingen) return benutzer.value
@@ -81,6 +91,9 @@ export function useSitzung() {
     angemeldet,
     istAdmin,
     darfBearbeiten,
+    darfAnlegen,
+    darfObjekt,
+    darfObjektEntfernen,
     laden,
     anmelden,
     abmelden,

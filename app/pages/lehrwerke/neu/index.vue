@@ -2,8 +2,8 @@
 definePageMeta({ middleware: [] })
 useHead({ title: 'Lehrwerk anlegen' })
 
-const { darfBearbeiten } = useSitzung()
-if (!darfBearbeiten.value) {
+const { darfAnlegen } = useSitzung()
+if (!darfAnlegen.value) {
   await navigateTo('/lehrwerke')
 }
 

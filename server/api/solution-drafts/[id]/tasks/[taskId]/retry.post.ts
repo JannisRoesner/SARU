@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { retrySolutionDraftTask } from '../../../../../services/ai/solutions-v2/draft-service'
-import { requireEditor } from '../../../../../utils/auth'
+import { requireLoesungsEntwurf } from '../../../../../utils/permissions'
 import { parseOrThrow, readZodBody, uuidSchema } from '../../../../../utils/validation'
 
 const bboxSchema = z.object({
@@ -13,8 +13,8 @@ const bboxSchema = z.object({
 })
 
 export default defineEventHandler(async (event) => {
-  const user = await requireEditor(event)
   const id = parseOrThrow(uuidSchema, getRouterParam(event, 'id'))
+  const user = await requireLoesungsEntwurf(event, id)
   const taskId = parseOrThrow(
     z.string().min(1).max(300),
     decodeURIComponent(getRouterParam(event, 'taskId') ?? ''),

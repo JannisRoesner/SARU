@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { benutzer, darfBearbeiten, istAdmin, abmelden } = useSitzung()
+const { benutzer, darfAnlegen, istAdmin, abmelden } = useSitzung()
 const route = useRoute()
 
 const menueOffen = ref(false)
@@ -26,7 +26,7 @@ const WERKZEUGE: NavEintrag[] = [
 ]
 
 const hauptnavigation = computed(() =>
-  HAUPTNAVIGATION.filter((e) => !e.nurBearbeiter || darfBearbeiten.value),
+  HAUPTNAVIGATION.filter((e) => !e.nurBearbeiter || darfAnlegen.value),
 )
 
 function istAktiv(pfad: string) {
@@ -147,7 +147,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', beiTastenkuerzel))
           </ul>
         </div>
 
-        <div v-if="darfBearbeiten" class="px-3">
+        <div v-if="darfAnlegen" class="px-3">
           <p class="pb-1.5 text-[0.7rem] font-semibold tracking-wider text-ink-subtle uppercase">
             Schnell anlegen
           </p>

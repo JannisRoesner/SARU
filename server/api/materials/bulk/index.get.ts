@@ -1,7 +1,7 @@
 import { listBulkUploads } from '../../../services/bulk-upload/bulk-upload.service'
-import { requireEditor } from '../../../utils/auth'
+import { requireRecht } from '../../../utils/permissions'
 
 export default defineEventHandler(async (event) => {
-  await requireEditor(event)
+  await requireRecht(event, 'anlegen')
   return listBulkUploads()
 })

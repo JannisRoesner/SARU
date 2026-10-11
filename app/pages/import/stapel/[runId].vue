@@ -12,12 +12,12 @@ import {
 
 const route = useRoute()
 const runId = computed(() => String(route.params.runId))
-const { darfBearbeiten } = useSitzung()
+const { darfAnlegen } = useSitzung()
 const { aufruf, laeuft } = useApi()
 const { schlagwortNamen } = useTaxonomie()
 const { optionen: schulformOptionen } = useSchulformen()
 
-if (!darfBearbeiten.value) await navigateTo('/materialien')
+if (!darfAnlegen.value) await navigateTo('/materialien')
 
 const dateiRollen = (Object.entries(BULK_FILE_ROLE_LABELS) as [BulkFileRole, string][]).map(
   ([value, label]) => ({ value, label }),

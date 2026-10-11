@@ -1,9 +1,9 @@
 import { getAiMaterialAnalyze } from '../../../../services/ai/material-create'
-import { requireEditor } from '../../../../utils/auth'
+import { requireImportLauf } from '../../../../utils/permissions'
+import { parseOrThrow, uuidSchema } from '../../../../utils/validation'
 
 export default defineEventHandler(async (event) => {
-  await requireEditor(event)
-  const analyzeId = getRouterParam(event, 'analyzeId')
-  if (!analyzeId) throw createError({ statusCode: 400, statusMessage: 'analyzeId fehlt' })
+  const analyzeId = parseOrThrow(uuidSchema, getRouterParam(event, 'analyzeId'))
+  await requireImportLauf(event, analyzeId)
   return await getAiMaterialAnalyze(analyzeId)
 })

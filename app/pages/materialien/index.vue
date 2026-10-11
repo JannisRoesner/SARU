@@ -11,7 +11,7 @@ const router = useRouter()
 if (route.query.typ === 'lehrwerk') {
   await navigateTo('/lehrwerke', { replace: true })
 }
-const { darfBearbeiten } = useSitzung()
+const { darfAnlegen } = useSitzung()
 const { fachOptionen } = useTaxonomie()
 
 const suche = ref(String(route.query.q ?? ''))
@@ -130,7 +130,7 @@ const aktiveFilter = computed(() => {
       titel="Materialien"
       untertitel="Arbeitsblätter, Kurse, Medien"
     >
-      <template v-if="darfBearbeiten" #aktionen>
+      <template v-if="darfAnlegen" #aktionen>
         <UiButton to="/materialien/neu" variante="primaer" icon="plus">
           Material anlegen
         </UiButton>
@@ -224,7 +224,7 @@ const aktiveFilter = computed(() => {
         titel="Keine Materialien gefunden"
         text="Keine Einträge."
       >
-        <UiButton v-if="darfBearbeiten" to="/materialien/neu" variante="primaer" icon="plus">
+        <UiButton v-if="darfAnlegen" to="/materialien/neu" variante="primaer" icon="plus">
           Material anlegen
         </UiButton>
       </UiLeerzustand>

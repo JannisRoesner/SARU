@@ -7,7 +7,7 @@ useHead({ title: 'Unterrichtsstunden' })
 
 const route = useRoute()
 const router = useRouter()
-const { darfBearbeiten } = useSitzung()
+const { darfAnlegen } = useSitzung()
 const suche = ref(String(route.query.q ?? ''))
 const sort = ref(String(route.query.sort ?? 'datum_neu'))
 const page = ref(Number(route.query.page ?? 1) || 1)
@@ -71,7 +71,7 @@ watch(page, syncQuery)
       titel="Unterrichtsstunden"
       untertitel="Verlaufspläne"
     >
-      <template v-if="darfBearbeiten" #aktionen>
+      <template v-if="darfAnlegen" #aktionen>
         <UiButton to="/stunden/neu" variante="primaer" icon="calendar-plus">
           Stunde planen
         </UiButton>
@@ -126,7 +126,7 @@ watch(page, syncQuery)
         titel="Keine Stunden"
         text="Noch keine vorhanden."
       >
-        <UiButton v-if="darfBearbeiten" to="/stunden/neu" variante="primaer" icon="plus">
+        <UiButton v-if="darfAnlegen" to="/stunden/neu" variante="primaer" icon="plus">
           Stunde planen
         </UiButton>
       </UiLeerzustand>

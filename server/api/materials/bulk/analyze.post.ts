@@ -5,7 +5,7 @@ import {
 } from '../../../services/bulk-upload/bulk-upload.service'
 import type { BulkUploadMapping } from '../../../services/bulk-upload/types'
 import { recordAudit } from '../../../services/audit.service'
-import { requireEditor } from '../../../utils/auth'
+import { requireRecht } from '../../../utils/permissions'
 import { invalidInput } from '../../../utils/errors'
 import { bulkUploadMappingSchema } from '../../../utils/schemas'
 import { parseOrThrow } from '../../../utils/validation'
@@ -15,7 +15,7 @@ const log = createLogger('bulk-analyze')
 
 /** Stapel entgegennehmen; Textextraktion und KI laufen im Hintergrund (kein Proxy-504). */
 export default defineEventHandler(async (event) => {
-  const user = await requireEditor(event)
+  const user = await requireRecht(event, 'anlegen')
 
   const parts = await readMultipartParts(event)
   if (!parts?.length) throw invalidInput('Es wurden keine Dateien übermittelt.')

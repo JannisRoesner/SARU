@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { enqueueSolutionGeneration } from '../../../services/ai/solutions'
-import { requireEditor } from '../../../utils/auth'
+import { requireMaterialBearbeiten } from '../../../utils/permissions'
 import { checkRateLimit } from '../../../utils/rate-limit'
 import { parseOrThrow, readZodBody, uuidSchema } from '../../../utils/validation'
 
@@ -9,8 +9,8 @@ import { parseOrThrow, readZodBody, uuidSchema } from '../../../utils/validation
  * PDF-Text-Overlay auf Originalseiten). Ergebnis = verknüpftes KI-Material mit Datei.
  */
 export default defineEventHandler(async (event) => {
-  const user = await requireEditor(event)
   const id = parseOrThrow(uuidSchema, getRouterParam(event, 'id'))
+  const user = await requireMaterialBearbeiten(event, id)
   const options = await readZodBody(
     event,
     z.object({

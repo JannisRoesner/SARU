@@ -54,7 +54,7 @@ export async function resetDatabase(): Promise<void> {
 }
 
 export async function createTestUser(
-  overrides: { email?: string; role?: 'admin' | 'lehrkraft' | 'leser' } = {},
+  overrides: { email?: string; role?: 'admin' | 'lehrkraft' | 'beitragende' | 'leser' } = {},
 ): Promise<{ id: string; email: string }> {
   const { createUser } = await import('../../server/services/user.service')
   const email = overrides.email ?? `test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@saru.test`

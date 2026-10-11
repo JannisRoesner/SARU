@@ -1,11 +1,11 @@
 import { z } from 'zod'
 import { getLessonDetail } from '../../../repositories/lesson.repository'
 import { duplicateLesson } from '../../../services/lesson.service'
-import { requireEditor } from '../../../utils/auth'
+import { requireRecht } from '../../../utils/permissions'
 import { parseOrThrow, readZodBody, uuidSchema } from '../../../utils/validation'
 
 export default defineEventHandler(async (event) => {
-  const user = await requireEditor(event)
+  const user = await requireRecht(event, 'anlegen')
   const id = parseOrThrow(uuidSchema, getRouterParam(event, 'id'))
   const options = await readZodBody(
     event,

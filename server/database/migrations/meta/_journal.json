@@ -57,6 +57,13 @@
       "when": 1786300000000,
       "tag": "0007_serviceband_material_type",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786400000000,
+      "tag": "0008_beitragende_role",
+      "breakpoints": true
     }
   ]
 }

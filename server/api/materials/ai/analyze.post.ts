@@ -2,7 +2,7 @@ import {
   processAiMaterialAnalyze,
   startAiMaterialAnalyze,
 } from '../../../services/ai/material-create'
-import { requireEditor } from '../../../utils/auth'
+import { requireRecht } from '../../../utils/permissions'
 import { invalidInput } from '../../../utils/errors'
 import { readMultipartParts } from '../../../utils/multipart'
 import { normalizeGradeLevel } from '#shared/utils/jahrgangsstufen'
@@ -10,7 +10,7 @@ import type { MaterialType } from '#shared/types/domain'
 
 /** Einzeldatei entgegennehmen; Vision/KI laufen im Hintergrund (kein Proxy-504). */
 export default defineEventHandler(async (event) => {
-  const user = await requireEditor(event)
+  const user = await requireRecht(event, 'anlegen')
 
   const parts = await readMultipartParts(event)
   if (!parts?.length) throw invalidInput('Es wurde keine Datei übermittelt.')

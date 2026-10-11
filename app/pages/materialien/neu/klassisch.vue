@@ -7,7 +7,7 @@ import type { MaterialDetail } from '~~/server/repositories/material.repository'
 definePageMeta({ middleware: [] })
 useHead({ title: 'Material klassisch anlegen' })
 
-const { darfBearbeiten } = useSitzung()
+const { darfAnlegen } = useSitzung()
 const { aufruf, laeuft } = useApi()
 const { schlagwortNamen } = useTaxonomie()
 const { optionen: schulformOptionen } = useSchulformen()
@@ -17,7 +17,7 @@ const lehrwerkId = /^[0-9a-f-]{36}$/i.test(String(route.query.lehrwerk ?? ''))
   ? String(route.query.lehrwerk)
   : null
 
-if (!darfBearbeiten.value) {
+if (!darfAnlegen.value) {
   await navigateTo('/materialien')
 }
 

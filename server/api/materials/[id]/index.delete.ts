@@ -1,11 +1,11 @@
 import { deleteMaterial } from '../../../services/material.service'
 import { recordAudit } from '../../../services/audit.service'
-import { requireEditor } from '../../../utils/auth'
+import { requireMaterialLoeschen } from '../../../utils/permissions'
 import { parseOrThrow, uuidSchema } from '../../../utils/validation'
 
 export default defineEventHandler(async (event) => {
-  const user = await requireEditor(event)
   const id = parseOrThrow(uuidSchema, getRouterParam(event, 'id'))
+  const user = await requireMaterialLoeschen(event, id)
 
   await deleteMaterial(id)
   await recordAudit(

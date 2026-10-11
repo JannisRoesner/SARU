@@ -6,11 +6,11 @@ import type { MaterialDetail } from '~~/server/repositories/material.repository'
 definePageMeta({ middleware: [] })
 useHead({ title: 'Lehrwerk klassisch anlegen' })
 
-const { darfBearbeiten } = useSitzung()
+const { darfAnlegen } = useSitzung()
 const { aufruf, laeuft } = useApi()
 const { schlagwortNamen } = useTaxonomie()
 
-if (!darfBearbeiten.value) {
+if (!darfAnlegen.value) {
   await navigateTo('/lehrwerke')
 }
 

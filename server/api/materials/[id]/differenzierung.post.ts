@@ -1,13 +1,13 @@
 import { enqueueDifferentiation } from '../../../services/ai/differenzierung/service'
-import { requireEditor } from '../../../utils/auth'
+import { requireMaterialBearbeiten } from '../../../utils/permissions'
 import { checkRateLimit } from '../../../utils/rate-limit'
 import { differentiationEnqueueSchema } from '../../../utils/schemas'
 import { parseOrThrow, readZodBody, uuidSchema } from '../../../utils/validation'
 
 /** Stellt die Erzeugung einer Differenzierungsfassung in die Warteschlange. */
 export default defineEventHandler(async (event) => {
-  const user = await requireEditor(event)
   const id = parseOrThrow(uuidSchema, getRouterParam(event, 'id'))
+  const user = await requireMaterialBearbeiten(event, id)
   const options = await readZodBody(event, differentiationEnqueueSchema)
 
   checkRateLimit(`ki:${user.id}`, {

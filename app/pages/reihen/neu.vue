@@ -4,11 +4,11 @@ import type { SeriesDetail } from '~~/server/repositories/series.repository'
 
 useHead({ title: 'Reihe starten' })
 
-const { darfBearbeiten } = useSitzung()
+const { darfAnlegen } = useSitzung()
 const { aufruf, laeuft } = useApi()
 const { lerngruppenOptionen, themenOptionen } = useTaxonomie()
 
-if (!darfBearbeiten.value) await navigateTo('/reihen')
+if (!darfAnlegen.value) await navigateTo('/reihen')
 
 const formular = reactive({
   title: '',

@@ -1,13 +1,13 @@
 import { and, desc, eq, or } from 'drizzle-orm'
 import { aiJobs, aiSolutionRuns, materials } from '../../../database/schema'
 import { useDatabase } from '../../../database/client'
-import { requireEditor } from '../../../utils/auth'
+import { requireMaterialBearbeiten } from '../../../utils/permissions'
 import { parseOrThrow, uuidSchema } from '../../../utils/validation'
 
 /** Aktuellen oder letzten Musterlösungsjob eines Materials für das Status-Polling liefern. */
 export default defineEventHandler(async (event) => {
-  const user = await requireEditor(event)
   const materialId = parseOrThrow(uuidSchema, getRouterParam(event, 'id'))
+  const user = await requireMaterialBearbeiten(event, materialId)
   const db = useDatabase()
   const [job] = await db
     .select({

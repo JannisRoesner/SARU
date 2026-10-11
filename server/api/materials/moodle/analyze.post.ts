@@ -6,7 +6,7 @@ import {
   mbzVariantenLabel,
 } from '#shared/utils/moodle'
 import { parseKursarchivMetadata } from '../../../services/moodle/mbz-metadata'
-import { requireEditor } from '../../../utils/auth'
+import { requireRecht } from '../../../utils/permissions'
 import { invalidInput } from '../../../utils/errors'
 
 function dateinameOhneEndung(fileName: string): string {
@@ -21,7 +21,7 @@ function quelleAusMeta(meta: Awaited<ReturnType<typeof parseKursarchivMetadata>>
 }
 
 export default defineEventHandler(async (event) => {
-  await requireEditor(event)
+  await requireRecht(event, 'anlegen')
 
   const parts = await readMultipartParts(event)
   const file = parts?.find((part) => part.filename && part.data?.length)

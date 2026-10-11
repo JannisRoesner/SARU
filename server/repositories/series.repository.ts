@@ -167,6 +167,7 @@ export interface SeriesDetail extends SeriesSummary {
   notes: string | null
   learningObjectives: string[]
   competencies: { id: string; name: string }[]
+  ownerId: string | null
   ownerName: string | null
   lessons: LessonSummary[]
   materials: SeriesMaterialDetail[]
@@ -179,6 +180,7 @@ export async function getSeriesDetail(
   const rows = await queryRows<SeriesDetail>(db, 
     sql`select ${summarySelection},
       r.notes, r.learning_objectives as "learningObjectives",
+      r.owner_id as "ownerId",
       (select u.name from users u where u.id = r.owner_id) as "ownerName",
       coalesce((
         select json_agg(json_build_object('id', c.id, 'name', c.name) order by c.name)

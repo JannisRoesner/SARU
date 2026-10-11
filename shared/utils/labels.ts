@@ -207,7 +207,12 @@ export const roles = definitions<Role>({
   lehrkraft: {
     label: 'Lehrkraft',
     icon: 'chalkboard-user',
-    description: 'Darf Materialien, Stunden und Reihen anlegen und bearbeiten.',
+    description: 'Darf alle Materialien, Stunden und Reihen anlegen, bearbeiten, löschen und teilen.',
+  },
+  beitragende: {
+    label: 'Beitragend',
+    icon: 'cloud-arrow-up',
+    description: 'Darf alles ansehen, Neues anlegen und hochladen und eigene Inhalte bearbeiten – Inhalte anderer aber nicht ändern.',
   },
   leser: {
     label: 'Lesezugriff',

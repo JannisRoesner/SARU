@@ -3,8 +3,8 @@ import { importStatuses } from '#shared/utils/labels'
 
 useHead({ title: 'Schulportal-Kursmappe importieren' })
 
-const { darfBearbeiten } = useSitzung()
-if (!darfBearbeiten.value) await navigateTo('/')
+const { darfAnlegen } = useSitzung()
+if (!darfAnlegen.value) await navigateTo('/')
 
 const { aufruf, laeuft } = useApi()
 

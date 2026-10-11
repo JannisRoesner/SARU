@@ -212,6 +212,7 @@ export interface LessonDetail extends LessonSummary {
   methodSummary: string | null
   learningObjectives: string[]
   competencies: { id: string; name: string }[]
+  ownerId: string | null
   ownerName: string | null
   phases: LessonPhaseDetail[]
   materials: LessonMaterialDetail[]
@@ -220,6 +221,7 @@ export interface LessonDetail extends LessonSummary {
 const detailSelection = sql`
   l.notes, l.reflection, l.method_summary as "methodSummary",
   l.learning_objectives as "learningObjectives",
+  l.owner_id as "ownerId",
   (select u.name from users u where u.id = l.owner_id) as "ownerName",
   coalesce((
     select json_agg(json_build_object('id', c.id, 'name', c.name) order by c.name)

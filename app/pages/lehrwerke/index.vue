@@ -6,7 +6,7 @@ useHead({ title: 'Lehrwerke' })
 
 const route = useRoute()
 const router = useRouter()
-const { darfBearbeiten } = useSitzung()
+const { darfAnlegen } = useSitzung()
 
 const suche = ref(String(route.query.q ?? ''))
 const sort = ref(String(route.query.sort ?? 'titel'))
@@ -85,7 +85,7 @@ const fachChips = computed(() => (facetten.value?.subjects ?? []).slice(0, 8))
       titel="Lehrwerke"
       untertitel="Schulbücher und Zuordnungen"
     >
-      <template v-if="darfBearbeiten" #aktionen>
+      <template v-if="darfAnlegen" #aktionen>
         <UiButton to="/lehrwerke/neu" variante="primaer" icon="plus">
           Lehrwerk anlegen
         </UiButton>
@@ -155,7 +155,7 @@ const fachChips = computed(() => (facetten.value?.subjects ?? []).slice(0, 8))
         titel="Noch keine Lehrwerke"
         text="Noch keines vorhanden."
       >
-        <UiButton v-if="darfBearbeiten" to="/lehrwerke/neu" variante="primaer" icon="plus">
+        <UiButton v-if="darfAnlegen" to="/lehrwerke/neu" variante="primaer" icon="plus">
           Lehrwerk anlegen
         </UiButton>
       </UiLeerzustand>

@@ -1,8 +1,9 @@
 import { eq } from 'drizzle-orm'
 import { readFile } from 'node:fs/promises'
 import { useDatabase } from '../database/client'
-import { materialAssets } from '../database/schema'
-import { hasRole, type SafeUser } from '../utils/auth'
+import { materialAssets, materials, materialVariants } from '../database/schema'
+import type { SafeUser } from '../utils/auth'
+import { darfObjektBearbeiten } from '#shared/utils/rechte'
 import {
   buildCollaboraIframeUrl,
   createWopiAccessToken,
@@ -60,7 +61,13 @@ export async function getAssetPreviewInfo(
 
   const title = asset.title || asset.fileName || asset.url || 'Anhang'
   const downloadUrl = `/api/assets/${asset.id}/download`
-  const canWrite = hasRole(user, 'lehrkraft')
+  const [owner] = await useDatabase()
+    .select({ ownerId: materials.ownerId })
+    .from(materialVariants)
+    .innerJoin(materials, eq(materials.id, materialVariants.materialId))
+    .where(eq(materialVariants.id, asset.variantId))
+    .limit(1)
+  const canWrite = darfObjektBearbeiten(user, owner?.ownerId)
   // Standard ist Nur-Lesen; Schreibrechte erst auf ausdrückliche Anforderung („Bearbeiten“-Button).
   const editing = officeSchreibzugriff(canWrite, options.bearbeiten === true)
   const base: Omit<

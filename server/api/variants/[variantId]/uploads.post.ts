@@ -1,13 +1,13 @@
 import { readMultipartParts } from '../../../utils/multipart'
 import { addFileAsset } from '../../../services/material.service'
 import { recordAudit } from '../../../services/audit.service'
-import { requireEditor } from '../../../utils/auth'
+import { requireVariantBearbeiten } from '../../../utils/permissions'
 import { invalidInput } from '../../../utils/errors'
 import { parseOrThrow, uuidSchema } from '../../../utils/validation'
 
 export default defineEventHandler(async (event) => {
-  const user = await requireEditor(event)
   const variantId = parseOrThrow(uuidSchema, getRouterParam(event, 'variantId'))
+  const user = await requireVariantBearbeiten(event, variantId)
 
   const parts = await readMultipartParts(event)
   const files = parts?.filter((part) => part.filename && part.data?.length) ?? []

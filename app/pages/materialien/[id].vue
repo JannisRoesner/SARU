@@ -18,7 +18,7 @@ import type { StoredStructuredSolution } from '~~/server/database/schema/materia
 
 const route = useRoute()
 const id = computed(() => String(route.params.id))
-const { darfBearbeiten } = useSitzung()
+const { darfObjekt } = useSitzung()
 const { aufruf, laeuft } = useApi()
 const { schlagwortNamen } = useTaxonomie()
 const { optionenMitAktuell } = useSchulformen()
@@ -27,6 +27,9 @@ const hinweise = useHinweise()
 const { data, status, error, refresh } = await useFetch<MaterialDetail>(
   () => `/api/materials/${id.value}`,
 )
+
+/** Bearbeiten mit allgemeinem Recht oder – für Beitragende – am eigenen Inhalt. */
+const darfBearbeiten = computed(() => darfObjekt(data.value?.ownerId))
 
 useHead({ title: () => data.value?.title ?? 'Material' })
 

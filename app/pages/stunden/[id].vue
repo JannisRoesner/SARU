@@ -13,13 +13,16 @@ import type { MaterialSummary } from '~~/server/repositories/material.repository
 
 const route = useRoute()
 const id = computed(() => String(route.params.id))
-const { darfBearbeiten } = useSitzung()
+const { darfObjekt, darfAnlegen } = useSitzung()
 const { aufruf } = useApi()
 const { lerngruppenOptionen, themenOptionen, schlagwortNamen } = useTaxonomie()
 
 const { data, status, error, refresh } = await useFetch<LessonDetail>(
   () => `/api/lessons/${id.value}`,
 )
+
+/** Bearbeiten mit allgemeinem Recht oder – für Beitragende – am eigenen Inhalt. */
+const darfBearbeiten = computed(() => darfObjekt(data.value?.ownerId))
 
 useHead({ title: () => data.value?.title ?? 'Stunde' })
 
@@ -245,7 +248,7 @@ function phaseGeaendert(phase: LessonPhaseDetail) {
             Drucken
           </UiButton>
           <UiButton
-            v-if="darfBearbeiten"
+            v-if="darfAnlegen"
             variante="sekundaer"
             icon="copy"
             @click="duplizieren"

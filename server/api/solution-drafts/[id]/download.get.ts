@@ -2,13 +2,13 @@ import { and, eq } from 'drizzle-orm'
 import { aiJobs, aiSolutionRuns } from '../../../database/schema'
 import { useDatabase } from '../../../database/client'
 import { fileExists, isInlineSafe, readFileStream } from '../../../services/storage.service'
-import { requireEditor } from '../../../utils/auth'
+import { requireLoesungsEntwurf } from '../../../utils/permissions'
 import { notFound } from '../../../utils/errors'
 import { parseOrThrow, uuidSchema } from '../../../utils/validation'
 
 export default defineEventHandler(async (event) => {
-  const user = await requireEditor(event)
   const id = parseOrThrow(uuidSchema, getRouterParam(event, 'id'))
+  const user = await requireLoesungsEntwurf(event, id)
   const [draft] = await useDatabase()
     .select({
       storageKey: aiSolutionRuns.draftStorageKey,

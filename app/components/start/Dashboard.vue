@@ -22,7 +22,7 @@ interface Dashboard {
   kennzahlen: { materialien: number; lehrwerke: number; stunden: number; reihen: number }
 }
 
-const { benutzer, darfBearbeiten, istAdmin } = useSitzung()
+const { benutzer, darfAnlegen, istAdmin } = useSitzung()
 const { data, status, error, refresh } = await useFetch<Dashboard>('/api/dashboard')
 const jetzt = useJetzt()
 
@@ -132,7 +132,7 @@ const schritte = computed(() => {
 const schritteErledigt = computed(() => schritte.value.filter((s) => s.erledigt).length)
 const ersteSchritteSichtbar = computed(
   () =>
-    darfBearbeiten.value &&
+    darfAnlegen.value &&
     bereit.value &&
     !error.value &&
     status.value !== 'pending' &&
@@ -261,7 +261,7 @@ const listen = computed(() => [
       </UiCard>
 
       <UiLeerzustand
-        v-if="istLeer && !darfBearbeiten"
+        v-if="istLeer && !darfAnlegen"
         icon="book"
         titel="Das Archiv ist noch leer"
         text="Sobald Lehrwerke und Material aufgenommen sind, findest du sie hier."

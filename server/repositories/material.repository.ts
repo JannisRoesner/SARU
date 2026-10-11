@@ -430,6 +430,8 @@ export interface MaterialDetail extends MaterialSummary {
   learningObjectives: string[]
   competencies: MaterialTaxonomyRef[]
   learningGroups: MaterialTaxonomyRef[]
+  /** Für die objektbezogene Rechteprüfung in der Oberfläche. */
+  ownerId: string | null
   ownerName: string | null
   variants: MaterialVariantDetail[]
   relations: MaterialRelationDetail[]
@@ -445,6 +447,7 @@ export async function getMaterialDetail(
       m.content,
       m.notes,
       m.learning_objectives as "learningObjectives",
+      m.owner_id as "ownerId",
       (select u.name from users u where u.id = m.owner_id) as "ownerName",
       coalesce((
         select json_agg(json_build_object('id', c.id, 'name', c.name) order by c.name)

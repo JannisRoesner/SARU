@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { ROLES } from '#shared/types/domain'
 import { recordAudit } from '../../services/audit.service'
 import { updateUser } from '../../services/user.service'
 import { requireAdmin } from '../../utils/auth'
@@ -8,7 +9,7 @@ import { readZodBody, uuidSchema } from '../../utils/validation'
 const schema = z.object({
   name: z.string().min(2).max(120).optional(),
   email: z.string().email('Bitte eine gültige E-Mail-Adresse angeben.').optional(),
-  role: z.enum(['admin', 'lehrkraft', 'leser']).optional(),
+  role: z.enum(ROLES).optional(),
   isActive: z.boolean().optional(),
   password: z.string().min(1).optional(),
   mustChangePassword: z.boolean().optional(),

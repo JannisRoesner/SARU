@@ -1,12 +1,12 @@
 import { getMaterialDetail } from '../../../repositories/material.repository'
 import { addVariant } from '../../../services/material.service'
-import { requireEditor } from '../../../utils/auth'
+import { requireMaterialBearbeiten } from '../../../utils/permissions'
 import { variantCreateSchema } from '../../../utils/schemas'
 import { parseOrThrow, readZodBody, uuidSchema } from '../../../utils/validation'
 
 export default defineEventHandler(async (event) => {
-  await requireEditor(event)
   const id = parseOrThrow(uuidSchema, getRouterParam(event, 'id'))
+  await requireMaterialBearbeiten(event, id)
   const input = await readZodBody(event, variantCreateSchema)
 
   await addVariant(id, input)

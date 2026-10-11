@@ -1,7 +1,7 @@
 <script setup lang="ts">
 useHead({ title: 'Einstellungen' })
 
-const { istAdmin, darfBearbeiten } = useSitzung()
+const { istAdmin, darfAnlegen } = useSitzung()
 
 const eintraege = computed(() =>
   [
@@ -76,7 +76,7 @@ const eintraege = computed(() =>
       </NuxtLink>
     </div>
 
-    <p v-if="!darfBearbeiten" class="mt-6 text-sm text-ink-subtle">
+    <p v-if="!darfAnlegen" class="mt-6 text-sm text-ink-subtle">
       Mit Leserecht kannst du Darstellung und Konto anpassen; Inhalte bleiben schreibgeschützt.
     </p>
   </LayoutEinstellungsSeite>

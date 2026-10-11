@@ -2,10 +2,10 @@ import { and, desc } from 'drizzle-orm'
 import { useDatabase } from '../../database/client'
 import { importRuns } from '../../database/schema'
 import { excludeBulkAdapterSql } from '../../services/bulk-upload/bulk-upload.service'
-import { requireEditor } from '../../utils/auth'
+import { requireRecht } from '../../utils/permissions'
 
 export default defineEventHandler(async (event) => {
-  await requireEditor(event)
+  await requireRecht(event, 'anlegen')
 
   return useDatabase()
     .select({

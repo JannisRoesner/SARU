@@ -1,12 +1,12 @@
 import { getDifferentiationDraftDownload } from '../../../services/ai/differenzierung/service'
 import { fileExists, isInlineSafe, readFileStream } from '../../../services/storage.service'
-import { requireEditor } from '../../../utils/auth'
+import { requireDifferenzierungsEntwurf } from '../../../utils/permissions'
 import { notFound } from '../../../utils/errors'
 import { parseOrThrow, uuidSchema } from '../../../utils/validation'
 
 export default defineEventHandler(async (event) => {
-  const user = await requireEditor(event)
   const id = parseOrThrow(uuidSchema, getRouterParam(event, 'id'))
+  const user = await requireDifferenzierungsEntwurf(event, id)
   const draft = await getDifferentiationDraftDownload(id, user.id)
   if (!(await fileExists(draft.storageKey))) throw notFound('Die Entwurfsdatei')
 

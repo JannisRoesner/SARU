@@ -1,14 +1,13 @@
 import { commitAiMaterialCreate } from '../../../../services/ai/material-create'
 import { getMaterialDetail } from '../../../../repositories/material.repository'
 import { recordAudit } from '../../../../services/audit.service'
-import { requireEditor } from '../../../../utils/auth'
+import { requireImportLauf } from '../../../../utils/permissions'
 import { aiMaterialCreateCommitSchema } from '../../../../utils/schemas'
-import { readZodBody } from '../../../../utils/validation'
+import { parseOrThrow, readZodBody, uuidSchema } from '../../../../utils/validation'
 
 export default defineEventHandler(async (event) => {
-  const user = await requireEditor(event)
-  const analyzeId = getRouterParam(event, 'analyzeId')
-  if (!analyzeId) throw createError({ statusCode: 400, statusMessage: 'analyzeId fehlt' })
+  const analyzeId = parseOrThrow(uuidSchema, getRouterParam(event, 'analyzeId'))
+  const user = await requireImportLauf(event, analyzeId)
 
   const input = await readZodBody(event, aiMaterialCreateCommitSchema)
   const { materialId } = await commitAiMaterialCreate(analyzeId, user.id, input)

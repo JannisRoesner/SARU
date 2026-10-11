@@ -1,10 +1,10 @@
 import { getOrCreateSubject, listSubjects } from '../../services/taxonomy.service'
-import { requireEditor } from '../../utils/auth'
+import { requireRecht } from '../../utils/permissions'
 import { subjectSchema } from '../../utils/schemas'
 import { readZodBody } from '../../utils/validation'
 
 export default defineEventHandler(async (event) => {
-  await requireEditor(event)
+  await requireRecht(event, 'anlegen')
   const { name } = await readZodBody(event, subjectSchema)
 
   const id = await getOrCreateSubject(name)

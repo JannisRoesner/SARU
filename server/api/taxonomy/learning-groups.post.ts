@@ -1,10 +1,10 @@
 import { getOrCreateLearningGroup, listLearningGroups } from '../../services/taxonomy.service'
-import { requireEditor } from '../../utils/auth'
+import { requireRecht } from '../../utils/permissions'
 import { learningGroupSchema } from '../../utils/schemas'
 import { readZodBody } from '../../utils/validation'
 
 export default defineEventHandler(async (event) => {
-  await requireEditor(event)
+  await requireRecht(event, 'anlegen')
   const input = await readZodBody(event, learningGroupSchema)
 
   const id = await getOrCreateLearningGroup(input)

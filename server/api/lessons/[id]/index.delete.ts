@@ -1,11 +1,11 @@
 import { deleteLesson } from '../../../services/lesson.service'
 import { recordAudit } from '../../../services/audit.service'
-import { requireEditor } from '../../../utils/auth'
+import { requireLessonLoeschen } from '../../../utils/permissions'
 import { parseOrThrow, uuidSchema } from '../../../utils/validation'
 
 export default defineEventHandler(async (event) => {
-  const user = await requireEditor(event)
   const id = parseOrThrow(uuidSchema, getRouterParam(event, 'id'))
+  const user = await requireLessonLoeschen(event, id)
 
   await deleteLesson(id)
   await recordAudit(

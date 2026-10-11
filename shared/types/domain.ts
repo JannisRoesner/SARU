@@ -4,7 +4,7 @@
  * (Zod-Validierung, Auswahllisten in der Oberfläche) nutzbar sind.
  */
 
-export const ROLES = ['admin', 'lehrkraft', 'leser'] as const
+export const ROLES = ['admin', 'lehrkraft', 'beitragende', 'leser'] as const
 export type Role = (typeof ROLES)[number]
 
 export const SCHOOL_FORMS = [

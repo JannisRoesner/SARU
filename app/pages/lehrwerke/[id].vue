@@ -10,12 +10,15 @@ import type {
 
 const route = useRoute()
 const id = computed(() => String(route.params.id))
-const { darfBearbeiten } = useSitzung()
+const { darfObjekt } = useSitzung()
 const { aufruf } = useApi()
 
 const { data, status, error, refresh } = await useFetch<MaterialDetail>(
   () => `/api/materials/${id.value}`,
 )
+
+/** Bearbeiten mit allgemeinem Recht oder – für Beitragende – am eigenen Inhalt. */
+const darfBearbeiten = computed(() => darfObjekt(data.value?.ownerId))
 
 const { data: inhaltDaten, refresh: inhaltLaden } = await useFetch<{ items: LehrwerkInhaltItem[] }>(
   () => `/api/materials/${id.value}/inhalt`,

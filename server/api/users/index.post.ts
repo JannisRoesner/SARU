@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { ROLES } from '#shared/types/domain'
 import { recordAudit } from '../../services/audit.service'
 import { createUser } from '../../services/user.service'
 import { requireAdmin } from '../../utils/auth'
@@ -8,7 +9,7 @@ const schema = z.object({
   email: z.string().email('Bitte eine gültige E-Mail-Adresse angeben.'),
   name: z.string().min(2, 'Bitte einen Namen angeben.').max(120),
   password: z.string().min(1, 'Bitte ein Passwort vergeben.'),
-  role: z.enum(['admin', 'lehrkraft', 'leser']),
+  role: z.enum(ROLES),
   mustChangePassword: z.boolean().default(true),
 })
 

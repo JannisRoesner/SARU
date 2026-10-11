@@ -8,8 +8,8 @@ import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
 
 useHead({ title: 'Stapel-Upload' })
 
-const { darfBearbeiten } = useSitzung()
-if (!darfBearbeiten.value) await navigateTo('/materialien')
+const { darfAnlegen } = useSitzung()
+if (!darfAnlegen.value) await navigateTo('/materialien')
 
 const { aufruf, laeuft } = useApi()
 const { optionen: schulformOptionen } = useSchulformen()

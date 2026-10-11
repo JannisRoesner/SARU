@@ -9,13 +9,16 @@ import type { Paginated } from '#shared/types/domain'
 
 const route = useRoute()
 const id = computed(() => String(route.params.id))
-const { darfBearbeiten } = useSitzung()
+const { darfObjekt } = useSitzung()
 const { aufruf } = useApi()
 const { lerngruppenOptionen, themenOptionen, schlagwortNamen } = useTaxonomie()
 
 const { data, status, error, refresh } = await useFetch<SeriesDetail>(
   () => `/api/series/${id.value}`,
 )
+
+/** Bearbeiten mit allgemeinem Recht oder – für Beitragende – am eigenen Inhalt. */
+const darfBearbeiten = computed(() => darfObjekt(data.value?.ownerId))
 
 useHead({ title: () => data.value?.title ?? 'Reihe' })
 

@@ -7,7 +7,7 @@ useHead({ title: 'Unterrichtsreihen' })
 
 const route = useRoute()
 const router = useRouter()
-const { darfBearbeiten } = useSitzung()
+const { darfAnlegen } = useSitzung()
 
 const suche = ref(String(route.query.q ?? ''))
 const sort = ref(String(route.query.sort ?? 'datum_neu'))
@@ -59,7 +59,7 @@ watch(page, syncQuery)
       titel="Unterrichtsreihen"
       untertitel="Geplant, aktiv, abgeschlossen"
     >
-      <template v-if="darfBearbeiten" #aktionen>
+      <template v-if="darfAnlegen" #aktionen>
         <UiButton to="/reihen/neu" variante="primaer" icon="plus">Reihe starten</UiButton>
       </template>
     </LayoutSeitenkopf>
@@ -107,7 +107,7 @@ watch(page, syncQuery)
         titel="Keine Reihen"
         text="Noch keine vorhanden."
       >
-        <UiButton v-if="darfBearbeiten" to="/reihen/neu" variante="primaer" icon="plus">
+        <UiButton v-if="darfAnlegen" to="/reihen/neu" variante="primaer" icon="plus">
           Reihe starten
         </UiButton>
       </UiLeerzustand>
