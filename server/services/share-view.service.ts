@@ -41,6 +41,9 @@ export interface GastMaterialKurz {
   fileTypes: string[]
   assetCount: number
   vorschauDateiId: string | null
+  /** Dateiname und Typ der Vorschaudatei – die Miniatur lädt nur bei bekannten Formaten. */
+  vorschauDateiname: string | null
+  vorschauMimeType: string | null
 }
 
 export interface GastStundeKurz {
@@ -137,6 +140,8 @@ function kurz(m: MaterialSummary): GastMaterialKurz {
     fileTypes: m.fileTypes,
     assetCount: m.assetCount,
     vorschauDateiId: m.preview?.kind === 'datei' ? m.preview.assetId : null,
+    vorschauDateiname: m.preview?.kind === 'datei' ? m.preview.fileName : null,
+    vorschauMimeType: m.preview?.kind === 'datei' ? m.preview.mimeType : null,
   }
 }
 

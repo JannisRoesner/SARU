@@ -1,8 +1,11 @@
+import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { closeConnections, createTestUser, resetDatabase } from './helpers'
 
-const { addRelation, createMaterial } = await import('../../server/services/material.service')
+const { addFileAsset, addRelation, createMaterial } = await import('../../server/services/material.service')
+const { getMaterialDetail } = await import('../../server/repositories/material.repository')
 const { addLessonToSeries, attachMaterialToSeries, createSeries } = await import(
   '../../server/services/series.service'
 )
@@ -61,6 +64,27 @@ describe('Freigabe-Links: Umfang', () => {
     const inhalt = await gastLehrwerkInhalt(umfang, lehrwerk)
     expect(inhalt.map((m) => m.title)).toEqual(['AB 1'])
     await expect(gastMaterial(umfang, fremd)).rejects.toThrow()
+  })
+
+  it('liefert Dateiname und Typ für die Miniaturen der Inhaltsliste', async () => {
+    const lehrwerk = await createMaterial({ title: 'Lehrwerk', materialType: 'lehrwerk' }, lehrkraft.id)
+    const ab = await createMaterial({ title: 'AB mit Datei', materialType: 'arbeitsblatt' }, lehrkraft.id)
+    await addRelation(ab, lehrwerk, 'gehoert_zu')
+    const buffer = await readFile(fileURLToPath(new URL('../fixtures/sample.pdf', import.meta.url)))
+    const assetId = await addFileAsset((await getMaterialDetail(ab))!.variants[0]!.id, {
+      buffer,
+      fileName: 'sample.pdf',
+    })
+    // Textextraktion läuft im Hintergrund – abwarten, bevor die Datenbank zurückgesetzt wird.
+    await new Promise((resolve) => setTimeout(resolve, 2500))
+
+    const link = await createShare({ entityType: 'material', entityId: lehrwerk, permission: 'ansehen' }, lehrkraft)
+    const [eintrag] = await gastLehrwerkInhalt(await freigabeUmfang(schluessel(link.pfad)), lehrwerk)
+    expect(eintrag).toMatchObject({
+      vorschauDateiId: assetId,
+      vorschauDateiname: 'sample.pdf',
+      vorschauMimeType: 'application/pdf',
+    })
   })
 
   it('teilt eine Reihe mit Stunden und dem Material aus Reihe, Stunden und Phasen', async () => {

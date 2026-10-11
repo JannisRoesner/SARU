@@ -95,6 +95,8 @@ async function inLehrwerkHochladen(files: FileList | null) {
                 >
                   <MaterialVorschauMiniatur
                     :asset-id="m.vorschauDateiId"
+                    :file-name="m.vorschauDateiname"
+                    :mime-type="m.vorschauMimeType"
                     :material-type="m.materialType"
                     :api-basis="`/api/geteilt/${token}/dateien`"
                     groesse="sm"
