@@ -32,7 +32,7 @@ const { data, error } = await useFetch<GastStunde>(
         <li v-for="ziel in data.learningObjectives" :key="ziel">{{ ziel }}</li>
       </ul>
 
-      <UiCard v-if="data.phasen.length" titel="Verlauf" icon="list-ol" class="mt-6">
+      <UiCard v-if="data.phasen.length" titel="Verlauf" icon="list-ol" class="mt-6" einklappbar einklapp-id="geteilt-stunde-verlauf">
         <ol class="space-y-4">
           <li v-for="phase in data.phasen" :key="phase.id" class="border-l-2 border-primary/40 pl-4">
             <p class="font-medium text-ink">
@@ -54,7 +54,7 @@ const { data, error } = await useFetch<GastStunde>(
         </ol>
       </UiCard>
 
-      <UiCard v-if="data.materialien.length" titel="Material" icon="folder-open" class="mt-4">
+      <UiCard v-if="data.materialien.length" titel="Material" icon="folder-open" class="mt-4" einklappbar einklapp-id="geteilt-stunde-material">
         <ul class="space-y-2">
           <li v-for="m in data.materialien" :key="m.materialId">
             <GeteiltKarte :token="token" :material="{ ...m, id: m.materialId }" />
@@ -62,7 +62,7 @@ const { data, error } = await useFetch<GastStunde>(
         </ul>
       </UiCard>
 
-      <UiCard v-if="data.homework" titel="Hausaufgaben" icon="house" class="mt-4">
+      <UiCard v-if="data.homework" titel="Hausaufgaben" icon="house" class="mt-4" einklappbar einklapp-id="geteilt-stunde-hausaufgaben">
         <p class="whitespace-pre-line text-sm text-ink-muted">{{ data.homework }}</p>
       </UiCard>
     </template>

@@ -18,6 +18,12 @@ interface Startansicht {
 
 const { token } = await useFreigabe()
 const { ziel } = useGastNavigation()
+const suchtGerade = computed(() => Boolean(suche.value.trim()))
+const { offen: gruppeOffen, umschalten: gruppeUmschalten, alleZugeklappt, alleUmschalten } = useGruppenEinklappen(
+  () => `saru.geteilt.zugeklappt.${token.value}`,
+  () => gruppen.value.map((g) => g.id),
+  suchtGerade,
+)
 const { data, error, refresh } = await useFetch<Startansicht>(() => `/api/geteilt/${token.value}`)
 
 const suche = ref('')
@@ -84,12 +90,37 @@ async function inLehrwerkHochladen(files: FileList | null) {
           </div>
 
           <p v-if="!gruppen.length" class="text-sm text-ink-subtle">Keine Treffer.</p>
+          <div v-if="gruppen.length > 1 && !suchtGerade" class="flex justify-end">
+            <UiButton
+              variante="still"
+              groesse="sm"
+              :icon="alleZugeklappt ? 'angles-down' : 'angles-up'"
+              @click="alleUmschalten"
+            >
+              {{ alleZugeklappt ? 'Alle ausklappen' : 'Alle einklappen' }}
+            </UiButton>
+          </div>
+
           <section v-for="gruppe in gruppen" :key="gruppe.id" class="space-y-2">
-            <h3 class="flex items-center gap-2 text-sm font-semibold text-ink">
-              <UiIcon :name="gruppe.icon" class="text-primary" fest /> {{ gruppe.label }}
-              <span class="text-ink-subtle">{{ gruppe.eintraege.length }}</span>
+            <h3 class="text-sm font-semibold text-ink">
+              <button
+                type="button"
+                class="flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                :aria-expanded="gruppeOffen(gruppe.id)"
+                :aria-controls="`gruppe-${gruppe.id}`"
+                @click="gruppeUmschalten(gruppe.id)"
+              >
+                <UiIcon
+                  name="chevron-down"
+                  fest
+                  class="text-xs text-ink-subtle transition-transform duration-200"
+                  :class="!gruppeOffen(gruppe.id) && '-rotate-90'"
+                />
+                <UiIcon :name="gruppe.icon" class="text-primary" fest /> {{ gruppe.label }}
+                <span class="font-normal text-ink-subtle">{{ gruppe.eintraege.length }}</span>
+              </button>
             </h3>
-            <ul class="space-y-2">
+            <ul v-show="gruppeOffen(gruppe.id)" :id="`gruppe-${gruppe.id}`" class="space-y-2">
               <li v-for="m in gruppe.eintraege" :key="m.id">
                 <GeteiltKarte
                   :token="token"
@@ -117,7 +148,7 @@ async function inLehrwerkHochladen(files: FileList | null) {
         </p>
         <p v-if="data.reihe.description" class="mt-3 whitespace-pre-line text-ink-muted">{{ data.reihe.description }}</p>
 
-        <UiCard titel="Stunden" icon="chalkboard-user" class="mt-6">
+        <UiCard titel="Stunden" icon="chalkboard-user" class="mt-6" einklappbar einklapp-id="geteilt-reihe-stunden">
           <p v-if="!data.reihe.stunden.length" class="text-sm text-ink-subtle">Keine Stunden.</p>
           <ol v-else class="space-y-2">
             <li v-for="(stunde, index) in data.reihe.stunden" :key="stunde.id">
@@ -136,7 +167,7 @@ async function inLehrwerkHochladen(files: FileList | null) {
           </ol>
         </UiCard>
 
-        <UiCard v-if="data.reihe.materialien.length" titel="Material der Reihe" icon="folder-open" class="mt-4">
+        <UiCard v-if="data.reihe.materialien.length" titel="Material der Reihe" icon="folder-open" class="mt-4" einklappbar einklapp-id="geteilt-reihe-material">
           <ul class="space-y-2">
             <li v-for="m in data.reihe.materialien" :key="m.materialId">
               <GeteiltKarte :token="token" :material="{ ...m, id: m.materialId }" />

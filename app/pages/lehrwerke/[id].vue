@@ -75,48 +75,17 @@ const gefilterterInhalt = computed(() => {
 
 const gruppen = computed(() => gruppiereLehrwerkInhalt(gefilterterInhalt.value))
 
-/** Eingeklappte Kategorien – pro Lehrwerk im Browser gemerkt. */
-const zugeklappt = ref<string[]>([])
-const speicherKey = computed(() => `saru.lehrwerk.zugeklappt.${id.value}`)
 const suchtGerade = computed(() => Boolean(inhaltSuche.value.trim()))
-
-onMounted(() => {
-  try {
-    const roh = localStorage.getItem(speicherKey.value)
-    if (roh) zugeklappt.value = JSON.parse(roh) as string[]
-  } catch {
-    // Ohne localStorage starten alle Kategorien offen.
-  }
-})
-
-function zustandMerken() {
-  try {
-    localStorage.setItem(speicherKey.value, JSON.stringify(zugeklappt.value))
-  } catch {
-    // Merken ist nur Komfort.
-  }
-}
-
-/** Bei aktiver Suche bleiben Treffer sichtbar, auch in sonst eingeklappten Kategorien. */
-function gruppeOffen(gruppeId: string) {
-  return suchtGerade.value || !zugeklappt.value.includes(gruppeId)
-}
-
-function gruppeUmschalten(gruppeId: string) {
-  zugeklappt.value = zugeklappt.value.includes(gruppeId)
-    ? zugeklappt.value.filter((g) => g !== gruppeId)
-    : [...zugeklappt.value, gruppeId]
-  zustandMerken()
-}
-
-const alleZugeklappt = computed(
-  () => gruppen.value.length > 0 && gruppen.value.every((g) => zugeklappt.value.includes(g.id)),
+const {
+  offen: gruppeOffen,
+  umschalten: gruppeUmschalten,
+  alleZugeklappt,
+  alleUmschalten,
+} = useGruppenEinklappen(
+  () => `saru.lehrwerk.zugeklappt.${id.value}`,
+  () => gruppen.value.map((g) => g.id),
+  suchtGerade,
 )
-
-function alleUmschalten() {
-  zugeklappt.value = alleZugeklappt.value ? [] : gruppen.value.map((g) => g.id)
-  zustandMerken()
-}
 
 const bereitsZugeordnet = computed(() => [id.value, ...inhalt.value.map((item) => item.id)])
 

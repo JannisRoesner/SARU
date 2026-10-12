@@ -106,6 +106,8 @@ function herunterladen(assetId: string) {
       :titel="material.materialType === 'lernzirkel' ? 'Stationen' : 'Enthaltene Materialien'"
       :untertitel="`${material.inhalt.length} ${material.inhalt.length === 1 ? 'Material' : 'Materialien'}`"
       :icon="material.materialType === 'lernzirkel' ? 'map-location-dot' : 'layer-group'"
+      einklappbar
+      einklapp-id="geteilt-material-inhalt"
     >
       <template #kopf>
         <UiButton
@@ -140,6 +142,8 @@ function herunterladen(assetId: string) {
       :key="fassung.id"
       :titel="material.fassungen.length > 1 ? fassung.label : 'Dateien'"
       icon="file-lines"
+      einklappbar
+      :einklapp-id="`geteilt-material-dateien-${fassung.id}`"
     >
       <p v-if="!fassung.dateien.length" class="text-sm text-ink-subtle">Keine Dateien.</p>
       <ul v-else class="divide-y divide-line">
@@ -176,7 +180,7 @@ function herunterladen(assetId: string) {
       </UiButton>
     </div>
 
-    <UiCard v-if="material.anhaengend.length" titel="Verknüpftes Material" icon="link">
+    <UiCard v-if="material.anhaengend.length" titel="Verknüpftes Material" icon="link" einklappbar einklapp-id="geteilt-material-verknuepft">
       <ul class="space-y-1">
         <li v-for="teil in material.anhaengend" :key="teil.id">
           <span class="mr-2 text-xs text-ink-subtle">{{ relationAnzeigeLabel(teil.relationType, 'ausgehend') }}</span>
