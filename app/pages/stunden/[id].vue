@@ -22,7 +22,11 @@ const { data, status, error, refresh } = await useFetch<LessonDetail>(
 )
 
 /** Bearbeiten mit allgemeinem Recht oder – für Beitragende – am eigenen Inhalt. */
-const darfBearbeiten = computed(() => darfObjekt(data.value?.ownerId))
+const hatBearbeitenRecht = computed(() => darfObjekt(data.value?.ownerId))
+
+/** Bearbeiten-Schalter wie im Lehrwerk: ohne ihn bleibt die Seite eine reine Ansicht. */
+const bearbeiten = ref(false)
+const darfBearbeiten = computed(() => hatBearbeitenRecht.value && bearbeiten.value)
 
 useHead({ title: () => data.value?.title ?? 'Stunde' })
 
@@ -234,6 +238,11 @@ function phaseGeaendert(phase: LessonPhaseDetail) {
           </div>
         </div>
         <LayoutAktionen class="sm:ml-auto sm:justify-end">
+          <UiToggle
+            v-if="hatBearbeitenRecht || darfAnlegen"
+            v-model="bearbeiten"
+            label="Bearbeiten"
+          />
           <UiSpeichernAnzeige
             v-if="darfBearbeiten"
             :zustand="autosave.zustand.value"
@@ -248,7 +257,7 @@ function phaseGeaendert(phase: LessonPhaseDetail) {
             Drucken
           </UiButton>
           <UiButton
-            v-if="darfAnlegen"
+            v-if="darfAnlegen && bearbeiten"
             variante="sekundaer"
             icon="copy"
             @click="duplizieren"

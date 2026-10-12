@@ -76,7 +76,8 @@ export async function withTempUploadDir<T>(run: () => Promise<T>): Promise<T> {
   try {
     return await run()
   } finally {
-    process.env.NUXT_UPLOAD_DIR = previous
+    if (previous === undefined) delete process.env.NUXT_UPLOAD_DIR
+    else process.env.NUXT_UPLOAD_DIR = previous
     await rm(dir, { recursive: true, force: true })
   }
 }

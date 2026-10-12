@@ -75,6 +75,49 @@ const gefilterterInhalt = computed(() => {
 
 const gruppen = computed(() => gruppiereLehrwerkInhalt(gefilterterInhalt.value))
 
+/** Eingeklappte Kategorien – pro Lehrwerk im Browser gemerkt. */
+const zugeklappt = ref<string[]>([])
+const speicherKey = computed(() => `saru.lehrwerk.zugeklappt.${id.value}`)
+const suchtGerade = computed(() => Boolean(inhaltSuche.value.trim()))
+
+onMounted(() => {
+  try {
+    const roh = localStorage.getItem(speicherKey.value)
+    if (roh) zugeklappt.value = JSON.parse(roh) as string[]
+  } catch {
+    // Ohne localStorage starten alle Kategorien offen.
+  }
+})
+
+function zustandMerken() {
+  try {
+    localStorage.setItem(speicherKey.value, JSON.stringify(zugeklappt.value))
+  } catch {
+    // Merken ist nur Komfort.
+  }
+}
+
+/** Bei aktiver Suche bleiben Treffer sichtbar, auch in sonst eingeklappten Kategorien. */
+function gruppeOffen(gruppeId: string) {
+  return suchtGerade.value || !zugeklappt.value.includes(gruppeId)
+}
+
+function gruppeUmschalten(gruppeId: string) {
+  zugeklappt.value = zugeklappt.value.includes(gruppeId)
+    ? zugeklappt.value.filter((g) => g !== gruppeId)
+    : [...zugeklappt.value, gruppeId]
+  zustandMerken()
+}
+
+const alleZugeklappt = computed(
+  () => gruppen.value.length > 0 && gruppen.value.every((g) => zugeklappt.value.includes(g.id)),
+)
+
+function alleUmschalten() {
+  zugeklappt.value = alleZugeklappt.value ? [] : gruppen.value.map((g) => g.id)
+  zustandMerken()
+}
+
 const bereitsZugeordnet = computed(() => [id.value, ...inhalt.value.map((item) => item.id)])
 
 const standardVariante = computed(
@@ -377,7 +420,7 @@ async function zuordnungLoesen(relationId: string) {
           />
 
           <label
-            v-if="darfBearbeiten && !hauptVorschau"
+            v-if="darfBearbeiten && bearbeiten && !hauptVorschau"
             class="mt-4 flex cursor-pointer flex-col items-center rounded-xl border-2 border-dashed px-4 py-6 text-center transition-colors"
             :class="ziehe ? 'border-primary bg-primary-soft/40' : 'border-line'"
             @dragover.prevent="ziehe = true"
@@ -452,13 +495,38 @@ async function zuordnungLoesen(relationId: string) {
             text="Passe die Eingrenzung an."
           />
 
+          <div v-if="gruppen.length > 1 && !suchtGerade" class="flex justify-end">
+            <UiButton
+              variante="still"
+              groesse="sm"
+              :icon="alleZugeklappt ? 'angles-down' : 'angles-up'"
+              @click="alleUmschalten"
+            >
+              {{ alleZugeklappt ? 'Alle ausklappen' : 'Alle einklappen' }}
+            </UiButton>
+          </div>
+
           <section v-for="gruppe in gruppen" :key="gruppe.id" class="space-y-2">
-            <h2 class="flex items-center gap-2 text-sm font-semibold text-ink">
-              <UiIcon :name="gruppe.icon" fest class="text-primary" />
-              {{ gruppe.label }}
-              <span class="font-normal text-ink-subtle">{{ gruppe.eintraege.length }}</span>
+            <h2 class="text-sm font-semibold text-ink">
+              <button
+                type="button"
+                class="flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                :aria-expanded="gruppeOffen(gruppe.id)"
+                :aria-controls="`lehrwerk-gruppe-${gruppe.id}`"
+                @click="gruppeUmschalten(gruppe.id)"
+              >
+                <UiIcon
+                  name="chevron-down"
+                  fest
+                  class="text-xs text-ink-subtle transition-transform duration-200"
+                  :class="!gruppeOffen(gruppe.id) && '-rotate-90'"
+                />
+                <UiIcon :name="gruppe.icon" fest class="text-primary" />
+                {{ gruppe.label }}
+                <span class="font-normal text-ink-subtle">{{ gruppe.eintraege.length }}</span>
+              </button>
             </h2>
-            <div class="space-y-2">
+            <div v-show="gruppeOffen(gruppe.id)" :id="`lehrwerk-gruppe-${gruppe.id}`" class="space-y-2">
               <div
                 v-for="item in gruppe.eintraege"
                 :key="item.id"

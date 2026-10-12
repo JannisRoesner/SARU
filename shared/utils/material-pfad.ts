@@ -9,10 +9,12 @@ export function materialUuid(wert: unknown): string | null {
 /** Detailroute: Lehrwerke haben eine eigene Hub-Ansicht. */
 export function materialPfad(
   material: { id: string; materialType?: string | null },
-  optionen?: { lehrwerkId?: string | null },
+  optionen?: { lehrwerkId?: string | null; lernzirkelId?: string | null },
 ): string {
   if (material.materialType === 'lehrwerk') return `/lehrwerke/${material.id}`
   const basis = `/materialien/${material.id}`
+  const lernzirkelId = materialUuid(optionen?.lernzirkelId)
+  if (lernzirkelId) return `${basis}?lernzirkel=${lernzirkelId}`
   const lehrwerkId = materialUuid(optionen?.lehrwerkId)
   return lehrwerkId ? `${basis}?lehrwerk=${lehrwerkId}` : basis
 }
@@ -31,9 +33,22 @@ export function materialZurueckZiel(input: {
   materialType?: string | null
   relations?: MaterialZurueckRelation[] | null
   queryLehrwerkId?: unknown
+  queryLernzirkelId?: unknown
 }): { to: string; label: string } {
   if (input.materialType === 'lehrwerk') {
     return { to: '/lehrwerke', label: 'Lehrwerke' }
+  }
+
+  // Wer aus einem Lernzirkel kommt, geht auch dorthin zurück.
+  const ausLernzirkel = materialUuid(input.queryLernzirkelId)
+  if (ausLernzirkel) {
+    const bekannt = (input.relations ?? []).some(
+      (relation) =>
+        relation.relationType === 'gehoert_zu'
+        && relation.direction === 'ausgehend'
+        && relation.material.id === ausLernzirkel,
+    )
+    if (bekannt) return { to: `/materialien/${ausLernzirkel}`, label: 'Lernzirkel' }
   }
 
   const lehrwerke = (input.relations ?? []).filter(

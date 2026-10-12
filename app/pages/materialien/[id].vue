@@ -13,7 +13,11 @@ import { istKiMusterloesung, kiAutorAnzeige } from '#shared/utils/ki'
 import { solutionEditorMode, type SolutionEditorMode } from '#shared/utils/solution-editor'
 import { istMoodleKursMaterial, istH5pMaterial, kursarchivErweiterung } from '#shared/utils/moodle'
 import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
-import type { MaterialDetail, MaterialSummary } from '~~/server/repositories/material.repository'
+import type {
+  LehrwerkInhaltItem,
+  MaterialDetail,
+  MaterialSummary,
+} from '~~/server/repositories/material.repository'
 import type { StoredStructuredSolution } from '~~/server/database/schema/materials'
 
 const route = useRoute()
@@ -31,7 +35,34 @@ const { data, status, error, refresh } = await useFetch<MaterialDetail>(
 )
 
 /** Bearbeiten mit allgemeinem Recht oder – für Beitragende – am eigenen Inhalt. */
-const darfBearbeiten = computed(() => darfObjekt(data.value?.ownerId))
+const hatBearbeitenRecht = computed(() => darfObjekt(data.value?.ownerId))
+
+/** Bearbeiten-Schalter wie im Lehrwerk: ohne ihn bleibt die Seite eine reine Ansicht. */
+const bearbeiten = ref(false)
+const darfBearbeiten = computed(() => hatBearbeitenRecht.value && bearbeiten.value)
+
+/** Materialien, die dieses Material per `gehoert_zu` enthält (Stationen eines Lernzirkels u. Ä.). */
+const enthalteneAnzahl = computed(
+  () =>
+    data.value?.relations.filter(
+      (rel) => rel.relationType === 'gehoert_zu' && rel.direction === 'eingehend',
+    ).length ?? 0,
+)
+const hatInhalt = computed(() => data.value?.materialType !== 'lehrwerk' && enthalteneAnzahl.value > 0)
+
+/** Was oben als Inhaltsliste erscheint, steht nicht noch einmal unter den Verknüpfungen. */
+const weitereRelationen = computed(() =>
+  (data.value?.relations ?? []).filter(
+    (rel) => !(hatInhalt.value && rel.relationType === 'gehoert_zu' && rel.direction === 'eingehend'),
+  ),
+)
+
+const { data: inhaltDaten, execute: inhaltLaden } = useFetch<{ items: LehrwerkInhaltItem[] }>(
+  () => `/api/materials/${id.value}/inhalt`,
+  { default: () => ({ items: [] }), immediate: false, watch: false },
+)
+watch(hatInhalt, (wert) => { if (wert) void inhaltLaden() }, { immediate: true })
+const inhalt = computed(() => inhaltDaten.value?.items ?? [])
 
 useHead({ title: () => data.value?.title ?? 'Material' })
 
@@ -41,7 +72,7 @@ const {
   duplizieren,
   loeschen,
   alsVerwendetMerken,
-} = useMaterialAktionen(() => refresh())
+} = useMaterialAktionen(() => Promise.all([refresh(), hatInhalt.value ? inhaltLaden() : null]))
 
 const formular = reactive({
   title: '',
@@ -634,6 +665,19 @@ async function geprueftUmschalten(wert: boolean) {
   if (ok !== null) await refresh()
 }
 
+function inhaltHerunterladen() {
+  void alsVerwendetMerken(id.value)
+  window.open(`/api/materials/${id.value}/inhalt-zip`, '_blank')
+}
+
+async function inhaltLoesen(relationId: string) {
+  const ok = await aufruf(`/api/relations/${relationId}`, {
+    method: 'DELETE',
+    erfolgsmeldung: 'Zuordnung entfernt.',
+  })
+  if (ok !== null) await Promise.all([refresh(), inhaltLaden()])
+}
+
 function assetHerunterladen(assetId: string) {
   void alsVerwendetMerken(id.value)
   window.open(`/api/assets/${assetId}/download`, '_blank')
@@ -659,6 +703,7 @@ const zurueck = computed(() =>
     materialType: data.value?.materialType,
     relations: data.value?.relations,
     queryLehrwerkId: route.query.lehrwerk,
+    queryLernzirkelId: route.query.lernzirkel,
   }),
 )
 
@@ -773,6 +818,11 @@ function loesungKorrigieren() {
           >
             Lehrwerk-Ansicht
           </UiButton>
+          <UiToggle
+            v-if="hatBearbeitenRecht"
+            v-model="bearbeiten"
+            label="Bearbeiten"
+          />
           <UiSpeichernAnzeige
             v-if="darfBearbeiten"
             :zustand="autosave.zustand.value"
@@ -973,6 +1023,53 @@ function loesungKorrigieren() {
                   label="Fachlich geprüft"
                   hinweis="Markiert die KI-Musterlösung als kontrolliert."
                   @update:model-value="geprueftUmschalten($event)"
+                />
+              </div>
+            </div>
+          </UiCard>
+
+          <UiCard
+            v-if="hatInhalt"
+            :titel="data.materialType === 'lernzirkel' ? 'Stationen' : 'Enthaltene Materialien'"
+            :untertitel="`${formatZahl(enthalteneAnzahl)} ${enthalteneAnzahl === 1 ? 'Material' : 'Materialien'}`"
+            :icon="data.materialType === 'lernzirkel' ? 'map-location-dot' : 'layer-group'"
+            einklappbar
+            einklapp-id="material-inhalt-liste"
+            :standard-offen="true"
+          >
+            <template #kopf>
+              <UiButton
+                variante="sekundaer"
+                groesse="sm"
+                icon="file-zipper"
+                title="Alle Dateien samt Lösungen als ZIP herunterladen"
+                @click="inhaltHerunterladen"
+              >
+                Alle herunterladen (ZIP)
+              </UiButton>
+            </template>
+            <UiSkelett v-if="!inhalt.length" art="liste" :zeilen="3" />
+            <div v-else class="space-y-2">
+              <div
+                v-for="item in inhalt"
+                :key="item.id"
+                class="flex items-stretch gap-2"
+              >
+                <MaterialKarte
+                  class="min-w-0 flex-1"
+                  :material="item"
+                  :lernzirkel-id="id"
+                  @favorit="favoritSetzen"
+                />
+                <UiButton
+                  v-if="darfBearbeiten"
+                  class="self-center"
+                  variante="still"
+                  groesse="sm"
+                  icon="xmark"
+                  nur-icon
+                  title="Aus diesem Material lösen"
+                  @click="inhaltLoesen(item.relationId)"
                 />
               </div>
             </div>
@@ -1260,15 +1357,15 @@ function loesungKorrigieren() {
             </template>
 
             <UiLeerzustand
-              v-if="!data.relations.length"
+              v-if="!weitereRelationen.length"
               klein
               icon="link"
               titel="Keine Verknüpfungen"
-              text="Keine Verknüpfungen."
+              text="Keine weiteren Verknüpfungen."
             />
             <ul v-else class="space-y-2">
               <li
-                v-for="rel in data.relations"
+                v-for="rel in weitereRelationen"
                 :key="rel.id"
                 class="flex items-center gap-3 rounded-lg border border-line px-3 py-2"
               >

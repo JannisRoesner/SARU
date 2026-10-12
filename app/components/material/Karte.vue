@@ -14,8 +14,10 @@ const props = withDefaults(
     ausgewaehlt?: boolean
     /** Kommt man vom Lehrwerk-Hub, bleibt der Rückweg dorthin erhalten. */
     lehrwerkId?: string | null
+    /** Kommt man aus einem Lernzirkel, führt der Rückweg dorthin. */
+    lernzirkelId?: string | null
   }>(),
-  { kompakt: false, auswaehlbar: false, ausgewaehlt: false },
+  { kompakt: false, auswaehlbar: false, ausgewaehlt: false, lernzirkelId: null },
 )
 
 const emit = defineEmits<{
@@ -25,7 +27,10 @@ const emit = defineEmits<{
 
 const { alsVerwendetMerken } = useMaterialAktionen()
 
-const ziel = computed(() => materialPfad(props.material, { lehrwerkId: props.lehrwerkId }))
+const ziel = computed(() => materialPfad(props.material, {
+    lehrwerkId: props.lehrwerkId,
+    lernzirkelId: props.lernzirkelId,
+  }))
 const icon = computed(() => materialVorschauIcon(props.material.materialType, preview.value?.fileName))
 const kiCredit = computed(() =>
   istKiMusterloesung(props.material)

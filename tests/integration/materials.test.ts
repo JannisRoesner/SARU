@@ -1,3 +1,4 @@
+import { unzipSync } from 'fflate'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import {
   closeConnections,
@@ -23,6 +24,7 @@ const {
 const { getMaterialDetail, getMaterialFacets, listLehrwerkInhalt, listMaterials } = await import(
   '../../server/repositories/material.repository'
 )
+const { sammleZipEintraege, zipStream } = await import('../../server/services/material-zip.service')
 const { getOrCreateSubject, getOrCreateTopic } = await import(
   '../../server/services/taxonomy.service'
 )
@@ -396,6 +398,33 @@ describe('Materialverwaltung', () => {
 
       await deleteMaterial(id)
       expect(await getMaterialDetail(id)).toBeNull()
+    })
+  })
+
+  it('packt Stationen eines Lernzirkels samt Lösungen in ein ZIP', async () => {
+    await withTempUploadDir(async () => {
+      const lernzirkel = await createMaterial({ title: 'Lernzirkel Früchte', materialType: 'lernzirkel' }, userId)
+      const station = await createMaterial({ title: 'Station Äpfel' }, userId)
+      const loesung = await createMaterial({ title: 'Lösung Äpfel', materialType: 'musterloesung' }, userId)
+      await addRelation(station, lernzirkel, 'gehoert_zu')
+      await addRelation(station, loesung, 'musterloesung')
+
+      for (const [id, fileName, text] of [
+        [station, 'Station Äpfel.txt', 'station'],
+        [loesung, 'Station Äpfel.txt', 'loesung'],
+      ] as const) {
+        const detail = await getMaterialDetail(id)
+        await addFileAsset(detail!.variants[0]!.id, { buffer: Buffer.from(text, 'utf8'), fileName })
+      }
+
+      const eintraege = await sammleZipEintraege(lernzirkel)
+      expect(eintraege.map((e) => e.name).sort()).toEqual(['Lösungen/Station Äpfel.txt', 'Station Äpfel.txt'])
+
+      const chunks: Buffer[] = []
+      for await (const chunk of zipStream(eintraege)) chunks.push(chunk as Buffer)
+      const entpackt = unzipSync(new Uint8Array(Buffer.concat(chunks)))
+      expect(Buffer.from(entpackt['Station Äpfel.txt']!).toString()).toBe('station')
+      expect(Buffer.from(entpackt['Lösungen/Station Äpfel.txt']!).toString()).toBe('loesung')
     })
   })
 
