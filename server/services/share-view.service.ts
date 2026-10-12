@@ -31,6 +31,8 @@ export interface GastMaterial {
   fassungen: { id: string; label: string; isDefault: boolean; dateien: GastDatei[] }[]
   /** Lösungen, Differenzierungen und Zusatzmaterial, soweit im Umfang. */
   anhaengend: { id: string; title: string; materialType: string; relationType: string }[]
+  /** Zugeordnete Materialien, z. B. die Stationen eines Lernzirkels (Lehrwerke: siehe Startansicht). */
+  inhalt: GastMaterialKurz[]
 }
 
 export interface GastMaterialKurz {
@@ -59,6 +61,9 @@ export interface GastMaterialVerweis {
   title: string
   materialType: string
   note: string | null
+  vorschauDateiId: string | null
+  vorschauDateiname: string | null
+  vorschauMimeType: string | null
 }
 
 export interface GastReihe {
@@ -128,6 +133,7 @@ export async function gastMaterial(umfang: FreigabeUmfang, id: string): Promise<
         materialType: r.material.materialType,
         relationType: r.relationType,
       })),
+    inhalt: m.materialType === 'lehrwerk' ? [] : await gastLehrwerkInhalt(umfang, m.id),
   }
 }
 
@@ -156,12 +162,36 @@ export async function gastLehrwerkInhalt(umfang: FreigabeUmfang, lehrwerkId: str
   return items.filter((m) => umfang.materialIds.has(m.id)).map(kurz)
 }
 
-const verweis = (m: { materialId: string; title: string; materialType: string; note: string | null }): GastMaterialVerweis => ({
-  materialId: m.materialId,
-  title: m.title,
-  materialType: m.materialType,
-  note: m.note,
-})
+type VerweisRoh = { materialId: string; title: string; materialType: string; note: string | null }
+
+/** Verweise samt Vorschaudatei, damit Gäste Material direkt ansehen und laden können. */
+async function verweiseMitVorschau(umfang: FreigabeUmfang, roh: VerweisRoh[]): Promise<GastMaterialVerweis[]> {
+  const sichtbar = roh.filter((m) => umfang.materialIds.has(m.materialId))
+  const ids = [...new Set(sichtbar.map((m) => m.materialId))]
+  const vorschau = new Map<string, MaterialSummary['preview']>()
+  for (let i = 0; i < ids.length; i += 100) {
+    const teil = ids.slice(i, i + 100)
+    const res = await listMaterials({
+      filters: { ids: teil, includeArchived: true },
+      sort: 'titel',
+      page: 1,
+      pageSize: teil.length,
+    })
+    for (const m of res.items) vorschau.set(m.id, m.preview)
+  }
+  return sichtbar.map((m) => {
+    const p = vorschau.get(m.materialId)
+    return {
+      materialId: m.materialId,
+      title: m.title,
+      materialType: m.materialType,
+      note: m.note,
+      vorschauDateiId: p?.kind === 'datei' ? p.assetId : null,
+      vorschauDateiname: p?.kind === 'datei' ? p.fileName : null,
+      vorschauMimeType: p?.kind === 'datei' ? p.mimeType : null,
+    }
+  })
+}
 
 export async function gastReihe(umfang: FreigabeUmfang): Promise<GastReihe> {
   if (!umfang.seriesId) throw notFound('Die Reihe')
@@ -182,7 +212,7 @@ export async function gastReihe(umfang: FreigabeUmfang): Promise<GastReihe> {
         positionInSeries: l.positionInSeries,
         materialCount: l.materialCount,
       })),
-    materialien: r.materials.filter((m) => umfang.materialIds.has(m.materialId)).map(verweis),
+    materialien: await verweiseMitVorschau(umfang, r.materials),
   }
 }
 
@@ -198,17 +228,19 @@ export async function gastStunde(umfang: FreigabeUmfang, id: string): Promise<Ga
     homework: s.homework,
     methodSummary: s.methodSummary,
     learningObjectives: s.learningObjectives,
-    phasen: s.phases.map((p) => ({
-      id: p.id,
-      name: p.name,
-      durationMinutes: p.durationMinutes,
-      content: p.content,
-      teacherActivity: p.teacherActivity,
-      studentActivity: p.studentActivity,
-      method: p.method,
-      socialForm: p.socialForm,
-      materialien: p.materials.filter((m) => umfang.materialIds.has(m.materialId)).map(verweis),
-    })),
-    materialien: s.materials.filter((m) => umfang.materialIds.has(m.materialId)).map(verweis),
+    phasen: await Promise.all(
+      s.phases.map(async (p) => ({
+        id: p.id,
+        name: p.name,
+        durationMinutes: p.durationMinutes,
+        content: p.content,
+        teacherActivity: p.teacherActivity,
+        studentActivity: p.studentActivity,
+        method: p.method,
+        socialForm: p.socialForm,
+        materialien: await verweiseMitVorschau(umfang, p.materials),
+      })),
+    ),
+    materialien: await verweiseMitVorschau(umfang, s.materials),
   }
 }

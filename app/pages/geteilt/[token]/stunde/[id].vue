@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { materialTypes } from '#shared/utils/labels'
 import type { GastStunde } from '~~/server/services/share-view.service'
 
 definePageMeta({ layout: 'geteilt' })
@@ -46,11 +45,9 @@ const { data, error } = await useFetch<GastStunde>(
             <p v-if="phase.method || phase.socialForm" class="mt-1 text-xs text-ink-subtle">
               {{ [phase.method, phase.socialForm].filter(Boolean).join(' · ') }}
             </p>
-            <ul v-if="phase.materialien.length" class="mt-2 space-y-1">
+            <ul v-if="phase.materialien.length" class="mt-2 space-y-2">
               <li v-for="m in phase.materialien" :key="m.materialId">
-                <NuxtLink :to="`/geteilt/${token}/material/${m.materialId}`" class="text-sm font-medium text-primary hover:underline">
-                  {{ m.title }}
-                </NuxtLink>
+                <GeteiltKarte :token="token" :material="{ ...m, id: m.materialId }" />
               </li>
             </ul>
           </li>
@@ -58,12 +55,9 @@ const { data, error } = await useFetch<GastStunde>(
       </UiCard>
 
       <UiCard v-if="data.materialien.length" titel="Material" icon="folder-open" class="mt-4">
-        <ul class="space-y-1">
+        <ul class="space-y-2">
           <li v-for="m in data.materialien" :key="m.materialId">
-            <NuxtLink :to="`/geteilt/${token}/material/${m.materialId}`" class="font-medium text-primary hover:underline">
-              {{ m.title }}
-            </NuxtLink>
-            <span class="ml-2 text-xs text-ink-subtle">{{ materialTypes.label(m.materialType as never) }}</span>
+            <GeteiltKarte :token="token" :material="{ ...m, id: m.materialId }" />
           </li>
         </ul>
       </UiCard>

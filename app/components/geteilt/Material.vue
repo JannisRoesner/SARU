@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { materialTypes } from '#shared/utils/labels'
+import { materialTypes, relationAnzeigeLabel } from '#shared/utils/labels'
 import type { GastMaterial } from '~~/server/services/share-view.service'
 
 /** Ansicht eines Materials über einen Freigabe-Link – mit Bearbeitung, wenn der Link es erlaubt. */
@@ -12,6 +12,7 @@ const props = defineProps<{
 const emit = defineEmits<{ geaendert: [] }>()
 
 const { aufruf, laeuft } = useApi()
+const { ziel } = useGastNavigation()
 const basis = computed(() => `/api/geteilt/${props.token}/dateien`)
 const darfBearbeiten = computed(() => props.recht === 'bearbeiten')
 
@@ -59,6 +60,10 @@ async function hochladen(files: FileList | null) {
   if (ok) emit('geaendert')
 }
 
+function zipHerunterladen() {
+  window.open(`/api/geteilt/${props.token}/materialien/${props.material.id}/inhalt-zip`, '_blank')
+}
+
 function herunterladen(assetId: string) {
   window.open(`${basis.value}/${assetId}/download`, '_blank')
 }
@@ -95,6 +100,40 @@ function herunterladen(assetId: string) {
         <UiBadge v-if="material.source" icon="quote-left">{{ material.source }}</UiBadge>
       </div>
     </div>
+
+    <UiCard
+      v-if="material.inhalt.length"
+      :titel="material.materialType === 'lernzirkel' ? 'Stationen' : 'Enthaltene Materialien'"
+      :untertitel="`${material.inhalt.length} ${material.inhalt.length === 1 ? 'Material' : 'Materialien'}`"
+      :icon="material.materialType === 'lernzirkel' ? 'map-location-dot' : 'layer-group'"
+    >
+      <template #kopf>
+        <UiButton
+          variante="sekundaer"
+          groesse="sm"
+          icon="file-zipper"
+          title="Alle Dateien samt Lösungen als ZIP herunterladen"
+          @click="zipHerunterladen"
+        >
+          Alle herunterladen (ZIP)
+        </UiButton>
+      </template>
+      <ul class="space-y-2">
+        <li v-for="m in material.inhalt" :key="m.id">
+          <GeteiltKarte
+            :token="token"
+            :material="{
+              id: m.id,
+              title: m.title,
+              materialType: m.materialType,
+              vorschauDateiId: m.vorschauDateiId,
+              vorschauDateiname: m.vorschauDateiname,
+              vorschauMimeType: m.vorschauMimeType,
+            }"
+          />
+        </li>
+      </ul>
+    </UiCard>
 
     <UiCard
       v-for="fassung in material.fassungen.filter((f) => f.dateien.length || darfBearbeiten)"
@@ -137,10 +176,11 @@ function herunterladen(assetId: string) {
       </UiButton>
     </div>
 
-    <UiCard v-if="material.anhaengend.length" titel="Dazu gehört" icon="link">
+    <UiCard v-if="material.anhaengend.length" titel="Verknüpftes Material" icon="link">
       <ul class="space-y-1">
         <li v-for="teil in material.anhaengend" :key="teil.id">
-          <NuxtLink :to="`/geteilt/${token}/material/${teil.id}`" class="font-medium text-primary hover:underline">
+          <span class="mr-2 text-xs text-ink-subtle">{{ relationAnzeigeLabel(teil.relationType, 'ausgehend') }}</span>
+          <NuxtLink :to="ziel(`/geteilt/${token}/material/${teil.id}`)" class="font-medium text-primary hover:underline">
             {{ teil.title }}
           </NuxtLink>
           <span class="ml-2 text-xs text-ink-subtle">{{ materialTypes.label(teil.materialType as never) }}</span>
@@ -152,7 +192,6 @@ function herunterladen(assetId: string) {
       v-model="vorschauOffen"
       :asset-id="vorschauId"
       :api-basis="basis"
-      @herunterladen="herunterladen"
     />
   </div>
 </template>

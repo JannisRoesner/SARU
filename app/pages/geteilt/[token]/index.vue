@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { gruppiereLehrwerkInhalt } from '#shared/utils/lehrwerk'
-import { materialTypes } from '#shared/utils/labels'
 import type { GastMaterial, GastMaterialKurz, GastReihe } from '~~/server/services/share-view.service'
 
 definePageMeta({ layout: 'geteilt' })
@@ -18,6 +17,7 @@ interface Startansicht {
 }
 
 const { token } = await useFreigabe()
+const { ziel } = useGastNavigation()
 const { data, error, refresh } = await useFetch<Startansicht>(() => `/api/geteilt/${token.value}`)
 
 const suche = ref('')
@@ -67,7 +67,9 @@ async function inLehrwerkHochladen(files: FileList | null) {
         <section v-if="data.inhalt" class="mt-8 space-y-4">
           <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
             <div class="flex-1">
-              <h2 class="text-lg font-semibold text-ink">Inhalt des Lehrwerks</h2>
+              <h2 class="text-lg font-semibold text-ink">
+                Inhalt des Lehrwerks
+              </h2>
               <p class="text-sm text-ink-muted">
                 {{ data.inhalt.length }} {{ data.inhalt.length === 1 ? 'Material' : 'Materialien' }}
               </p>
@@ -87,25 +89,19 @@ async function inLehrwerkHochladen(files: FileList | null) {
               <UiIcon :name="gruppe.icon" class="text-primary" fest /> {{ gruppe.label }}
               <span class="text-ink-subtle">{{ gruppe.eintraege.length }}</span>
             </h3>
-            <ul class="grid gap-2 sm:grid-cols-2">
+            <ul class="space-y-2">
               <li v-for="m in gruppe.eintraege" :key="m.id">
-                <NuxtLink
-                  :to="`/geteilt/${token}/material/${m.id}`"
-                  class="karte karte-klickbar flex items-center gap-3 p-3"
-                >
-                  <MaterialVorschauMiniatur
-                    :asset-id="m.vorschauDateiId"
-                    :file-name="m.vorschauDateiname"
-                    :mime-type="m.vorschauMimeType"
-                    :material-type="m.materialType"
-                    :api-basis="`/api/geteilt/${token}/dateien`"
-                    groesse="sm"
-                  />
-                  <span class="min-w-0">
-                    <span class="block truncate font-medium text-ink">{{ m.title }}</span>
-                    <span class="text-xs text-ink-subtle">{{ materialTypes.label(m.materialType as never) }}</span>
-                  </span>
-                </NuxtLink>
+                <GeteiltKarte
+                  :token="token"
+                  :material="{
+                    id: m.id,
+                    title: m.title,
+                    materialType: m.materialType,
+                    vorschauDateiId: m.vorschauDateiId,
+                    vorschauDateiname: m.vorschauDateiname,
+                    vorschauMimeType: m.vorschauMimeType,
+                  }"
+                />
               </li>
             </ul>
           </section>
@@ -125,7 +121,7 @@ async function inLehrwerkHochladen(files: FileList | null) {
           <p v-if="!data.reihe.stunden.length" class="text-sm text-ink-subtle">Keine Stunden.</p>
           <ol v-else class="space-y-2">
             <li v-for="(stunde, index) in data.reihe.stunden" :key="stunde.id">
-              <NuxtLink :to="`/geteilt/${token}/stunde/${stunde.id}`" class="karte karte-klickbar flex items-center gap-3 p-3">
+              <NuxtLink :to="ziel(`/geteilt/${token}/stunde/${stunde.id}`)" class="karte karte-klickbar flex items-center gap-3 p-3">
                 <span class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-sm font-semibold text-primary-strong">
                   {{ index + 1 }}
                 </span>
@@ -141,12 +137,9 @@ async function inLehrwerkHochladen(files: FileList | null) {
         </UiCard>
 
         <UiCard v-if="data.reihe.materialien.length" titel="Material der Reihe" icon="folder-open" class="mt-4">
-          <ul class="space-y-1">
+          <ul class="space-y-2">
             <li v-for="m in data.reihe.materialien" :key="m.materialId">
-              <NuxtLink :to="`/geteilt/${token}/material/${m.materialId}`" class="font-medium text-primary hover:underline">
-                {{ m.title }}
-              </NuxtLink>
-              <span class="ml-2 text-xs text-ink-subtle">{{ materialTypes.label(m.materialType as never) }}</span>
+              <GeteiltKarte :token="token" :material="{ ...m, id: m.materialId }" />
             </li>
           </ul>
         </UiCard>

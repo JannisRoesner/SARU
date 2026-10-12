@@ -223,13 +223,12 @@ async function berechneUmfang(link: ShareLink): Promise<FreigabeUmfang> {
     if (!root) throw notFound('Das geteilte Material')
     wurzel = { typ: 'material', id: root.id, materialType: root.materialType }
     materialIds.add(root.id)
-    if (root.materialType === 'lehrwerk') {
-      const inhalt = await db
-        .select({ id: materialRelations.fromMaterialId })
-        .from(materialRelations)
-        .where(and(eq(materialRelations.toMaterialId, root.id), eq(materialRelations.relationType, 'gehoert_zu')))
-      for (const r of inhalt) materialIds.add(r.id)
-    }
+    // Lehrwerke und Lernzirkel: auch die ihnen zugeordneten Materialien (Blätter, Stationen) sind enthalten.
+    const inhalt = await db
+      .select({ id: materialRelations.fromMaterialId })
+      .from(materialRelations)
+      .where(and(eq(materialRelations.toMaterialId, root.id), eq(materialRelations.relationType, 'gehoert_zu')))
+    for (const r of inhalt) materialIds.add(r.id)
   } else {
     const [root] = await db.select({ id: series.id }).from(series).where(eq(series.id, link.entityId)).limit(1)
     if (!root) throw notFound('Die geteilte Reihe')
@@ -255,6 +254,26 @@ async function berechneUmfang(link: ShareLink): Promise<FreigabeUmfang> {
         .innerJoin(lessonPhases, eq(lessonPhases.id, lessonPhaseMaterials.phaseId))
         .where(inArray(lessonPhases.lessonId, ids))
       for (const m of phasenMaterial) materialIds.add(m.id)
+    }
+  }
+
+  // Ein Lernzirkel in einer Reihe oder Stunde bringt seine Stationen mit.
+  if (materialIds.size) {
+    const zirkel = await db
+      .select({ id: materials.id })
+      .from(materials)
+      .where(and(inArray(materials.id, [...materialIds]), eq(materials.materialType, 'lernzirkel')))
+    if (zirkel.length) {
+      const stationen = await db
+        .select({ id: materialRelations.fromMaterialId })
+        .from(materialRelations)
+        .where(
+          and(
+            inArray(materialRelations.toMaterialId, zirkel.map((z) => z.id)),
+            eq(materialRelations.relationType, 'gehoert_zu'),
+          ),
+        )
+      for (const r of stationen) materialIds.add(r.id)
     }
   }
 

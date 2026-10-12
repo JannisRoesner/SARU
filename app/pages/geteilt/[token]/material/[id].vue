@@ -6,6 +6,7 @@ useHead({ title: 'Geteilter Zugang', meta: [{ name: 'robots', content: 'noindex,
 
 const route = useRoute()
 const { token, recht } = await useFreigabe()
+const { zurueck } = useGastNavigation()
 
 const { data, error, refresh } = await useFetch<GastMaterial>(
   () => `/api/geteilt/${token.value}/materialien/${String(route.params.id)}`,
@@ -14,8 +15,8 @@ const { data, error, refresh } = await useFetch<GastMaterial>(
 
 <template>
   <div>
-    <NuxtLink :to="`/geteilt/${token}`" class="mb-4 inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-primary">
-      <UiIcon name="arrow-left" fest /> Zur Übersicht
+    <NuxtLink :to="zurueck.to" class="mb-4 inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-primary">
+      <UiIcon name="arrow-left" fest /> {{ zurueck.label }}
     </NuxtLink>
     <div v-if="error" class="rounded-xl border border-line bg-surface px-6 py-10 text-center">
       <p class="font-medium text-ink">Dieses Material ist über den Link nicht erreichbar.</p>

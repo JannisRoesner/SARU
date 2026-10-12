@@ -9,7 +9,7 @@ import { checkRateLimit } from './rate-limit'
  */
 export async function gastZugriff(event: H3Event): Promise<FreigabeUmfang> {
   checkRateLimit(`geteilt:${clientIp(event) ?? 'unbekannt'}`, {
-    limit: 600,
+    limit: 3000,
     windowMs: 60_000,
     message: 'Zu viele Aufrufe über diesen Link. Bitte kurz warten.',
   })

@@ -46,6 +46,34 @@ beforeEach(async () => {
 })
 
 describe('Freigabe-Links: Umfang', () => {
+  it('teilt einen Lernzirkel mit seinen Stationen und deren Lösungen', async () => {
+    const lernzirkel = await createMaterial({ title: 'Lernzirkel', materialType: 'lernzirkel' }, lehrkraft.id)
+    const station = await createMaterial({ title: 'Station 1', materialType: 'arbeitsblatt' }, lehrkraft.id)
+    const loesung = await createMaterial({ title: 'Lösung Station 1', materialType: 'musterloesung' }, lehrkraft.id)
+    const fremd = await createMaterial({ title: 'Nicht geteilt', materialType: 'arbeitsblatt' }, lehrkraft.id)
+    await addRelation(station, lernzirkel, 'gehoert_zu')
+    await addRelation(station, loesung, 'musterloesung')
+
+    const link = await createShare({ entityType: 'material', entityId: lernzirkel, permission: 'ansehen' }, lehrkraft)
+    const umfang = await freigabeUmfang(schluessel(link.pfad))
+    expect([...umfang.materialIds].sort()).toEqual([lernzirkel, station, loesung].sort())
+    expect(umfang.materialIds.has(fremd)).toBe(false)
+    expect((await gastLehrwerkInhalt(umfang, lernzirkel)).map((m) => m.title)).toEqual(['Station 1'])
+  })
+
+  it('bringt Stationen eines Lernzirkels mit, der in einer Reihe liegt', async () => {
+    const lernzirkel = await createMaterial({ title: 'Lernzirkel', materialType: 'lernzirkel' }, lehrkraft.id)
+    const station = await createMaterial({ title: 'Station 1', materialType: 'arbeitsblatt' }, lehrkraft.id)
+    await addRelation(station, lernzirkel, 'gehoert_zu')
+    const reihe = await createSeries({ title: 'Reihe Pflanzen' }, lehrkraft.id)
+    await attachMaterialToSeries(reihe, { materialId: lernzirkel })
+
+    const link = await createShare({ entityType: 'reihe', entityId: reihe, permission: 'ansehen' }, lehrkraft)
+    const umfang = await freigabeUmfang(schluessel(link.pfad))
+    expect(umfang.materialIds.has(station)).toBe(true)
+    expect((await gastMaterial(umfang, lernzirkel)).inhalt.map((m) => m.title)).toEqual(['Station 1'])
+  })
+
   it('teilt ein Lehrwerk mit Inhalt und Lösungen, aber nichts anderes', async () => {
     const lehrwerk = await createMaterial({ title: 'Lehrwerk', materialType: 'lehrwerk' }, lehrkraft.id)
     const ab = await createMaterial({ title: 'AB 1', materialType: 'arbeitsblatt' }, lehrkraft.id)
