@@ -41,6 +41,13 @@ const eintraege = computed(() =>
       sichtbar: istAdmin.value,
     },
     {
+      to: '/einstellungen/sicherung',
+      icon: 'box-archive',
+      titel: 'Sicherung & Umzug',
+      text: 'Alle Inhalte als ZIP sichern und in eine andere Instanz einspielen.',
+      sichtbar: istAdmin.value,
+    },
+    {
       to: '/einstellungen/benutzer',
       icon: 'users',
       titel: 'Benutzer',

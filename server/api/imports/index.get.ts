@@ -1,4 +1,5 @@
-import { and, desc } from 'drizzle-orm'
+import { and, desc, ne } from 'drizzle-orm'
+import { SICHERUNG_ADAPTER_ID } from '#shared/utils/sicherung'
 import { useDatabase } from '../../database/client'
 import { importRuns } from '../../database/schema'
 import { excludeBulkAdapterSql } from '../../services/bulk-upload/bulk-upload.service'
@@ -22,7 +23,7 @@ export default defineEventHandler(async (event) => {
       undoneAt: importRuns.undoneAt,
     })
     .from(importRuns)
-    .where(and(excludeBulkAdapterSql()))
+    .where(and(excludeBulkAdapterSql(), ne(importRuns.adapterId, SICHERUNG_ADAPTER_ID)))
     .orderBy(desc(importRuns.startedAt))
     .limit(50)
 })

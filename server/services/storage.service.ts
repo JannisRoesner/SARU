@@ -224,15 +224,20 @@ export interface StoredFile extends ValidatedUpload {
   storageKey: string
 }
 
+/** Zufälliger Speicherschlüssel nach Monat, z. B. `2025/03/<uuid>.pdf`. */
+export function newStorageKey(extension: string): string {
+  const now = new Date()
+  return join(
+    String(now.getFullYear()),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    `${randomUUID()}.${extension}`,
+  ).replaceAll(sep, '/')
+}
+
 /** Schreibt die Datei unter einem zufälligen Namen; der Klarname bleibt nur Metadatum. */
 export async function storeFile(buffer: Buffer, originalName: string): Promise<StoredFile> {
   const validated = await validateUpload(buffer, originalName)
-  const now = new Date()
-  const storageKey = join(
-    String(now.getFullYear()),
-    String(now.getMonth() + 1).padStart(2, '0'),
-    `${randomUUID()}.${validated.extension}`,
-  ).replaceAll(sep, '/')
+  const storageKey = newStorageKey(validated.extension)
 
   const target = resolveStoragePath(storageKey)
   await mkdir(dirname(target), { recursive: true })

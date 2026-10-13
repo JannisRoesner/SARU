@@ -4,6 +4,7 @@ import { oeffentlicheFehlermeldung } from '#shared/utils/public-error'
 import { guessMaterialType } from '#shared/utils/material-type-guess'
 import { materialTypes } from '#shared/utils/labels'
 import { chooseMaterialDescription } from '#shared/utils/material-description'
+import { SICHERUNG_ADAPTER_ID } from '#shared/utils/sicherung'
 import { normalizeGradeLevel } from '#shared/utils/jahrgangsstufen'
 import { desc, eq, sql } from 'drizzle-orm'
 import { useDatabase } from '../../database/client'
@@ -822,6 +823,12 @@ export async function getRunOverview(runId: string): Promise<RunOverview> {
     throw appError(
       'UNGUELTIGE_EINGABE',
       'Dieser Vorgang ist ein PDF-Stapel-Upload. Bitte unter Materialien → Stapel-Upload öffnen.',
+    )
+  }
+  if (run.adapterId === SICHERUNG_ADAPTER_ID) {
+    throw appError(
+      'UNGUELTIGE_EINGABE',
+      'Dieser Vorgang ist eine eingespielte Sicherung. Bitte unter Einstellungen → Sicherung & Umzug öffnen.',
     )
   }
 
