@@ -139,7 +139,7 @@ export const importItemActionEnum = pgEnum('import_item_action', [
 
 export const importLogLevelEnum = pgEnum('import_log_level', ['info', 'warnung', 'fehler'])
 
-export const aiProviderEnum = pgEnum('ai_provider', ['openai', 'ollama', 'openrouter'])
+export const aiProviderEnum = pgEnum('ai_provider', ['openai', 'ollama', 'openrouter', 'openai_kompatibel'])
 
 export const aiJobKindEnum = pgEnum('ai_job_kind', [
   'musterloesung',

@@ -15,7 +15,7 @@ export function isOpenAiEmbeddingModel(model: string): boolean {
 export function resolveEmbeddingModel(provider: AiProvider, model: string): string {
   const trimmed = model.trim()
   if (!trimmed) {
-    return provider === 'ollama'
+    return provider === 'ollama' || provider === 'openai_kompatibel'
       ? OLLAMA_EMBEDDING_MODEL
       : provider === 'openai'
         ? 'text-embedding-3-small'

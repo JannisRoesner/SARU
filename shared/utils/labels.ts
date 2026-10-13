@@ -226,6 +226,7 @@ export const aiProviders = definitions<AiProvider>({
   openai: { label: 'OpenAI', icon: 'cloud' },
   ollama: { label: 'Ollama (lokal)', icon: 'server' },
   openrouter: { label: 'OpenRouter', icon: 'route' },
+  openai_kompatibel: { label: 'OpenAI-kompatibel (llama.cpp, LM Studio, vLLM …)', icon: 'plug' },
 })
 
 export const importStatuses = definitions<ImportStatus>({

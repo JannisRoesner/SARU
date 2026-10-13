@@ -1,4 +1,5 @@
 import { eq } from 'drizzle-orm'
+import type { AiProvider } from '#shared/types/domain'
 import { OLLAMA_EMBEDDING_MODEL } from '#shared/utils/embeddings'
 import { useDatabase } from '../database/client'
 import { appSettings } from '../database/schema'
@@ -15,7 +16,7 @@ export const SETTING_KEYS = {
   collabora: 'vorschau.collabora',
 } as const
 
-export type AiProviderId = 'openai' | 'ollama' | 'openrouter'
+export type AiProviderId = AiProvider
 
 export interface AiSettings {
   enabled: boolean
@@ -43,6 +44,7 @@ export const DEFAULT_BASE_URLS: Record<AiProviderId, string> = {
   openai: 'https://api.openai.com/v1',
   ollama: 'http://localhost:11434/v1',
   openrouter: 'https://openrouter.ai/api/v1',
+  openai_kompatibel: 'http://localhost:8080/v1',
 }
 
 /** Empfohlene Modellnamen für die Einstellungs-UI (Platzhalter / Schnellwahl). */
@@ -67,6 +69,13 @@ export const PROVIDER_MODEL_HINTS: Record<
     chatModel: 'openai/gpt-4o-mini',
     visionModel: 'openai/gpt-4o-mini',
     embeddingModel: 'openai/text-embedding-3-small',
+    useVision: true,
+  },
+  // Modellnamen legt der Server fest (z. B. llama.cpp-Alias) – Auswahl kommt aus /models.
+  openai_kompatibel: {
+    chatModel: '',
+    visionModel: '',
+    embeddingModel: '',
     useVision: true,
   },
 }
