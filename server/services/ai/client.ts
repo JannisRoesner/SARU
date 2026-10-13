@@ -335,6 +335,20 @@ export async function chatCompletion(
   }
 }
 
+/** Fehlerantwort des Anbieters mit Originalmeldung (nur für Logik und Logs, nie für die Oberfläche). */
+export class AnbieterFehler extends Error {
+  constructor(
+    readonly status: number,
+    readonly meldung: string,
+  ) {
+    super(`KI-Anbieter: ${status} ${meldung}`)
+  }
+}
+
+/** Meldungen von llama.cpp, vLLM, Ollama und OpenAI, wenn ein Text das Limit überschreitet. */
+const ZU_LANG = /too large|too long|maximum context|context length|exceeds|batch size/i
+const MIN_EMBEDDING_ZEICHEN = 400
+
 interface EmbeddingResponse {
   data?: { embedding: number[] }[]
   error?: { message?: string }
@@ -358,12 +372,26 @@ export async function createEmbeddings(
     body.dimensions = targetDimensions
   }
 
-  const payload = await request<EmbeddingResponse>(
-    settings,
-    '/embeddings',
-    body,
-    'Die Anfrage an das Embedding-Modell',
-  )
+  // Lokale Server (llama.cpp) lehnen Texte über ihrer Batchgröße ab, z. B. 512 Tokens.
+  // Dann schrittweise kürzen statt den ganzen Lauf abzubrechen.
+  let payload: EmbeddingResponse | null = null
+  let maxZeichen = Math.max(...inputs.map((text) => text.length))
+  for (let versuch = 0; !payload; versuch += 1) {
+    try {
+      payload = await request<EmbeddingResponse>(
+        settings,
+        '/embeddings',
+        { ...body, input: inputs.map((text) => text.slice(0, maxZeichen)) },
+        'Die Anfrage an das Embedding-Modell',
+      )
+    } catch (error) {
+      const ursache = (error as { cause?: unknown }).cause
+      const zuLang = ursache instanceof AnbieterFehler && ZU_LANG.test(ursache.meldung)
+      if (!zuLang || maxZeichen <= MIN_EMBEDDING_ZEICHEN || versuch >= 6) throw error
+      maxZeichen = Math.max(MIN_EMBEDDING_ZEICHEN, Math.floor(maxZeichen / 2))
+      log.warn('Embedding-Eingabe zu lang – wird gekürzt', { model, maxZeichen })
+    }
+  }
 
   const vectors = payload.data?.map((entry) => entry.embedding) ?? []
   if (vectors.length !== inputs.length) {
@@ -439,7 +467,10 @@ async function request<T>(
       raw.slice(0, 300) ??
       response.statusText
     log.warn('KI-Anbieter hat einen Fehler gemeldet', { url, status: response.status, message })
-    throw appError('KI_FEHLER', kiAnbieterFehlermeldung(response.status, what))
+    // Die Rohmeldung bleibt intern (cause), damit Aufrufer gezielt reagieren können.
+    throw appError('KI_FEHLER', kiAnbieterFehlermeldung(response.status, what), {
+      cause: new AnbieterFehler(response.status, message),
+    })
   }
 
   return parsed as T

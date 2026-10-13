@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { chatCompletion, listModels, parseModelList, testConnection } from '../../server/services/ai/client'
+import { chatCompletion, createEmbeddings, listModels, parseModelList, testConnection } from '../../server/services/ai/client'
 import type { AiSettings } from '../../server/services/settings.service'
 
 const settings: AiSettings = {
@@ -130,6 +130,56 @@ describe('chatCompletion', () => {
       { jsonMode: true },
     )
     expect(result.text).toBe('{"value":"ok"}')
+  })
+})
+
+describe('createEmbeddings', () => {
+  const embeddingSettings: AiSettings = {
+    ...settings,
+    provider: 'openai_kompatibel',
+    embeddingsEnabled: true,
+    embeddingModel: 'embeddinggemma-2',
+  }
+
+  /** Verhält sich wie llama-server mit Standard-Batchgröße: lange Texte → 500. */
+  function llamaServer(maxZeichen: number) {
+    return vi.fn(async (_url: string, init?: RequestInit) => {
+      const { input } = JSON.parse(String(init?.body)) as { input: string[] }
+      if (input.some((text) => text.length > maxZeichen)) {
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: 500,
+              message: 'input (1702 tokens) is too large to process. increase the physical batch size (current batch size: 512)',
+              type: 'server_error',
+            },
+          }),
+          { status: 500 },
+        )
+      }
+      return new Response(JSON.stringify({ data: input.map(() => ({ embedding: [1, 0, 0] })) }), { status: 200 })
+    })
+  }
+
+  it('kürzt zu lange Texte schrittweise, bis der Server sie annimmt', async () => {
+    const fetchMock = llamaServer(1500)
+    vi.stubGlobal('fetch', fetchMock)
+
+    const vektoren = await createEmbeddings(embeddingSettings, ['kurz', 'x'.repeat(8000)], 4)
+
+    expect(vektoren).toEqual([[1, 0, 0, 0], [1, 0, 0, 0]])
+    // 8000 → 4000 → 2000 → 1000 Zeichen
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+    const letzte = JSON.parse(String(fetchMock.mock.calls.at(-1)![1]!.body)) as { input: string[] }
+    expect(letzte.input.map((t) => t.length)).toEqual([4, 1000])
+  })
+
+  it('gibt andere Serverfehler sofort weiter', async () => {
+    const fetchMock = vi.fn(async () => new Response('{"error":{"message":"model not loaded"}}', { status: 500 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(createEmbeddings(embeddingSettings, ['x'.repeat(8000)], 4)).rejects.toThrow(/Embedding-Modell/)
+    expect(fetchMock).toHaveBeenCalledOnce()
   })
 })
 
