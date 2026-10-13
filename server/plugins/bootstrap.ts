@@ -6,6 +6,7 @@ import { pruneRateLimits } from '../utils/rate-limit'
 import { purgeExpiredSessions } from '../utils/auth'
 import { startSolutionWorker } from '../services/ai/solutions-v2/worker'
 import { startDifferentiationWorker } from '../services/ai/differenzierung/worker'
+import { ueberlangeAbschnitteNeuAufbauen } from '../services/search/indexer'
 
 const log = createLogger('bootstrap')
 
@@ -41,6 +42,11 @@ export default defineNitroPlugin(async () => {
   } catch (error) {
     log.error('Differenzierungs-Worker konnte nicht gestartet werden', error)
   }
+
+  // Im Hintergrund: Altlasten im Suchindex bereinigen, ohne den Start zu verzögern.
+  void ueberlangeAbschnitteNeuAufbauen().catch((error) =>
+    log.warn('Suchindex konnte nicht geprüft werden', error),
+  )
 
   // Stündlich abgelaufene Sitzungen und Rate-Limit-Einträge entfernen.
   const interval = setInterval(

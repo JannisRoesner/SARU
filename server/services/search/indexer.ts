@@ -24,6 +24,29 @@ const CHUNK_SIZE = 1600
 const CHUNK_OVERLAP = 200
 const MAX_CHUNKS_PER_ENTITY = 60
 
+/** Zerlegt ein Stück, das länger als `max` ist: erst an Zeilen, dann an Leerzeichen, zuletzt hart. */
+function kleinTeilen(text: string, max: number): string[] {
+  if (text.length <= max) return [text]
+  for (const trenner of ['\n', ' ']) {
+    const teile = text.split(trenner)
+    if (teile.length < 2) continue
+    const ergebnis: string[] = []
+    let aktuell = ''
+    for (const teil of teile) {
+      if (aktuell && aktuell.length + trenner.length + teil.length > max) {
+        ergebnis.push(aktuell)
+        aktuell = ''
+      }
+      aktuell += (aktuell ? trenner : '') + teil
+    }
+    if (aktuell) ergebnis.push(aktuell)
+    return ergebnis.flatMap((stueck) => kleinTeilen(stueck, max))
+  }
+  const ergebnis: string[] = []
+  for (let i = 0; i < text.length; i += max) ergebnis.push(text.slice(i, i + max))
+  return ergebnis
+}
+
 /**
  * Teilt langen Text an Absatz- bzw. Satzgrenzen auf, damit Abschnitte
  * inhaltlich zusammenhängend bleiben.
@@ -46,8 +69,10 @@ export function chunkText(text: string): string[] {
   for (const paragraph of paragraphs) {
     if (paragraph.length > CHUNK_SIZE) {
       push()
-      // Sehr langer Absatz: an Satzgrenzen zerlegen.
-      const sentences = paragraph.split(/(?<=[.!?])\s+/)
+      // Sehr langer Absatz: an Satzgrenzen zerlegen. Tabellen und Listen aus
+      // PDFs haben kaum Satzzeichen – überlange „Sätze“ dann an Zeilen bzw.
+      // Leerzeichen teilen, damit kein Abschnitt die Zielgröße sprengt.
+      const sentences = paragraph.split(/(?<=[.!?])\s+/).flatMap((satz) => kleinTeilen(satz, CHUNK_SIZE))
       for (const sentence of sentences) {
         if (current.length + sentence.length + 1 > CHUNK_SIZE) {
           const tail = current.slice(-CHUNK_OVERLAP)
@@ -384,6 +409,25 @@ export async function clearEmbeddings(): Promise<void> {
   await useDatabase()
     .update(searchDocuments)
     .set({ embedding: null, embeddingModel: null, embeddedAt: null })
+}
+
+/**
+ * Ältere Versionen haben Tabellen und Listen ohne Satzzeichen nicht zerteilt,
+ * sodass einzelne Abschnitte viele tausend Zeichen lang wurden (zu groß für
+ * Embedding-Modelle). Betroffene Einträge werden einmalig neu aufgebaut.
+ * Der Metadaten-Abschnitt 0 eines Materials darf länger sein und zählt nicht.
+ */
+export async function ueberlangeAbschnitteNeuAufbauen(db: Database = useDatabase()): Promise<number> {
+  const betroffen = (await db.execute(sql`
+    select distinct entity_type as "entityType", entity_id as "entityId"
+    from search_documents
+    where length(content) > ${CHUNK_SIZE * 2}
+      and not (entity_type = 'material' and chunk_index = 0)
+  `)) as unknown as Array<{ entityType: IndexEntityType; entityId: string }>
+
+  for (const { entityType, entityId } of betroffen) queueReindex(entityType, entityId)
+  if (betroffen.length) log.info('Überlange Suchabschnitte werden neu aufgebaut', { anzahl: betroffen.length })
+  return betroffen.length
 }
 
 export async function reindexAll(): Promise<{ materialien: number; stunden: number; reihen: number }> {
