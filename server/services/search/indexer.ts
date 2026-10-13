@@ -1,10 +1,11 @@
-import { and, eq, isNull, ne, or, sql } from 'drizzle-orm'
+import { and, eq, isNull, or, sql } from 'drizzle-orm'
+import { resolveEmbeddingModel } from '#shared/utils/embeddings'
 import { useDatabase, type Database } from '../../database/client'
 import { EMBEDDING_DIMENSIONS, searchDocuments } from '../../database/schema'
 import { sha256 } from '../../utils/crypto'
 import { createLogger } from '../../utils/logger'
 import { createEmbeddings } from '../ai/client'
-import { getAiSettings } from '../settings.service'
+import { getAiSettings, type AiSettings } from '../settings.service'
 
 const log = createLogger('search:index')
 
@@ -182,9 +183,7 @@ export async function flushIndexQueue(): Promise<void> {
   }
 
   // Embeddings nur nachziehen, wenn ein Anbieter konfiguriert ist.
-  void embedPendingDocuments().catch((error) =>
-    log.warn('Embeddings konnten nicht erzeugt werden', error),
-  )
+  void startEmbeddingJob()
 }
 
 /** Für Tests und den Import: wartet, bis der Index aktuell ist. */
@@ -223,16 +222,24 @@ export async function reindexEntity(
 
 let embedding = false
 
+const EMBED_BATCH_SIZE = 32
+
+/** Modellname, unter dem Vektoren gespeichert und gesucht werden (null = Vektorsuche aus). */
+export function activeEmbeddingModel(settings: AiSettings): string | null {
+  if (!settings.enabled || !settings.embeddingsEnabled || !settings.embeddingModel) return null
+  return resolveEmbeddingModel(settings.provider, settings.embeddingModel)
+}
+
 /**
- * Berechnet fehlende Vektoren stapelweise nach.
- * Läuft absichtlich außerhalb des Anfragezyklus, damit Speichern und Import
- * nicht durch Wartezeiten des KI-Anbieters blockiert werden.
+ * Berechnet einen Stapel fehlender oder veralteter Vektoren.
+ * Gibt `null` zurück, wenn gerade ein anderer Lauf arbeitet.
  */
-export async function embedPendingDocuments(limit = 64): Promise<number> {
-  if (embedding) return 0
+async function embedBatch(limit: number): Promise<number | null> {
+  if (embedding) return null
 
   const settings = await getAiSettings()
-  if (!settings.enabled || !settings.embeddingsEnabled || !settings.embeddingModel) return 0
+  const model = activeEmbeddingModel(settings)
+  if (!model) return 0
 
   embedding = true
   try {
@@ -248,7 +255,7 @@ export async function embedPendingDocuments(limit = 64): Promise<number> {
       .where(
         or(
           isNull(searchDocuments.embedding),
-          ne(searchDocuments.embeddingModel, settings.embeddingModel),
+          sql`${searchDocuments.embeddingModel} is distinct from ${model}`,
         ),
       )
       .limit(limit)
@@ -265,44 +272,114 @@ export async function embedPendingDocuments(limit = 64): Promise<number> {
         .update(searchDocuments)
         .set({
           embedding: vectors[index]!,
-          embeddingModel: settings.embeddingModel,
+          embeddingModel: model,
           embeddedAt: new Date(),
         })
         .where(eq(searchDocuments.id, row.id))
     }
 
-    log.info('Embeddings erzeugt', { anzahl: rows.length, modell: settings.embeddingModel })
+    log.info('Embeddings erzeugt', { anzahl: rows.length, modell: model })
     return rows.length
   } finally {
     embedding = false
   }
 }
 
-/** Wie viele Dokumente noch auf ein Embedding warten. */
-export async function getIndexStatus(): Promise<{
+/**
+ * Berechnet fehlende Vektoren stapelweise nach.
+ * Läuft absichtlich außerhalb des Anfragezyklus, damit Speichern und Import
+ * nicht durch Wartezeiten des KI-Anbieters blockiert werden.
+ */
+export async function embedPendingDocuments(limit = 64): Promise<number> {
+  return (await embedBatch(limit)) ?? 0
+}
+
+export interface EmbeddingJobState {
+  running: boolean
+  /** Letzte Fehlermeldung des Laufs; wird beim nächsten Start gelöscht. */
+  error: string | null
+}
+
+const embeddingJob: EmbeddingJobState = { running: false, error: null }
+
+/**
+ * Arbeitet alle offenen Vektoren in Stapeln ab, bis nichts mehr aussteht.
+ * Mehrfache Aufrufe laufen in denselben Lauf hinein. Bei einem Fehler (z. B.
+ * Anbieter nicht erreichbar) stoppt der Lauf und merkt sich die Meldung.
+ */
+export function startEmbeddingJob(): Promise<void> | null {
+  if (embeddingJob.running) return null
+  embeddingJob.running = true
+  embeddingJob.error = null
+
+  return (async () => {
+    try {
+      for (;;) {
+        const done = await embedBatch(EMBED_BATCH_SIZE)
+        if (done === null) {
+          // Ein Einzelstapel aus der Änderungswarteschlange arbeitet gerade.
+          await new Promise((resolve) => setTimeout(resolve, 500))
+          continue
+        }
+        if (done === 0) break
+      }
+    } catch (error) {
+      embeddingJob.error = error instanceof Error ? error.message : 'Unbekannter Fehler'
+      log.warn('Embedding-Lauf abgebrochen', error)
+    } finally {
+      embeddingJob.running = false
+    }
+  })()
+}
+
+export interface IndexStatus {
   documents: number
+  /** Chunks mit Vektor des aktuell eingestellten Modells. */
   embedded: number
   pending: number
+  /** Chunks mit Vektor eines anderen Modells – für die Suche derzeit unbrauchbar. */
+  outdated: number
+  /** In der Datenbank vorkommende Modelle. */
   models: string[]
-}> {
+  /** Aktuell wirksames Modell; null, wenn die Vektorsuche aus ist. */
+  currentModel: string | null
+  job: EmbeddingJobState
+}
+
+/** Wie viele Dokumente noch auf ein Embedding warten. */
+export async function getIndexStatus(): Promise<IndexStatus> {
   const db = useDatabase()
+  const currentModel = activeEmbeddingModel(await getAiSettings())
+
   const [row] = await db.execute<{
     documents: number
     embedded: number
+    outdated: number
     models: string[] | null
   }>(
     sql`select count(*)::int as documents,
-      count(embedding)::int as embedded,
+      (count(*) filter (where embedding is not null
+        and embedding_model = ${currentModel}::text))::int as embedded,
+      (count(*) filter (where embedding is not null
+        and embedding_model is distinct from ${currentModel}::text))::int as outdated,
       array_remove(array_agg(distinct embedding_model), null) as models
       from search_documents`,
   )
 
   const documents = row?.documents ?? 0
   const embedded = row?.embedded ?? 0
-  return { documents, embedded, pending: documents - embedded, models: row?.models ?? [] }
+  return {
+    documents,
+    embedded,
+    pending: documents - embedded,
+    outdated: row?.outdated ?? 0,
+    models: row?.models ?? [],
+    currentModel,
+    job: { ...embeddingJob },
+  }
 }
 
-/** Verwirft alle Vektoren, z. B. nach einem Modellwechsel. */
+/** Verwirft alle Vektoren, z. B. um sie mit demselben Modell frisch zu berechnen. */
 export async function clearEmbeddings(): Promise<void> {
   await useDatabase()
     .update(searchDocuments)

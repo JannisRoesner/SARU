@@ -68,6 +68,48 @@ watch(
 
 const testErgebnis = ref<string | null>(null)
 
+interface IndexStatus {
+  documents: number
+  embedded: number
+  pending: number
+  outdated: number
+  models: string[]
+  currentModel: string | null
+  job: { running: boolean; error: string | null }
+}
+
+const { data: indexStatus, refresh: indexStatusLaden } =
+  await useFetch<IndexStatus>('/api/search/index-status')
+
+const fortschritt = computed(() => {
+  const status = indexStatus.value
+  if (!status || status.documents === 0) return 0
+  return Math.round((status.embedded / status.documents) * 100)
+})
+
+const andereModelle = computed(() =>
+  (indexStatus.value?.models ?? []).filter((m) => m !== indexStatus.value?.currentModel),
+)
+
+// Solange der Hintergrundlauf arbeitet, den Stand regelmäßig nachladen.
+let indexTimer: ReturnType<typeof setInterval> | null = null
+onMounted(() => {
+  indexTimer = setInterval(() => {
+    if (indexStatus.value?.job.running) void indexStatusLaden()
+  }, 2000)
+})
+onBeforeUnmount(() => {
+  if (indexTimer) clearInterval(indexTimer)
+})
+
+async function embeddingsBerechnen(alle: boolean) {
+  const status = await aufruf<IndexStatus>(`/api/search/embeddings${alle ? '?alle=1' : ''}`, {
+    method: 'POST',
+    erfolgsmeldung: 'Berechnung der Vektoren gestartet.',
+  })
+  if (status) indexStatus.value = status
+}
+
 const hinweise = computed(() => {
   const hints = data.value?.modelHints?.[formular.provider as ProviderId]
   if (formular.provider === 'ollama') {
@@ -121,6 +163,7 @@ async function speichern() {
     erfolgsmeldung: 'KI-Einstellungen gespeichert.',
   })
   await refresh()
+  await indexStatusLaden()
 }
 
 async function testen() {
@@ -238,6 +281,83 @@ async function testen() {
             Speichern
           </UiButton>
         </div>
+      </div>
+    </UiCard>
+
+    <UiCard v-if="indexStatus" titel="Vektorsuche" icon="magnifying-glass">
+      <div class="space-y-4 text-sm">
+        <p v-if="!indexStatus.currentModel" class="rounded-lg bg-surface-sunken px-3 py-2 text-ink-muted">
+          Die Vektorsuche ist ausgeschaltet. Die Volltextsuche funktioniert unabhängig davon.
+        </p>
+
+        <template v-else>
+          <div>
+            <div class="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+              <span>
+                Aktuelles Modell: <strong>{{ indexStatus.currentModel }}</strong>
+              </span>
+              <span class="text-ink-muted">
+                {{ indexStatus.embedded }} von {{ indexStatus.documents }} Abschnitten berechnet
+              </span>
+            </div>
+            <div
+              class="h-2 overflow-hidden rounded-full bg-surface-sunken"
+              role="progressbar"
+              :aria-valuenow="fortschritt"
+              aria-valuemin="0"
+              aria-valuemax="100"
+            >
+              <div
+                class="h-full rounded-full bg-[var(--color-primary)] transition-all"
+                :style="{ width: `${fortschritt}%` }"
+              />
+            </div>
+          </div>
+
+          <p v-if="indexStatus.job.running" class="text-ink-muted">
+            Vektoren werden im Hintergrund berechnet … Du kannst die Seite verlassen.
+          </p>
+          <p
+            v-else-if="indexStatus.job.error"
+            class="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-ink-muted"
+          >
+            Die Berechnung wurde abgebrochen: {{ indexStatus.job.error }}
+          </p>
+          <p v-else-if="indexStatus.pending === 0" class="text-ink-muted">
+            Alles aktuell – die semantische Suche nutzt alle Abschnitte.
+          </p>
+
+          <p
+            v-if="indexStatus.pending > 0 && !indexStatus.job.running"
+            class="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-ink-muted"
+          >
+            {{ indexStatus.pending }} Abschnitte haben noch keinen Vektor des aktuellen Modells
+            <template v-if="andereModelle.length">
+              (vorhanden: {{ andereModelle.join(', ') }})
+            </template>.
+            Sie werden in der semantischen Suche übergangen, bis sie neu berechnet sind.
+          </p>
+
+          <div class="flex flex-wrap justify-end gap-2">
+            <UiButton
+              variante="sekundaer"
+              icon="arrows-rotate"
+              :disabled="indexStatus.job.running"
+              @click="embeddingsBerechnen(true)"
+            >
+              Alle neu berechnen
+            </UiButton>
+            <UiButton
+              v-if="indexStatus.pending > 0 || indexStatus.job.error"
+              variante="primaer"
+              icon="play"
+              :disabled="indexStatus.job.running"
+              @click="embeddingsBerechnen(false)"
+            >
+              {{ indexStatus.job.error ? 'Erneut versuchen' : 'Fehlende berechnen' }}
+            </UiButton>
+          </div>
+        </template>
       </div>
     </UiCard>
   </LayoutEinstellungsSeite>

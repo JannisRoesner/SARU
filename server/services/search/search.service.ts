@@ -51,10 +51,10 @@ const WEIGHTS = { fts: 1, trigram: 0.5, vector: 0.9 }
 const RRF_K = 60
 
 /** Kleiner Zwischenspeicher für Anfragevektoren, damit Tippen nicht jedes Mal kostet. */
-const embeddingCache = new Map<string, number[]>()
+const embeddingCache = new Map<string, { vector: number[]; model: string }>()
 const EMBEDDING_CACHE_MAX = 200
 
-async function embedQuery(query: string): Promise<number[] | null> {
+async function embedQuery(query: string): Promise<{ vector: number[]; model: string } | null> {
   const settings = await getAiSettings()
   if (!settings.enabled || !settings.embeddingsEnabled || !settings.embeddingModel) return null
 
@@ -70,8 +70,9 @@ async function embedQuery(query: string): Promise<number[] | null> {
     if (embeddingCache.size >= EMBEDDING_CACHE_MAX) {
       embeddingCache.delete(embeddingCache.keys().next().value as string)
     }
-    embeddingCache.set(key, vector)
-    return vector
+    const entry = { vector, model }
+    embeddingCache.set(key, entry)
+    return entry
   } catch (error) {
     // Die lexikalische Suche funktioniert weiter – Semantik ist nur eine Zutat.
     log.warn('Anfragevektor konnte nicht erzeugt werden, Suche läuft ohne Semantik weiter', error)
@@ -107,8 +108,10 @@ export async function search(
     ? options.entityTypes
     : (['material', 'unterrichtsstunde', 'reihe'] as IndexEntityType[])
 
-  const queryVector = options.skipVector ? null : await embedQuery(trimmed)
+  const queryEmbedding = options.skipVector ? null : await embedQuery(trimmed)
+  const queryVector = queryEmbedding?.vector ?? null
   const vectorLiteral = queryVector ? `[${queryVector.join(',')}]` : null
+  const vectorModel = queryEmbedding?.model ?? null
 
   const rows = await queryRows<RawHit>(db, 
     sql`
@@ -152,6 +155,8 @@ export async function search(
       from search_documents d, parameter p
       where ${vectorLiteral}::text is not null
         and d.entity_type = any(p.types) and d.embedding is not null
+        -- Vektoren verschiedener Modelle sind nicht vergleichbar.
+        and d.embedding_model = ${vectorModel}::text
       group by d.entity_type, d.entity_id
       order by score desc
       limit ${limit}

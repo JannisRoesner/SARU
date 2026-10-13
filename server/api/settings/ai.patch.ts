@@ -1,3 +1,4 @@
+import { startEmbeddingJob } from '../../services/search/indexer'
 import { getAiSettings, saveAiSettings } from '../../services/settings.service'
 import { recordAudit } from '../../services/audit.service'
 import { maskSecret } from '../../utils/crypto'
@@ -24,6 +25,9 @@ export default defineEventHandler(async (event) => {
     },
     event,
   )
+
+  // Nach einem Modellwechsel die Vektoren im Hintergrund neu berechnen (ohne Wirkung, wenn nichts aussteht).
+  void startEmbeddingJob()
 
   const saved = await getAiSettings()
   return { ...saved, apiKey: maskSecret(saved.apiKey), apiKeyGesetzt: Boolean(saved.apiKey) }
