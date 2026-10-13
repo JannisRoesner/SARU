@@ -15,6 +15,7 @@ Selbst gehostetes Archiv für Unterrichtsreihen, Stunden und Materialien – mit
 - Moodle-Kursarchive zum Ablegen für Wiederherstellung im SchulMoodle (Archiv-Upload, kein Moodle-API-Import)
 - Mehrbenutzerbetrieb mit Rollen (Administration / Lehrkraft / Lesezugriff)
 - Einstellungen für KI, Uploads, Darstellung und Datenschutz
+- Sicherung & Umzug: alle Inhalte als eine ZIP-Datei (lesbar nach Lehrwerk/Fach geordnet) exportieren und in eine andere Instanz einspielen – mit Auswahl, Dublettenerkennung und Rückgängig
 
 ## Schnellstart mit Docker
 
@@ -53,6 +54,10 @@ Das Image enthält Anwendung und PostgreSQL (inkl. pgvector). Daten liegen in de
 | `PORT` | nein | HTTP-Port (Standard: `3000`) |
 
 Vollständige Liste: [`.env.example`](.env.example)
+
+### Sicherung & Umzug
+
+Unter *Einstellungen → Sicherung & Umzug* lädt die Administration alle Inhalte als ZIP herunter und spielt sie in einer anderen Instanz wieder ein. Benutzerkonten, Einstellungen und API-Schlüssel sind bewusst nicht enthalten. Läuft SARU hinter einem Reverse Proxy, muss dessen Upload-Limit für das Einspielen groß genug sein (z. B. nginx `client_max_body_size 0;` für `/api/sicherung/import`).
 
 ## Technik
 
