@@ -47,6 +47,9 @@ export function supportsNativePdf(provider: AiProviderId): boolean {
   return NATIVE_PDF_PROVIDERS.includes(provider)
 }
 
+/** Lokale Server (Ollama, llama.cpp …) benötigen üblicherweise keinen Schlüssel. */
+const SCHLUESSEL_OPTIONAL: AiProviderId[] = ['ollama', 'openai_kompatibel']
+
 function baseUrl(settings: AiSettings): string {
   return (settings.baseUrl || DEFAULT_BASE_URLS[settings.provider]).replace(/\/+$/, '')
 }
@@ -54,9 +57,8 @@ function baseUrl(settings: AiSettings): string {
 function headers(settings: AiSettings): Record<string, string> {
   const result: Record<string, string> = { 'Content-Type': 'application/json' }
 
-  // Ollama läuft lokal und benötigt üblicherweise keinen Schlüssel.
   if (settings.apiKey) result.Authorization = `Bearer ${settings.apiKey}`
-  else if (settings.provider !== 'ollama') {
+  else if (!SCHLUESSEL_OPTIONAL.includes(settings.provider)) {
     throw appError(
       'KI_NICHT_KONFIGURIERT',
       'Für diesen Anbieter ist kein API-Schlüssel hinterlegt. Bitte in den Einstellungen ergänzen.',
@@ -112,6 +114,8 @@ interface ChatCompletionResponse {
       /** Ollama/OpenAI-Kompatibilität: Denkkanal mancher lokaler Modelle. */
       reasoning?: string | null
       thinking?: string | null
+      /** llama.cpp legt Denktext hier ab. */
+      reasoning_content?: string | null
     }
     finish_reason?: string | null
   }[]
@@ -260,7 +264,14 @@ export async function chatCompletion(
     })),
   }
 
-  if (options.jsonSchema && settings.provider === 'openai') {
+  if (settings.provider === 'openai_kompatibel') {
+    // Denkmodus abschalten (llama.cpp, vLLM): Sonst verbrauchen Modelle wie
+    // Gemma 4 oder Qwen 3 ihr Budget im Denkkanal. Andere Server ignorieren das Feld.
+    body.chat_template_kwargs = { enable_thinking: false }
+  }
+
+  // llama.cpp, vLLM und LM Studio erzwingen ein JSON Schema per Grammatik.
+  if (options.jsonSchema && (settings.provider === 'openai' || settings.provider === 'openai_kompatibel')) {
     body.response_format = {
       type: 'json_schema',
       json_schema: {
@@ -288,7 +299,7 @@ export async function chatCompletion(
   // Einige OpenAI-kompatible Ollama-Versionen legen JSON trotz deaktiviertem
   // Thinking im reasoning/thinking-Feld ab. Nur ein vollständiges JSON-Objekt
   // wird als gleichwertiger Antwortkanal akzeptiert – niemals freier Denktext.
-  const alternateJson = [message?.reasoning, message?.thinking]
+  const alternateJson = [message?.reasoning, message?.thinking, message?.reasoning_content]
     .map((value) => value?.trim() ?? '')
     .find((value) => value.startsWith('{') && value.endsWith('}')) ?? ''
   const text = content || alternateJson
@@ -298,7 +309,7 @@ export async function chatCompletion(
       model,
       finishReason: payload.choices?.[0]?.finish_reason ?? null,
       contentChars: message?.content?.length ?? 0,
-      reasoningChars: message?.reasoning?.length ?? 0,
+      reasoningChars: (message?.reasoning ?? message?.reasoning_content)?.length ?? 0,
       thinkingChars: message?.thinking?.length ?? 0,
       outputTokens: payload.usage?.completion_tokens ?? null,
     })
@@ -434,28 +445,142 @@ async function request<T>(
   return parsed as T
 }
 
+export interface ModellInfo {
+  id: string
+  /** Weitere Namen, unter denen der Server das Modell annimmt (llama.cpp-Aliase). */
+  aliase: string[]
+  /** Kann Bilder verarbeiten – `null`, wenn der Server das nicht verrät. */
+  bild: boolean | null
+  /** Embedding-Modell (nicht für Chat geeignet) – `null`, wenn unbekannt. */
+  embedding: boolean | null
+}
+
+export interface ModellListe {
+  modelle: ModellInfo[]
+  /** Hinweis, wenn Anbieter und Server nicht zusammenpassen. */
+  warnung: string | null
+}
+
+interface ModelsResponse {
+  data?: Array<{
+    id?: unknown
+    /** llama.cpp */
+    aliases?: unknown[]
+    /** llama.cpp und OpenRouter */
+    architecture?: { input_modalities?: string[]; output_modalities?: string[] }
+  }>
+}
+
+const EMBEDDING_NAME = /embed|bge-|nomic|minilm|mxbai/i
+
+async function getStatus(settings: AiSettings, url: string, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(url, { headers: headers(settings), signal: controller.signal })
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+/** Übersetzt die Antwort von GET /models; Fähigkeiten nur, soweit der Server sie nennt. */
+export function parseModelList(payload: ModelsResponse): ModellInfo[] {
+  return (payload.data ?? [])
+    .filter((eintrag): eintrag is typeof eintrag & { id: string } => typeof eintrag?.id === 'string')
+    .map((eintrag) => {
+      const eingaben = eintrag.architecture?.input_modalities
+      const ausgaben = eintrag.architecture?.output_modalities
+      const embeddingName = EMBEDDING_NAME.test(eintrag.id)
+      return {
+        id: eintrag.id,
+        aliase: (eintrag.aliases ?? []).filter((a): a is string => typeof a === 'string' && a !== eintrag.id),
+        // Embedding-Modelle melden bei llama.cpp mitunter Bildeingang – für Vision zählt das nicht.
+        bild: embeddingName ? false : Array.isArray(eingaben) ? eingaben.includes('image') : null,
+        embedding: embeddingName || (Array.isArray(ausgaben) && ausgaben.includes('embeddings')) ? true : null,
+      }
+    })
+    .sort((a, b) => a.id.localeCompare(b.id))
+}
+
+/**
+ * Antwortet unter der Adresse wirklich Ollama? Chat-Anfragen gehen bei
+ * „Ollama“ an den nativen Endpunkt /api/chat, den llama.cpp & Co. nicht kennen.
+ */
+async function istEchtesOllama(settings: AiSettings): Promise<boolean> {
+  try {
+    return (await getStatus(settings, `${ollamaNativeBaseUrl(settings)}/api/tags`, 5000)).ok
+  } catch {
+    return false
+  }
+}
+
+/** Ollama nennt Fähigkeiten nur über /api/show – je Modell eine kurze Anfrage. */
+async function ollamaFaehigkeitenErgaenzen(settings: AiSettings, modelle: ModellInfo[]): Promise<void> {
+  await Promise.all(
+    modelle.slice(0, 60).map(async (modell) => {
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 5000)
+      try {
+        const response = await fetch(`${ollamaNativeBaseUrl(settings)}/api/show`, {
+          method: 'POST',
+          headers: headers(settings),
+          body: JSON.stringify({ model: modell.id }),
+          signal: controller.signal,
+        })
+        if (!response.ok) return
+        const { capabilities } = (await response.json()) as { capabilities?: string[] }
+        if (!Array.isArray(capabilities)) return
+        modell.bild = capabilities.includes('vision')
+        modell.embedding = capabilities.includes('embedding') && !capabilities.includes('completion')
+      } catch {
+        // Ohne Angaben bleibt es bei der Namens-Heuristik.
+      } finally {
+        clearTimeout(timeout)
+      }
+    }),
+  )
+}
+
+/** Verfügbare Modelle über das OpenAI-kompatible GET /models. */
+export async function listModels(settings: AiSettings, timeoutMs = 20_000): Promise<ModellListe> {
+  let response: Response
+  try {
+    response = await getStatus(settings, `${baseUrl(settings)}/models`, timeoutMs)
+  } catch (error) {
+    throw appError('KI_FEHLER', 'Der Anbieter ist unter dieser Adresse nicht erreichbar.', { cause: error })
+  }
+  if (!response.ok) {
+    throw appError(
+      'KI_FEHLER',
+      `Der Anbieter antwortete mit Status ${response.status}. Bitte Adresse und Schlüssel prüfen.`,
+    )
+  }
+
+  const modelle = parseModelList((await response.json()) as ModelsResponse)
+
+  let warnung: string | null = null
+  if (settings.provider === 'ollama') {
+    if (await istEchtesOllama(settings)) {
+      await ollamaFaehigkeitenErgaenzen(settings, modelle)
+    } else {
+      warnung =
+        'Unter dieser Adresse läuft kein Ollama, sondern ein anderer OpenAI-kompatibler Server (z. B. llama.cpp). ' +
+        'Modellliste und Embeddings funktionieren, Texte und Musterlösungen aber nicht – bitte den Anbieter „OpenAI-kompatibel“ wählen.'
+    }
+  }
+
+  return { modelle, warnung }
+}
+
 /** Prüft Erreichbarkeit und Zugangsdaten für die Einstellungsseite. */
 export async function testConnection(
   settings: AiSettings,
 ): Promise<{ ok: boolean; message: string; models?: string[] }> {
   try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), Math.min(settings.timeoutMs, 20_000))
+    const { modelle, warnung } = await listModels(settings, Math.min(settings.timeoutMs, 20_000))
+    const models = modelle.map((m) => m.id)
+    if (warnung) return { ok: false, message: warnung, models }
 
-    const response = await fetch(`${baseUrl(settings)}/models`, {
-      headers: headers(settings),
-      signal: controller.signal,
-    }).finally(() => clearTimeout(timeout))
-
-    if (!response.ok) {
-      return {
-        ok: false,
-        message: `Der Anbieter antwortete mit Status ${response.status}. Bitte Adresse und Schlüssel prüfen.`,
-      }
-    }
-
-    const payload = (await response.json()) as { data?: { id: string }[] }
-    const models = payload.data?.map((entry) => entry.id).sort() ?? []
     let message = models.length
       ? `Verbindung erfolgreich. ${models.length} Modelle verfügbar.`
       : 'Verbindung erfolgreich.'

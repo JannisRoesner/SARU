@@ -135,7 +135,7 @@ export type MaterialUsage = (typeof MATERIAL_USAGES)[number]
 export const SEARCH_ENTITY_TYPES = ['material', 'unterrichtsstunde', 'reihe'] as const
 export type SearchEntityType = (typeof SEARCH_ENTITY_TYPES)[number]
 
-export const AI_PROVIDERS = ['openai', 'ollama', 'openrouter'] as const
+export const AI_PROVIDERS = ['openai', 'ollama', 'openrouter', 'openai_kompatibel'] as const
 export type AiProvider = (typeof AI_PROVIDERS)[number]
 
 export const IMPORT_STATUSES = [

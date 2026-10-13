@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import type { AiProvider } from '#shared/types/domain'
 import { OLLAMA_EMBEDDING_MODEL } from '#shared/utils/embeddings'
 import { aiProviders } from '#shared/utils/labels'
+import type { KombiOption } from '~/components/ui/Kombifeld.vue'
 
 useHead({ title: 'KI-Anbindung' })
 
@@ -9,7 +11,14 @@ if (!istAdmin.value) await navigateTo('/einstellungen')
 
 const { aufruf, laeuft } = useApi()
 
-type ProviderId = 'openai' | 'ollama' | 'openrouter'
+type ProviderId = AiProvider
+
+const STANDARD_URLS: Record<ProviderId, string> = {
+  openai: 'https://api.openai.com/v1',
+  ollama: 'http://localhost:11434/v1',
+  openrouter: 'https://openrouter.ai/api/v1',
+  openai_kompatibel: 'http://localhost:8080/v1',
+}
 
 const { data, refresh } = await useFetch<{
   ai: {
@@ -122,6 +131,15 @@ const hinweise = computed(() => {
         `Für die Vektorsuche z. B. ${OLLAMA_EMBEDDING_MODEL} (ollama pull ${OLLAMA_EMBEDDING_MODEL}). OpenAI-Modelle wie text-embedding-3-small funktionieren bei Ollama nicht.`,
     }
   }
+  if (formular.provider === 'openai_kompatibel') {
+    return {
+      chat: 'aus der Liste wählen',
+      vision: 'aus der Liste wählen',
+      embedding: 'aus der Liste wählen',
+      text: 'Für llama.cpp (llama-server), LM Studio, vLLM und andere Server mit OpenAI-Schnittstelle. Arbeitsblätter werden als Seitenbilder übergeben – für Musterlösungen ein multimodales Modell wählen (bei llama.cpp mit --mmproj gestartet).',
+      embeddingHinweis: 'Ein Embedding-Modell des Servers, z. B. qwen3-embedding. Nach einem Wechsel die Vektoren neu berechnen.',
+    }
+  }
   if (formular.provider === 'openai') {
     return {
       chat: hints?.chatModel ?? 'gpt-4o-mini',
@@ -143,15 +161,91 @@ const hinweise = computed(() => {
 function anbieterHinweiseUebernehmen() {
   const hints = data.value?.modelHints?.[formular.provider as ProviderId]
   if (!hints) return
-  formular.chatModel = hints.chatModel
-  formular.visionModel = hints.visionModel
-  formular.embeddingModel = hints.embeddingModel
+  // Leere Empfehlungen (OpenAI-kompatibel) überschreiben nichts – dort gibt der Server die Namen vor.
+  if (hints.chatModel) formular.chatModel = hints.chatModel
+  if (hints.visionModel) formular.visionModel = hints.visionModel
+  if (hints.embeddingModel) formular.embeddingModel = hints.embeddingModel
   formular.useVision = hints.useVision
-  if (!formular.baseUrl.trim()) {
-    if (formular.provider === 'ollama') formular.baseUrl = 'http://localhost:11434/v1'
-    if (formular.provider === 'openai') formular.baseUrl = 'https://api.openai.com/v1'
-    if (formular.provider === 'openrouter') formular.baseUrl = 'https://openrouter.ai/api/v1'
+  if (!formular.baseUrl.trim()) formular.baseUrl = STANDARD_URLS[formular.provider]
+}
+
+// --- Modelllisten -------------------------------------------------------------
+
+interface ModellInfo {
+  id: string
+  aliase: string[]
+  bild: boolean | null
+  embedding: boolean | null
+}
+
+const modelle = ref<ModellInfo[]>([])
+const modellWarnung = ref<string | null>(null)
+const modellFehler = ref<string | null>(null)
+const modelleLaden = ref(false)
+let ladeNummer = 0
+
+async function modelleAbrufen() {
+  const nummer = ++ladeNummer
+  modelleLaden.value = true
+  modellFehler.value = null
+  try {
+    const body: Record<string, unknown> = { provider: formular.provider, baseUrl: formular.baseUrl }
+    if (formular.apiKey.trim()) body.apiKey = formular.apiKey
+    // Schlichter Funktionstyp – siehe useApi (Routentypen werden sonst zu tief).
+    const holen = $fetch as unknown as (
+      url: string,
+      opts: object,
+    ) => Promise<{ modelle: ModellInfo[]; warnung: string | null }>
+    const ergebnis = await holen('/api/settings/ai-models', { method: 'POST', body })
+    if (nummer !== ladeNummer) return
+    modelle.value = ergebnis.modelle
+    modellWarnung.value = ergebnis.warnung
+  } catch (error) {
+    if (nummer !== ladeNummer) return
+    modelle.value = []
+    modellWarnung.value = null
+    modellFehler.value = toApiFehler(error).nachricht
+  } finally {
+    if (nummer === ladeNummer) modelleLaden.value = false
   }
+}
+
+// Anbieter oder Adresse geändert: Liste mit kurzer Verzögerung neu laden.
+let ladeTimer: ReturnType<typeof setTimeout> | null = null
+watch(
+  () => [formular.provider, formular.baseUrl] as const,
+  () => {
+    if (ladeTimer) clearTimeout(ladeTimer)
+    ladeTimer = setTimeout(() => void modelleAbrufen(), 600)
+  },
+)
+onMounted(() => void modelleAbrufen())
+onBeforeUnmount(() => {
+  if (ladeTimer) clearTimeout(ladeTimer)
+})
+
+function alsOption(modell: ModellInfo, nachrangig: boolean): KombiOption {
+  const zusaetze = modell.aliase.slice(0, 1)
+  if (modell.bild) zusaetze.push('Bild')
+  if (modell.embedding) zusaetze.push('Embedding')
+  return { wert: modell.id, zusaetze, gleichwertig: modell.aliase, nachrangig }
+}
+
+const chatOptionen = computed(() => modelle.value.map((m) => alsOption(m, m.embedding === true)))
+const visionOptionen = computed(() =>
+  modelle.value.map((m) => alsOption(m, m.embedding === true || m.bild === false)),
+)
+const embeddingOptionen = computed(() => {
+  // Erkennt der Server keine Embedding-Modelle, bleiben alle gleichrangig.
+  const bekannt = modelle.value.some((m) => m.embedding === true)
+  return modelle.value.map((m) => alsOption(m, bekannt && m.embedding !== true))
+})
+
+/** Steht der eingetragene Name (oder ein Alias) nicht in der Liste des Servers? */
+function fehltAufServer(name: string): boolean {
+  const n = name.trim()
+  if (!n || !modelle.value.length) return false
+  return !modelle.value.some((m) => m.id === n || m.aliase.includes(n))
 }
 
 async function speichern() {
@@ -176,6 +270,7 @@ async function testen() {
       { method: 'POST', body, stumm: true },
     )
     testErgebnis.value = ergebnis?.message ?? 'Verbindung erfolgreich.'
+    void modelleAbrufen()
   } catch (error) {
     testErgebnis.value = (error as { nachricht?: string }).nachricht ?? 'Test fehlgeschlagen.'
   }
@@ -213,7 +308,7 @@ async function testen() {
           <UiField label="Basis-URL">
             <UiInput
               v-model="formular.baseUrl"
-              :placeholder="formular.provider === 'ollama' ? 'http://localhost:11434/v1' : 'https://api.openai.com/v1'"
+              :placeholder="STANDARD_URLS[formular.provider]"
             />
           </UiField>
           <UiField
@@ -223,20 +318,63 @@ async function testen() {
           >
             <UiInput v-model="formular.apiKey" type="password" autocomplete="off" placeholder="••••••••" />
           </UiField>
-          <UiField label="Chat-Modell" :hinweis="`Empfehlung: ${hinweise.chat}`">
-            <UiInput v-model="formular.chatModel" :placeholder="hinweise.chat" />
+          <div class="flex flex-wrap items-center gap-2 text-xs sm:col-span-2">
+            <span v-if="modelleLaden" class="text-ink-subtle">Modelle werden geladen …</span>
+            <span v-else-if="modellFehler" class="text-danger">Modellliste nicht verfügbar: {{ modellFehler }}</span>
+            <span v-else class="text-ink-subtle">
+              {{
+                modelle.length
+                  ? `${modelle.length} Modelle auf dem Server – Felder aufklappen oder Namen eintippen.`
+                  : 'Der Server meldet keine Modelle.'
+              }}
+            </span>
+            <button type="button" class="text-primary hover:underline" @click="modelleAbrufen">Neu laden</button>
+          </div>
+          <p
+            v-if="modellWarnung"
+            class="sm:col-span-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-ink-muted"
+          >
+            {{ modellWarnung }}
+            <button
+              type="button"
+              class="ml-1 font-medium text-primary hover:underline"
+              @click="formular.provider = 'openai_kompatibel'"
+            >
+              Jetzt umstellen
+            </button>
+          </p>
+          <UiField
+            label="Chat-Modell"
+            :hinweis="fehltAufServer(formular.chatModel) ? 'Dieser Name steht nicht in der Liste des Servers.' : `Empfehlung: ${hinweise.chat}`"
+          >
+            <UiKombifeld
+              v-model="formular.chatModel"
+              :optionen="chatOptionen"
+              :laedt="modelleLaden"
+              :placeholder="hinweise.chat"
+            />
           </UiField>
           <UiField
             label="Vision-Modell"
-            hinweis="Für Arbeitsblätter/PDFs – bei Ollama z. B. gemma4:e4b-it-qat"
+            :hinweis="fehltAufServer(formular.visionModel) ? 'Dieser Name steht nicht in der Liste des Servers.' : 'Für Arbeitsblätter/PDFs – muss Bilder verarbeiten können.'"
           >
-            <UiInput v-model="formular.visionModel" :placeholder="hinweise.vision" />
+            <UiKombifeld
+              v-model="formular.visionModel"
+              :optionen="visionOptionen"
+              :laedt="modelleLaden"
+              :placeholder="hinweise.vision"
+            />
           </UiField>
           <UiField
             label="Embedding-Modell"
-            :hinweis="hinweise.embeddingHinweis"
+            :hinweis="fehltAufServer(formular.embeddingModel) ? 'Dieser Name steht nicht in der Liste des Servers.' : hinweise.embeddingHinweis"
           >
-            <UiInput v-model="formular.embeddingModel" :placeholder="hinweise.embedding" />
+            <UiKombifeld
+              v-model="formular.embeddingModel"
+              :optionen="embeddingOptionen"
+              :laedt="modelleLaden"
+              :placeholder="hinweise.embedding"
+            />
           </UiField>
           <p
             v-if="data?.ai.embeddingModelWarnung"
