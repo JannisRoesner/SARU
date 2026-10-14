@@ -120,16 +120,6 @@ function dateiInfo(datei: Datei, fassung: Fassung) {
         <UiBadge v-if="material.gradeLevels.length">{{ formatJahrgaenge(material.gradeLevels as never) }}</UiBadge>
         <UiBadge v-if="material.source" icon="quote-left">{{ material.source }}</UiBadge>
       </div>
-      <div v-if="istLehrwerk" class="mt-4">
-        <UiButton
-          variante="primaer"
-          icon="file-zipper"
-          title="Schulbuch, Serviceband, Versuche, Arbeitsblätter, Lernzirkel … in Ordnern als ZIP"
-          @click="zipHerunterladen"
-        >
-          Komplettes Lehrwerk herunterladen (ZIP)
-        </UiButton>
-      </div>
     </div>
 
     <UiCard

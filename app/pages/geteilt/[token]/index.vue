@@ -35,6 +35,10 @@ const gruppen = computed(() => {
   return gruppiereLehrwerkInhalt(items)
 })
 
+function lehrwerkZip(id: string) {
+  window.open(`/api/geteilt/${token.value}/materialien/${id}/inhalt-zip`, '_blank')
+}
+
 const { aufruf, laeuft } = useApi()
 const uploadInput = ref<HTMLInputElement | null>(null)
 async function inLehrwerkHochladen(files: FileList | null) {
@@ -81,6 +85,15 @@ async function inLehrwerkHochladen(files: FileList | null) {
                 zum Schulbuch
               </p>
             </div>
+            <UiButton
+              variante="sekundaer"
+              icon="file-zipper"
+              title="Schulbuch, Serviceband, Versuche, Arbeitsblätter, Lernzirkel … in Ordnern als ZIP"
+              class="self-start md:self-auto"
+              @click="lehrwerkZip(data.material.id)"
+            >
+              Komplettes Lehrwerk herunterladen (ZIP)
+            </UiButton>
             <div class="flex items-center gap-2">
               <UiInput
                 v-model="suche"
