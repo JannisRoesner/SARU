@@ -51,6 +51,7 @@ interface PromptFormat {
 const PROMPT_FORMATS: { pattern: RegExp; format: PromptFormat }[] = [
   {
     // https://ai.google.dev/gemma/docs/embeddinggemma/model_card#prompt-instructions
+    // EmbeddingGemma 2 nutzt dasselbe Format: https://huggingface.co/google/embeddinggemma-2
     pattern: /embeddinggemma/i,
     format: {
       version: 1,
