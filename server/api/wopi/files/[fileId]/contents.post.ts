@@ -53,6 +53,8 @@ export default defineEventHandler(async (event) => {
     .set({
       sizeBytes: stored.sizeBytes,
       checksum: stored.checksum,
+      // Wird für die Seitenbilder der Suche bei Bedarf neu ermittelt.
+      pageCount: null,
       extractedText: null,
       extractionError: null,
       extractionStatus: isExtractable(asset.fileName ?? '')

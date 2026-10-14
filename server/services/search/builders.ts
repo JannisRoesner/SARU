@@ -2,7 +2,9 @@ import { sql } from 'drizzle-orm'
 import { queryRows, useDatabase } from '../../database/client'
 import { materialTypes, schoolForms, socialForms } from '#shared/utils/labels'
 import { formatJahrgaenge, normalizeGradeLevels, type GradeLevel } from '#shared/utils/jahrgangsstufen'
-import { chunkText, type IndexDocument } from './indexer'
+import { getAiSettings } from '../settings.service'
+import { chunkText, IMAGE_CHUNK_START, imageEmbeddingsActive, type IndexDocument } from './indexer'
+import { hatSeitenbilder, seitenzahl } from './seitenbilder'
 
 /**
  * Baut die indizierbaren Abschnitte einer Entität.
@@ -35,8 +37,22 @@ interface MaterialIndexRow {
   competencies: string[]
   groups: string[]
   gradeLevels: GradeLevel[]
-  assets: { label: string; text: string | null }[]
+  assets: {
+    id: string
+    label: string
+    text: string | null
+    kind: string
+    storageKey: string | null
+    mimeType: string | null
+    fileName: string | null
+    checksum: string | null
+    pageCount: number | null
+  }[]
 }
+
+/** Obergrenzen für Seitenbilder – lange Dokumente sind meist Sammelbände, keine Arbeitsblätter. */
+const MAX_SEITENBILDER_JE_DATEI = 10
+const MAX_SEITENBILDER_JE_MATERIAL = 30
 
 export async function buildMaterialDocuments(
   materialId: string,
@@ -61,8 +77,15 @@ export async function buildMaterialDocuments(
         from material_grade_levels mgl where mgl.material_id = m.id), '{}') as "gradeLevels",
       coalesce((
         select json_agg(json_build_object(
+          'id', a.id,
           'label', coalesce(a.title, a.file_name, a.url),
-          'text', a.extracted_text
+          'text', a.extracted_text,
+          'kind', a.kind,
+          'storageKey', a.storage_key,
+          'mimeType', a.mime_type,
+          'fileName', a.file_name,
+          'checksum', a.checksum,
+          'pageCount', a.page_count
         ) order by v.sort_order, a.sort_order)
         from material_variants v join material_assets a on a.variant_id = v.id
         where v.material_id = m.id
@@ -130,6 +153,35 @@ export async function buildMaterialDocuments(
     }
   }
 
+  if (imageEmbeddingsActive(await getAiSettings())) {
+    documents.push(...(await seitenbildDokumente(row, metaText)))
+  }
+
+  return documents
+}
+
+/**
+ * Ein Abschnitt je Seite von PDFs, Office-Dateien und Bildern. Der Vektor
+ * entsteht später aus dem gerenderten Seitenbild – so werden auch Abbildungen,
+ * Diagramme und Scans auffindbar, die im extrahierten Text fehlen.
+ */
+async function seitenbildDokumente(row: MaterialIndexRow, metaText: string): Promise<IndexDocument[]> {
+  const documents: IndexDocument[] = []
+  for (const asset of row.assets ?? []) {
+    if (!hatSeitenbilder(asset)) continue
+    const seiten = Math.min(await seitenzahl(asset.id, asset), MAX_SEITENBILDER_JE_DATEI)
+    for (let page = 1; page <= seiten; page++) {
+      if (documents.length >= MAX_SEITENBILDER_JE_MATERIAL) return documents
+      documents.push({
+        chunkIndex: IMAGE_CHUNK_START + documents.length,
+        title: row.title,
+        metaText,
+        content: '',
+        sourceLabel: seiten > 1 ? `${asset.label}, Seite ${page}` : asset.label,
+        imageSource: { assetId: asset.id, page, checksum: asset.checksum },
+      })
+    }
+  }
   return documents
 }
 

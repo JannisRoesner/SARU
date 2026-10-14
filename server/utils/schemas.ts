@@ -414,6 +414,7 @@ export const aiSettingsSchema = z
     embeddingsEnabled: z.boolean(),
     embeddingModel: z.string().max(200),
     vectorOnlySearch: z.boolean(),
+    embedImages: z.boolean(),
     temperature: z.coerce.number().min(0).max(2),
     maxOutputTokens: z.coerce.number().int().min(256).max(32_000),
     timeoutMs: z.coerce.number().int().min(5000).max(600_000),

@@ -9,7 +9,7 @@ Selbst gehostetes Archiv für Unterrichtsreihen, Stunden und Materialien – mit
 - Materialien mit Varianten, Dateianhängen (PDF, Office), Moodle-Kursarchiven (.mbz / .imscc), H5P-Paketen, Tags und Bewertungen
 - Stapel-Upload: PDF, Office und ZIP-Pakete gemeinsam hochladen, Paare (Arbeitsblatt + Lösung) prüfen und optional mit KI-Vorschlägen anlegen
 - Unterrichtsstunden und Reihen mit Phasen und Materialzuordnung
-- Hybride Suche (Volltext, Ähnlichkeitssuche, optional Vektorsuche)
+- Hybride Suche (Volltext, Ähnlichkeitssuche, optional Vektorsuche – mit multimodalen Embedding-Modellen wie EmbeddingGemma 2 auch über Seitenbilder von Arbeitsblättern)
 - Import von Schulportal-Kursmappen
 - KI-Musterlösungen aus PDF- und Office-Dateien — klar als KI gekennzeichnet, mit Ausgangsmaterial verknüpft
 - Moodle-Kursarchive zum Ablegen für Wiederherstellung im SchulMoodle (Archiv-Upload, kein Moodle-API-Import)
