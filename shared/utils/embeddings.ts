@@ -36,3 +36,61 @@ export function getEmbeddingModelWarning(provider: AiProvider, model: string): s
 
   return `„${trimmed}“ ist ein OpenAI-Modell und bei Ollama nicht verfügbar. Empfehlung: ${OLLAMA_EMBEDDING_MODEL} (ollama pull ${OLLAMA_EMBEDDING_MODEL}). Bestehende Vektoren sollten nach dem Wechsel neu erzeugt werden.`
 }
+
+/**
+ * Manche Embedding-Modelle sind auf Aufgaben-Präfixe trainiert und liefern ohne
+ * sie deutlich schlechtere Suchergebnisse – vor allem bei kurzen Anfragen.
+ */
+interface PromptFormat {
+  /** Erhöhen, wenn sich das Format ändert – gespeicherte Vektoren werden dann neu berechnet. */
+  version: number
+  query: (text: string) => string
+  document: (title: string, text: string) => string
+}
+
+const PROMPT_FORMATS: { pattern: RegExp; format: PromptFormat }[] = [
+  {
+    // https://ai.google.dev/gemma/docs/embeddinggemma/model_card#prompt-instructions
+    // EmbeddingGemma 2 nutzt dasselbe Format: https://huggingface.co/google/embeddinggemma-2
+    pattern: /embeddinggemma/i,
+    format: {
+      version: 1,
+      query: (text) => `task: search result | query: ${text}`,
+      document: (title, text) => `title: ${title.trim() || 'none'} | text: ${text}`,
+    },
+  },
+  {
+    // Qwen3-Embedding erwartet die Anweisung nur bei Anfragen, Dokumente bleiben unverändert.
+    pattern: /qwen3-embedding/i,
+    format: {
+      version: 1,
+      query: (text) =>
+        `Instruct: Given a search query, retrieve relevant German teaching materials\nQuery:${text}`,
+      document: (title, text) => [title, text].filter(Boolean).join('\n'),
+    },
+  },
+]
+
+function promptFormat(model: string): PromptFormat | null {
+  return PROMPT_FORMATS.find((entry) => entry.pattern.test(model))?.format ?? null
+}
+
+/** Bereitet eine Suchanfrage für das Embedding-Modell vor. */
+export function embeddingQueryInput(model: string, query: string): string {
+  return promptFormat(model)?.query(query) ?? query
+}
+
+/** Bereitet einen Index-Abschnitt (Titel + Text) für das Embedding-Modell vor. */
+export function embeddingDocumentInput(model: string, title: string, text: string): string {
+  const format = promptFormat(model)
+  return format ? format.document(title, text) : [title, text].filter(Boolean).join('\n')
+}
+
+/**
+ * Kennung, unter der Vektoren gespeichert werden. Enthält die Version des
+ * Prompt-Formats, damit Vektoren mit und ohne Präfix nie vermischt werden.
+ */
+export function embeddingIndexKey(model: string): string {
+  const format = promptFormat(model)
+  return format ? `${model} [Prompt v${format.version}]` : model
+}

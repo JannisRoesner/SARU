@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  embeddingDocumentInput,
+  embeddingIndexKey,
+  embeddingQueryInput,
   getEmbeddingModelWarning,
   isOpenAiEmbeddingModel,
   OLLAMA_EMBEDDING_MODEL,
@@ -19,6 +22,25 @@ describe('embeddings', () => {
     expect(resolveEmbeddingModel('ollama', 'nomic-embed-text')).toBe('nomic-embed-text')
     expect(resolveEmbeddingModel('ollama', '')).toBe(OLLAMA_EMBEDDING_MODEL)
     expect(resolveEmbeddingModel('openai', 'text-embedding-3-small')).toBe('text-embedding-3-small')
+  })
+
+  it('setzt für EmbeddingGemma die Aufgaben-Präfixe', () => {
+    expect(embeddingQueryInput('embeddinggemma2:latest', 'Essen')).toBe('task: search result | query: Essen')
+    expect(embeddingDocumentInput('embeddinggemma', 'Zwiebelzellen', 'Mitose')).toBe(
+      'title: Zwiebelzellen | text: Mitose',
+    )
+    expect(embeddingDocumentInput('embeddinggemma', '', 'Mitose')).toBe('title: none | text: Mitose')
+  })
+
+  it('setzt für Qwen3-Embedding nur bei Anfragen eine Anweisung', () => {
+    expect(embeddingQueryInput('qwen3-embedding:8b', 'Essen')).toMatch(/^Instruct: .*\nQuery:Essen$/)
+    expect(embeddingDocumentInput('qwen3-embedding:8b', 'Titel', 'Text')).toBe('Titel\nText')
+  })
+
+  it('lässt unbekannte Modelle unverändert und trennt Vektoren mit Präfix per Kennung', () => {
+    expect(embeddingQueryInput('nomic-embed-text', 'Essen')).toBe('Essen')
+    expect(embeddingIndexKey('nomic-embed-text')).toBe('nomic-embed-text')
+    expect(embeddingIndexKey('embeddinggemma')).toBe('embeddinggemma [Prompt v1]')
   })
 
   it('liefert einen Hinweis bei inkompatiblem Ollama-Modell', () => {

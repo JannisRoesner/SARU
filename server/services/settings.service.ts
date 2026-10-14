@@ -32,6 +32,8 @@ export interface AiSettings {
   useVision: boolean
   embeddingsEnabled: boolean
   embeddingModel: string
+  /** Suche ausschließlich semantisch statt kombiniert mit der Volltextsuche. */
+  vectorOnlySearch: boolean
   temperature: number
   maxOutputTokens: number
   timeoutMs: number
@@ -90,6 +92,7 @@ export const defaultAiSettings: AiSettings = {
   useVision: true,
   embeddingsEnabled: false,
   embeddingModel: PROVIDER_MODEL_HINTS.ollama.embeddingModel,
+  vectorOnlySearch: false,
   temperature: 0.2,
   maxOutputTokens: 4000,
   timeoutMs: 180_000,
