@@ -67,6 +67,27 @@ function zipHerunterladen() {
 function herunterladen(assetId: string) {
   window.open(`${basis.value}/${assetId}/download`, '_blank')
 }
+
+const istLehrwerk = computed(() => props.material.materialType === 'lehrwerk')
+
+type Fassung = GastMaterial['fassungen'][number]
+type Datei = Fassung['dateien'][number]
+
+/** Anzeigename: eigener Titel, sonst trägt die einzige Hauptdatei den Materialtitel, sonst der Dateiname. */
+function dateiTitel(datei: Datei, fassung: Fassung) {
+  if (datei.title) return datei.title
+  const haupt = fassung.dateien.filter((d) => d.role === 'haupt')
+  if (datei.role === 'haupt' && haupt.length === 1) return props.material.title
+  return datei.fileName || datei.url || 'Datei'
+}
+
+/** Zweite Zeile: Dateiname (falls nicht schon Titel) und Größe. */
+function dateiInfo(datei: Datei, fassung: Fassung) {
+  const name = datei.fileName || datei.url
+  return [name !== dateiTitel(datei, fassung) && name, datei.sizeBytes && formatBytes(datei.sizeBytes)]
+    .filter(Boolean)
+    .join(' · ')
+}
 </script>
 
 <template>
@@ -98,6 +119,16 @@ function herunterladen(assetId: string) {
         <UiBadge v-for="fach in material.subjects" :key="fach">{{ fach }}</UiBadge>
         <UiBadge v-if="material.gradeLevels.length">{{ formatJahrgaenge(material.gradeLevels as never) }}</UiBadge>
         <UiBadge v-if="material.source" icon="quote-left">{{ material.source }}</UiBadge>
+      </div>
+      <div v-if="istLehrwerk" class="mt-4">
+        <UiButton
+          variante="primaer"
+          icon="file-zipper"
+          title="Schulbuch, Serviceband, Versuche, Arbeitsblätter, Lernzirkel … in Ordnern als ZIP"
+          @click="zipHerunterladen"
+        >
+          Komplettes Lehrwerk herunterladen (ZIP)
+        </UiButton>
       </div>
     </div>
 
@@ -140,8 +171,9 @@ function herunterladen(assetId: string) {
     <UiCard
       v-for="fassung in material.fassungen.filter((f) => f.dateien.length || darfBearbeiten)"
       :key="fassung.id"
-      :titel="material.fassungen.length > 1 ? fassung.label : 'Dateien'"
-      icon="file-lines"
+      :titel="material.fassungen.length > 1 ? fassung.label : istLehrwerk ? 'Schulbuch' : 'Dateien'"
+      :untertitel="istLehrwerk ? 'Buchdatei' : undefined"
+      :icon="istLehrwerk ? 'book' : 'file-lines'"
       einklappbar
       :einklapp-id="`geteilt-material-dateien-${fassung.id}`"
     >
@@ -153,12 +185,19 @@ function herunterladen(assetId: string) {
             :asset-id="datei.id"
             :file-name="datei.fileName"
             :mime-type="datei.mimeType"
+            :material-type="material.materialType"
             :api-basis="basis"
             groesse="sm"
           />
           <span class="min-w-0 flex-1">
-            <span class="line-clamp-2 font-medium break-all text-ink">{{ datei.title || datei.fileName || datei.url }}</span>
-            <span v-if="datei.sizeBytes" class="text-xs text-ink-subtle">{{ formatBytes(datei.sizeBytes) }}</span>
+            <span class="line-clamp-2 font-medium break-words text-ink">{{ dateiTitel(datei, fassung) }}</span>
+            <span
+              v-if="dateiInfo(datei, fassung)"
+              class="block truncate text-xs text-ink-subtle"
+              :title="datei.fileName || datei.url || undefined"
+            >
+              {{ dateiInfo(datei, fassung) }}
+            </span>
           </span>
           <template v-if="datei.kind === 'datei'">
             <div class="flex shrink-0 gap-1.5">

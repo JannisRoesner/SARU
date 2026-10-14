@@ -1,6 +1,7 @@
 import { once } from 'node:events'
 import { PassThrough } from 'node:stream'
-import { and, asc, desc, eq, inArray } from 'drizzle-orm'
+import { gruppiereLehrwerkInhalt } from '#shared/utils/lehrwerk'
+import { and, asc, desc, eq, inArray, or } from 'drizzle-orm'
 import { Zip, ZipPassThrough } from 'fflate'
 import { useDatabase } from '../database/client'
 import { materialAssets, materialRelations, materials, materialVariants } from '../database/schema'
@@ -96,6 +97,179 @@ export async function sammleZipEintraege(
       const name = sanitizeFileName(zeile.fileName ?? zeile.materialTitel) || 'datei'
       eintraege.push({ name: eindeutigerName(`${gruppe.ordner}${name}`, belegt), storageKey: zeile.storageKey })
     }
+  }
+
+  return eintraege
+}
+
+/** Ordner- bzw. Dateiname aus einem Titel – ohne Pfadtrenner und unzulässige Zeichen. */
+function pfadTeil(titel: string): string {
+  return sanitizeFileName(titel.replace(/[/\\]+/g, ' ')).replace(/[. ]+$/, '') || 'Material'
+}
+
+function endungVon(fileName: string | null): string {
+  const punkt = fileName?.lastIndexOf('.') ?? -1
+  return fileName && punkt > 0 ? fileName.slice(punkt) : ''
+}
+
+/**
+ * Ein komplettes Lehrwerk in Ordnern: Schulbuch, dann je Lehrwerk-Gruppe (Serviceband,
+ * Versuche, Kopiervorlagen …) ein nummerierter Ordner. Dateien tragen den Materialtitel;
+ * Materialien mit mehreren Dateien, Stationen oder Lösungen bekommen einen eigenen Ordner,
+ * Lösungen liegen dort in „Lösungen“.
+ */
+export async function sammleLehrwerkZipEintraege(
+  lehrwerkId: string,
+  /** Optionale Obergrenze, z. B. der Umfang eines Freigabe-Links. */
+  erlaubt?: ReadonlySet<string>,
+): Promise<ZipEintrag[]> {
+  const db = useDatabase()
+  const darf = (id: string) => !erlaubt || erlaubt.has(id)
+
+  // Zugeordnete Materialien und – ein paar Ebenen tief – deren Stationen und Lösungen.
+  const kinder = new Map<string, string[]>()
+  const loesungen = new Map<string, string[]>()
+  const anhaengen = (map: Map<string, string[]>, von: string, zu: string) => {
+    if (!darf(zu)) return
+    map.set(von, [...(map.get(von) ?? []), zu])
+  }
+
+  const direkt = await db
+    .select({ id: materialRelations.fromMaterialId })
+    .from(materialRelations)
+    .where(and(eq(materialRelations.toMaterialId, lehrwerkId), eq(materialRelations.relationType, 'gehoert_zu')))
+  const direkteIds = [...new Set(direkt.map((k) => k.id))].filter((id) => id !== lehrwerkId && darf(id))
+
+  const bekannt = new Set<string>([lehrwerkId, ...direkteIds])
+  let ebene = direkteIds
+  for (let tiefe = 0; tiefe < 3 && ebene.length; tiefe += 1) {
+    const zeilen = await db
+      .select({
+        von: materialRelations.fromMaterialId,
+        zu: materialRelations.toMaterialId,
+        typ: materialRelations.relationType,
+      })
+      .from(materialRelations)
+      .where(
+        or(
+          and(inArray(materialRelations.toMaterialId, ebene), eq(materialRelations.relationType, 'gehoert_zu')),
+          and(
+            inArray(materialRelations.fromMaterialId, ebene),
+            inArray(materialRelations.relationType, ['musterloesung', 'loesung']),
+          ),
+        ),
+      )
+    const naechste: string[] = []
+    for (const z of zeilen) {
+      const [eltern, kind, map] = z.typ === 'gehoert_zu' ? [z.zu, z.von, kinder] : [z.von, z.zu, loesungen]
+      if (kind === lehrwerkId || kind === eltern) continue
+      anhaengen(map, eltern, kind)
+      if (!bekannt.has(kind) && darf(kind)) {
+        bekannt.add(kind)
+        naechste.push(kind)
+      }
+    }
+    ebene = naechste
+  }
+
+  const ids = [...bekannt]
+  const infos = new Map(
+    (
+      await db
+        .select({ id: materials.id, title: materials.title, materialType: materials.materialType })
+        .from(materials)
+        .where(inArray(materials.id, ids))
+    ).map((m) => [m.id, m]),
+  )
+  const dateien = new Map<string, Array<{ fileName: string | null; storageKey: string }>>()
+  const dateiZeilen = await db
+    .select({
+      materialId: materials.id,
+      fileName: materialAssets.fileName,
+      storageKey: materialAssets.storageKey,
+    })
+    .from(materialAssets)
+    .innerJoin(materialVariants, eq(materialAssets.variantId, materialVariants.id))
+    .innerJoin(materials, eq(materialVariants.materialId, materials.id))
+    .where(and(inArray(materials.id, ids), eq(materialAssets.kind, 'datei')))
+    .orderBy(
+      desc(materialVariants.isDefault),
+      asc(materialVariants.sortOrder),
+      asc(materialAssets.role),
+      asc(materialAssets.sortOrder),
+    )
+  for (const d of dateiZeilen) {
+    if (!d.storageKey) continue
+    dateien.set(d.materialId, [...(dateien.get(d.materialId) ?? []), { fileName: d.fileName, storageKey: d.storageKey }])
+  }
+
+  const nachTitel = (a: string, b: string) =>
+    (infos.get(a)?.title ?? '').localeCompare(infos.get(b)?.title ?? '', 'de', { numeric: true })
+
+  const belegt = new Set<string>()
+  const eintraege: ZipEintrag[] = []
+  const platziert = new Set<string>([lehrwerkId])
+
+  function ablegen(id: string, ordner: string) {
+    if (platziert.has(id)) return
+    platziert.add(id)
+    const titel = pfadTeil(infos.get(id)?.title ?? 'Material')
+    const eigene = dateien.get(id) ?? []
+    const stationen = (kinder.get(id) ?? []).filter((k) => !platziert.has(k)).sort(nachTitel)
+    const loes = (loesungen.get(id) ?? []).filter((l) => !platziert.has(l)).sort(nachTitel)
+    const einzeln = eigene.length === 1 && !stationen.length && !loes.length
+    const ziel = einzeln ? ordner : `${ordner}${titel}/`
+
+    for (const datei of eigene) {
+      const name =
+        eigene.length === 1 ? `${titel}${endungVon(datei.fileName)}` : sanitizeFileName(datei.fileName ?? titel)
+      eintraege.push({ name: eindeutigerName(`${ziel}${name}`, belegt), storageKey: datei.storageKey })
+    }
+    for (const station of stationen) ablegen(station, ziel)
+    for (const loesung of loes) ablegen(loesung, `${ziel}Lösungen/`)
+  }
+
+  // Das Buch selbst.
+  const buch = dateien.get(lehrwerkId) ?? []
+  const buchTitel = pfadTeil(infos.get(lehrwerkId)?.title ?? 'Schulbuch')
+  for (const datei of buch) {
+    const name = buch.length === 1 ? `${buchTitel}${endungVon(datei.fileName)}` : sanitizeFileName(datei.fileName ?? buchTitel)
+    eintraege.push({ name: eindeutigerName(`01 Schulbuch/${name}`, belegt), storageKey: datei.storageKey })
+  }
+
+  // Was schon unter einem anderen zugeordneten Material hängt (Station, Lösung), steht nicht doppelt oben.
+  const untergeordnet = new Set<string>()
+  for (const id of direkteIds) {
+    for (const k of [...(kinder.get(id) ?? []), ...(loesungen.get(id) ?? [])]) if (k !== id) untergeordnet.add(k)
+  }
+  const oben = direkteIds.filter((id) => !untergeordnet.has(id))
+  const rest = direkteIds.filter((id) => untergeordnet.has(id))
+
+  const gruppen = gruppiereLehrwerkInhalt(
+    [...oben, ...rest].sort(nachTitel).map((id) => ({
+      id,
+      materialType: infos.get(id)?.materialType ?? '',
+      title: infos.get(id)?.title ?? '',
+    })),
+  )
+  // Platzhalter je Gruppe; nummeriert wird am Ende nur, was wirklich Dateien enthält.
+  const platzhalter = (index: number) => `\u0000${index}/`
+  // Erst eigenständige Materialien (damit Lösungen bei ihrem Arbeitsblatt landen), dann der Rest.
+  for (const nurOben of [true, false]) {
+    gruppen.forEach((gruppe, index) => {
+      for (const m of gruppe.eintraege) if (untergeordnet.has(m.id) !== nurOben) ablegen(m.id, platzhalter(index))
+    })
+  }
+
+  let nummer = buch.length ? 2 : 1
+  const ordner = new Map<string, string>()
+  gruppen.forEach((gruppe, index) => {
+    if (!eintraege.some((e) => e.name.startsWith(platzhalter(index)))) return
+    ordner.set(platzhalter(index), `${String(nummer++).padStart(2, '0')} ${pfadTeil(gruppe.label.replace(/&/g, 'und'))}/`)
+  })
+  for (const e of eintraege) {
+    const praefix = e.name.match(/^\0\d+\//)?.[0]
+    if (praefix) e.name = `${ordner.get(praefix)}${e.name.slice(praefix.length)}`
   }
 
   return eintraege

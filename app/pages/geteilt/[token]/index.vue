@@ -71,35 +71,43 @@ async function inLehrwerkHochladen(files: FileList | null) {
         <GeteiltMaterial :token="token" :material="data.material" :recht="data.recht" @geaendert="refresh()" />
 
         <section v-if="data.inhalt" class="mt-8 space-y-4">
-          <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <div class="flex flex-col gap-3 border-b border-line pb-4 md:flex-row md:items-center">
             <div class="flex-1">
-              <h2 class="text-lg font-semibold text-ink">
-                Inhalt des Lehrwerks
+              <h2 class="flex items-center gap-2 text-lg font-semibold text-ink">
+                <UiIcon name="layer-group" class="text-primary" fest /> Inhalt des Lehrwerks
               </h2>
               <p class="text-sm text-ink-muted">
                 {{ data.inhalt.length }} {{ data.inhalt.length === 1 ? 'Material' : 'Materialien' }}
+                zum Schulbuch
               </p>
             </div>
-            <UiInput v-model="suche" icon="magnifying-glass" placeholder="Lehrwerk durchsuchen …" class="sm:w-72" />
-            <template v-if="data.recht === 'bearbeiten'">
-              <input ref="uploadInput" type="file" multiple class="sr-only" @change="inLehrwerkHochladen(($event.target as HTMLInputElement).files)">
-              <UiButton variante="primaer" icon="cloud-arrow-up" :laedt="laeuft" @click="uploadInput?.click()">
-                Material hochladen
-              </UiButton>
-            </template>
+            <div class="flex items-center gap-2">
+              <UiInput
+                v-model="suche"
+                icon="magnifying-glass"
+                placeholder="Inhalt durchsuchen …"
+                aria-label="Inhalt des Lehrwerks durchsuchen"
+                class="min-w-0 flex-1 md:w-72"
+              />
+              <UiButton
+                v-if="gruppen.length > 1 && !suchtGerade"
+                variante="sekundaer"
+                :icon="alleZugeklappt ? 'angles-down' : 'angles-up'"
+                nur-icon
+                :title="alleZugeklappt ? 'Alle ausklappen' : 'Alle einklappen'"
+                :aria-label="alleZugeklappt ? 'Alle ausklappen' : 'Alle einklappen'"
+                @click="alleUmschalten"
+              />
+              <template v-if="data.recht === 'bearbeiten'">
+                <input ref="uploadInput" type="file" multiple class="sr-only" @change="inLehrwerkHochladen(($event.target as HTMLInputElement).files)">
+                <UiButton variante="primaer" icon="cloud-arrow-up" :laedt="laeuft" title="Material hochladen" @click="uploadInput?.click()">
+                  <span class="hidden sm:inline">Hochladen</span>
+                </UiButton>
+              </template>
+            </div>
           </div>
 
           <p v-if="!gruppen.length" class="text-sm text-ink-subtle">Keine Treffer.</p>
-          <div v-if="gruppen.length > 1 && !suchtGerade" class="flex justify-end">
-            <UiButton
-              variante="still"
-              groesse="sm"
-              :icon="alleZugeklappt ? 'angles-down' : 'angles-up'"
-              @click="alleUmschalten"
-            >
-              {{ alleZugeklappt ? 'Alle ausklappen' : 'Alle einklappen' }}
-            </UiButton>
-          </div>
 
           <section v-for="gruppe in gruppen" :key="gruppe.id" class="space-y-2">
             <h3 class="text-sm font-semibold text-ink">

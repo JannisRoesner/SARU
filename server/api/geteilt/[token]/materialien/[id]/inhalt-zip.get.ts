@@ -1,11 +1,14 @@
 import { getMaterialDetail } from '../../../../../repositories/material.repository'
-import { sammleZipEintraege, zipStream } from '../../../../../services/material-zip.service'
+import { sammleLehrwerkZipEintraege, sammleZipEintraege, zipStream } from '../../../../../services/material-zip.service'
 import { assertMaterialImUmfang } from '../../../../../services/share.service'
 import { gastZugriff } from '../../../../../utils/gast'
 import { notFound } from '../../../../../utils/errors'
 import { parseOrThrow, uuidSchema } from '../../../../../utils/validation'
 
-/** Alle Dateien eines geteilten Materials und seiner zugeordneten Materialien (inkl. Lösungen) als ZIP. */
+/**
+ * Alle Dateien eines geteilten Materials und seiner zugeordneten Materialien (inkl. Lösungen) als ZIP.
+ * Ein Lehrwerk kommt komplett in Ordnern (Schulbuch, Serviceband, Versuche …).
+ */
 export default defineEventHandler(async (event) => {
   const umfang = await gastZugriff(event)
   const id = parseOrThrow(uuidSchema, getRouterParam(event, 'id'))
@@ -15,7 +18,10 @@ export default defineEventHandler(async (event) => {
   if (!detail) throw notFound('Das Material')
 
   // Der Umfang des Links ist die Obergrenze: nur Materialien, die er freigibt.
-  const eintraege = await sammleZipEintraege(id, umfang.materialIds)
+  const eintraege =
+    detail.materialType === 'lehrwerk'
+      ? await sammleLehrwerkZipEintraege(id, umfang.materialIds)
+      : await sammleZipEintraege(id, umfang.materialIds)
   if (!eintraege.length) throw notFound('Die Dateien')
 
   const dateiName = `${detail.title.replace(/[\\/:*?"<>|\r\n]+/g, ' ').trim() || 'Material'}.zip`
