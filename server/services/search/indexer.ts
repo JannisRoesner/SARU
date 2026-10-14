@@ -1,5 +1,5 @@
 import { and, eq, isNull, or, sql } from 'drizzle-orm'
-import { resolveEmbeddingModel } from '#shared/utils/embeddings'
+import { embeddingDocumentInput, embeddingIndexKey, resolveEmbeddingModel } from '#shared/utils/embeddings'
 import { useDatabase, type Database } from '../../database/client'
 import { EMBEDDING_DIMENSIONS, searchDocuments } from '../../database/schema'
 import { sha256 } from '../../utils/crypto'
@@ -249,10 +249,10 @@ let embedding = false
 
 const EMBED_BATCH_SIZE = 32
 
-/** Modellname, unter dem Vektoren gespeichert und gesucht werden (null = Vektorsuche aus). */
+/** Kennung, unter der Vektoren gespeichert und gesucht werden (null = Vektorsuche aus). */
 export function activeEmbeddingModel(settings: AiSettings): string | null {
   if (!settings.enabled || !settings.embeddingsEnabled || !settings.embeddingModel) return null
-  return resolveEmbeddingModel(settings.provider, settings.embeddingModel)
+  return embeddingIndexKey(resolveEmbeddingModel(settings.provider, settings.embeddingModel))
 }
 
 /**
@@ -265,6 +265,7 @@ async function embedBatch(limit: number): Promise<number | null> {
   const settings = await getAiSettings()
   const model = activeEmbeddingModel(settings)
   if (!model) return 0
+  const modelName = resolveEmbeddingModel(settings.provider, settings.embeddingModel)
 
   embedding = true
   try {
@@ -288,7 +289,11 @@ async function embedBatch(limit: number): Promise<number | null> {
     if (rows.length === 0) return 0
 
     const inputs = rows.map((row) =>
-      [row.title, row.metaText, row.content].filter(Boolean).join('\n').slice(0, 8000),
+      embeddingDocumentInput(
+        modelName,
+        row.title,
+        [row.metaText, row.content].filter(Boolean).join('\n'),
+      ).slice(0, 8000),
     )
     const vectors = await createEmbeddings(settings, inputs, EMBEDDING_DIMENSIONS)
 

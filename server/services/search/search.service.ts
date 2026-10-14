@@ -1,10 +1,10 @@
-import { resolveEmbeddingModel } from '#shared/utils/embeddings'
+import { embeddingIndexKey, embeddingQueryInput, resolveEmbeddingModel } from '#shared/utils/embeddings'
 import { sql } from 'drizzle-orm'
 import { queryRows, useDatabase, type Database } from '../../database/client'
 import { EMBEDDING_DIMENSIONS } from '../../database/schema'
 import { createLogger } from '../../utils/logger'
 import { createEmbeddings } from '../ai/client'
-import { getAiSettings } from '../settings.service'
+import { getAiSettings, type AiSettings } from '../settings.service'
 import type { IndexEntityType } from './indexer'
 
 const log = createLogger('search')
@@ -49,22 +49,36 @@ const EMPTY_OUTCOME: SearchOutcome = {
 const WEIGHTS = { fts: 1, trigram: 0.5, vector: 0.9 }
 /** Dämpfungskonstante der RRF – üblich ist 60. */
 const RRF_K = 60
+/**
+ * Zusätzliches Gewicht für Vektortreffer, die deutlich ähnlicher sind als der
+ * Durchschnitt der Kandidaten. Der beste Vektortreffer zählt so bis zu dreifach,
+ * damit klar passende Inhalte nicht hinter bloßen Wortübereinstimmungen landen.
+ */
+const VECTOR_BOOST = 2
 
 /** Kleiner Zwischenspeicher für Anfragevektoren, damit Tippen nicht jedes Mal kostet. */
 const embeddingCache = new Map<string, { vector: number[]; model: string }>()
 const EMBEDDING_CACHE_MAX = 200
 
-async function embedQuery(query: string): Promise<{ vector: number[]; model: string } | null> {
-  const settings = await getAiSettings()
+async function embedQuery(
+  settings: AiSettings,
+  query: string,
+): Promise<{ vector: number[]; model: string } | null> {
   if (!settings.enabled || !settings.embeddingsEnabled || !settings.embeddingModel) return null
 
-  const model = resolveEmbeddingModel(settings.provider, settings.embeddingModel)
+  const modelName = resolveEmbeddingModel(settings.provider, settings.embeddingModel)
+  // Muss zur Kennung passen, unter der der Indexer die Vektoren speichert.
+  const model = embeddingIndexKey(modelName)
   const key = `${model}:${query}`
   const cached = embeddingCache.get(key)
   if (cached) return cached
 
   try {
-    const [vector] = await createEmbeddings(settings, [query], EMBEDDING_DIMENSIONS)
+    const [vector] = await createEmbeddings(
+      settings,
+      [embeddingQueryInput(modelName, query)],
+      EMBEDDING_DIMENSIONS,
+    )
     if (!vector) return null
 
     if (embeddingCache.size >= EMBEDDING_CACHE_MAX) {
@@ -108,10 +122,14 @@ export async function search(
     ? options.entityTypes
     : (['material', 'unterrichtsstunde', 'reihe'] as IndexEntityType[])
 
-  const queryEmbedding = options.skipVector ? null : await embedQuery(trimmed)
+  const settings = await getAiSettings()
+  const queryEmbedding = options.skipVector ? null : await embedQuery(settings, trimmed)
   const queryVector = queryEmbedding?.vector ?? null
   const vectorLiteral = queryVector ? `[${queryVector.join(',')}]` : null
   const vectorModel = queryEmbedding?.model ?? null
+  // Ohne Anfragevektor (Modell nicht erreichbar, Autovervollständigung) bleibt
+  // die Volltextsuche auch im reinen Vektormodus aktiv, damit die Suche nie leer läuft.
+  const lexical = !(settings.vectorOnlySearch && queryVector)
 
   const rows = await queryRows<RawHit>(db, 
     sql`
@@ -130,7 +148,7 @@ export async function search(
         max(ts_rank_cd(d.tsv, p.tsq)) as score,
         (array_agg(d.id order by ts_rank_cd(d.tsv, p.tsq) desc))[1] as best_document
       from search_documents d, parameter p
-      where d.entity_type = any(p.types) and d.tsv @@ p.tsq
+      where ${lexical}::boolean and d.entity_type = any(p.types) and d.tsv @@ p.tsq
       group by d.entity_type, d.entity_id
       order by score desc
       limit ${limit}
@@ -141,7 +159,7 @@ export async function search(
         max(similarity(d.title, p.raw)) as score,
         (array_agg(d.id order by similarity(d.title, p.raw) desc))[1] as best_document
       from search_documents d, parameter p
-      where d.entity_type = any(p.types) and d.chunk_index = 0
+      where ${lexical}::boolean and d.entity_type = any(p.types) and d.chunk_index = 0
         and similarity(d.title, p.raw) > 0.15
       group by d.entity_type, d.entity_id
       order by score desc
@@ -161,19 +179,30 @@ export async function search(
       order by score desc
       limit ${limit}
     ),
+    -- Wie deutlich ein Vektortreffer über dem Durchschnitt der Kandidaten liegt (0 … 1).
+    -- Quadriert, damit nur wirklich starke Treffer nennenswert profitieren.
+    vector_strength as (
+      select entity_type, entity_id, best_document, score,
+        case when max(score) over w > avg(score) over w
+          then power(greatest(0, (score - avg(score) over w) / (max(score) over w - avg(score) over w)), 2)
+          else 0
+        end as strength
+      from vector
+      window w as (partition by entity_type)
+    ),
     ranked as (
       select entity_type, entity_id, best_document,
         rank() over (partition by entity_type order by score desc) as position,
-        'fts' as source
+        'fts' as source, 0::float8 as strength
       from fts
       union all
       select entity_type, entity_id, best_document,
-        rank() over (partition by entity_type order by score desc), 'trigram'
+        rank() over (partition by entity_type order by score desc), 'trigram', 0::float8
       from trigram
       union all
       select entity_type, entity_id, best_document,
-        rank() over (partition by entity_type order by score desc), 'vector'
-      from vector
+        rank() over (partition by entity_type order by score desc), 'vector', strength::float8
+      from vector_strength
     ),
     fused as (
       select entity_type, entity_id,
@@ -181,7 +210,7 @@ export async function search(
           case source
             when 'fts' then ${WEIGHTS.fts}::float8
             when 'trigram' then ${WEIGHTS.trigram}::float8
-            else ${WEIGHTS.vector}::float8
+            else ${WEIGHTS.vector}::float8 * (1 + ${VECTOR_BOOST}::float8 * strength)
           end / (${RRF_K}::float8 + position)
         ) as score,
         min(case when source = 'fts' then position end) as fts_rank,

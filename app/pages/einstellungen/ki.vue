@@ -32,6 +32,7 @@ const { data, refresh } = await useFetch<{
     useVision: boolean
     embeddingsEnabled: boolean
     embeddingModel: string
+    vectorOnlySearch: boolean
     embeddingModelEffektiv?: string
     embeddingModelWarnung?: string | null
     temperature: number
@@ -56,6 +57,7 @@ const formular = reactive({
   useVision: true,
   embeddingsEnabled: false,
   embeddingModel: '',
+  vectorOnlySearch: false,
   temperature: 0.2,
   maxOutputTokens: 4096,
   timeoutMs: 180000,
@@ -401,6 +403,15 @@ async function testen() {
           <label class="flex items-center gap-2">
             <input v-model="formular.embeddingsEnabled" type="checkbox" class="accent-[var(--color-primary)]">
             Embeddings / Vektorsuche
+          </label>
+          <label class="flex items-center gap-2" :class="{ 'opacity-50': !formular.embeddingsEnabled }">
+            <input
+              v-model="formular.vectorOnlySearch"
+              type="checkbox"
+              class="accent-[var(--color-primary)]"
+              :disabled="!formular.embeddingsEnabled"
+            >
+            Nur Vektorsuche (ohne Volltext)
           </label>
         </div>
 
