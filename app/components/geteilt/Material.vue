@@ -157,17 +157,28 @@ function herunterladen(assetId: string) {
             groesse="sm"
           />
           <span class="min-w-0 flex-1">
-            <span class="block truncate font-medium text-ink">{{ datei.title || datei.fileName || datei.url }}</span>
+            <span class="line-clamp-2 font-medium break-all text-ink">{{ datei.title || datei.fileName || datei.url }}</span>
             <span v-if="datei.sizeBytes" class="text-xs text-ink-subtle">{{ formatBytes(datei.sizeBytes) }}</span>
           </span>
           <template v-if="datei.kind === 'datei'">
-            <UiButton variante="sekundaer" groesse="sm" icon="eye" @click="vorschauId = datei.id">Ansehen</UiButton>
-            <UiButton variante="sekundaer" groesse="sm" icon="download" @click="herunterladen(datei.id)">
-              Herunterladen
-            </UiButton>
+            <div class="flex shrink-0 gap-1.5">
+              <UiButton variante="sekundaer" groesse="sm" icon="eye" title="Ansehen" @click="vorschauId = datei.id">
+                <span class="hidden sm:inline">Ansehen</span>
+              </UiButton>
+              <UiButton variante="sekundaer" groesse="sm" icon="download" title="Herunterladen" @click="herunterladen(datei.id)">
+                <span class="hidden sm:inline">Herunterladen</span>
+              </UiButton>
+            </div>
           </template>
-          <UiButton v-else-if="datei.url" :to="datei.url" variante="sekundaer" groesse="sm" icon="arrow-up-right-from-square">
-            Öffnen
+          <UiButton
+            v-else-if="datei.url"
+            :to="datei.url"
+            variante="sekundaer"
+            groesse="sm"
+            icon="arrow-up-right-from-square"
+            title="Öffnen"
+          >
+            <span class="hidden sm:inline">Öffnen</span>
           </UiButton>
         </li>
       </ul>
