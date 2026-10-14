@@ -24,7 +24,7 @@ const {
 const { getMaterialDetail, getMaterialFacets, listLehrwerkInhalt, listMaterials } = await import(
   '../../server/repositories/material.repository'
 )
-const { sammleZipEintraege, zipStream } = await import('../../server/services/material-zip.service')
+const { sammleLehrwerkZipEintraege, sammleZipEintraege, zipStream } = await import('../../server/services/material-zip.service')
 const { getOrCreateSubject, getOrCreateTopic } = await import(
   '../../server/services/taxonomy.service'
 )
@@ -425,6 +425,43 @@ describe('Materialverwaltung', () => {
       const entpackt = unzipSync(new Uint8Array(Buffer.concat(chunks)))
       expect(Buffer.from(entpackt['Station Äpfel.txt']!).toString()).toBe('station')
       expect(Buffer.from(entpackt['Lösungen/Station Äpfel.txt']!).toString()).toBe('loesung')
+    })
+  })
+
+  it('packt ein komplettes Lehrwerk in Ordner', async () => {
+    await withTempUploadDir(async () => {
+      const lehrwerk = await createMaterial({ title: 'Natura Oberstufe', materialType: 'lehrwerk' }, userId)
+      const service = await createMaterial({ title: 'Serviceband Natura', materialType: 'serviceband' }, userId)
+      const ab = await createMaterial({ title: 'AB Meiose' }, userId)
+      const loesung = await createMaterial({ title: 'Lösung Meiose', materialType: 'musterloesung' }, userId)
+      const lernzirkel = await createMaterial({ title: 'Lernzirkel Zelle', materialType: 'lernzirkel' }, userId)
+      const station = await createMaterial({ title: 'Station Membran' }, userId)
+      const versteckt = await createMaterial({ title: 'Nicht geteilt' }, userId)
+      for (const id of [service, ab, loesung, lernzirkel, versteckt]) await addRelation(id, lehrwerk, 'gehoert_zu')
+      await addRelation(ab, loesung, 'musterloesung')
+      await addRelation(station, lernzirkel, 'gehoert_zu')
+
+      for (const [id, fileName] of [
+        [lehrwerk, 'natura_komplett.pdf'],
+        [service, 'sb.pdf'],
+        [ab, 'wd04_118_meiose.docx'],
+        [loesung, 'wd04_118_meiose_l.docx'],
+        [station, 'station1.docx'],
+        [versteckt, 'geheim.pdf'],
+      ] as const) {
+        const detail = await getMaterialDetail(id)
+        await addFileAsset(detail!.variants[0]!.id, { buffer: Buffer.from(fileName, 'utf8'), fileName })
+      }
+
+      const erlaubt = new Set([lehrwerk, service, ab, loesung, lernzirkel, station])
+      const eintraege = await sammleLehrwerkZipEintraege(lehrwerk, erlaubt)
+      expect(eintraege.map((e) => e.name).sort()).toEqual([
+        '01 Schulbuch/Natura Oberstufe.pdf',
+        '02 Serviceband/Serviceband Natura.pdf',
+        '03 Lernzirkel und Stationenarbeit/Lernzirkel Zelle/Station Membran.docx',
+        '04 Kopiervorlagen und Aufgaben/AB Meiose/AB Meiose.docx',
+        '04 Kopiervorlagen und Aufgaben/AB Meiose/Lösungen/Lösung Meiose.docx',
+      ])
     })
   })
 
