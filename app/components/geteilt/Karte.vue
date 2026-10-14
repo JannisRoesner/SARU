@@ -36,7 +36,7 @@ function herunterladen() {
       @klick="vorschauOffen = true"
     />
     <NuxtLink :to="ziel(`/geteilt/${token}/material/${material.id}`)" class="min-w-0 flex-1">
-      <span class="block truncate font-medium text-ink hover:text-primary">{{ material.title }}</span>
+      <span class="line-clamp-2 font-medium break-words text-ink hover:text-primary">{{ material.title }}</span>
       <span class="text-xs text-ink-subtle">{{ materialTypes.label(material.materialType as never) }}</span>
     </NuxtLink>
     <div v-if="material.vorschauDateiId" class="flex shrink-0 gap-1.5">

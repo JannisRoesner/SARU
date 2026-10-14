@@ -75,8 +75,8 @@ const inhaltPadding = computed(() => (props.blank ? 'flex-1' : 'flex-1 p-4 sm:p-
         class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2"
       >
         <div
-          class="min-w-0 flex-1 basis-full sm:basis-auto"
-          :class="einklappbar && 'cursor-pointer'"
+          class="min-w-0 flex-1"
+          :class="[einklappbar && 'cursor-pointer', $slots.kopf && 'basis-full sm:basis-auto']"
           @click="einklappbar ? umschalten() : undefined"
         >
           <h2 class="flex min-w-0 items-center gap-2 font-semibold text-ink">
@@ -87,7 +87,8 @@ const inhaltPadding = computed(() => (props.blank ? 'flex-1' : 'flex-1 p-4 sm:p-
         </div>
 
         <div
-          class="flex w-full shrink-0 flex-wrap items-center justify-end gap-2 sm:w-auto"
+          class="flex shrink-0 flex-wrap items-center justify-end gap-2"
+          :class="$slots.kopf && 'w-full sm:w-auto'"
           @click.stop
         >
           <slot name="kopf" />
