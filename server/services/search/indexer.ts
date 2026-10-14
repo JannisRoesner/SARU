@@ -1,10 +1,15 @@
-import { and, eq, isNull, or, sql } from 'drizzle-orm'
-import { embeddingDocumentInput, embeddingIndexKey, resolveEmbeddingModel } from '#shared/utils/embeddings'
+import { and, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm'
+import {
+  embeddingDocumentInput,
+  embeddingIndexKey,
+  resolveEmbeddingModel,
+  supportsImageEmbeddings,
+} from '#shared/utils/embeddings'
 import { useDatabase, type Database } from '../../database/client'
-import { EMBEDDING_DIMENSIONS, searchDocuments } from '../../database/schema'
+import { EMBEDDING_DIMENSIONS, searchDocuments, type SearchImageSource } from '../../database/schema'
 import { sha256 } from '../../utils/crypto'
 import { createLogger } from '../../utils/logger'
-import { createEmbeddings } from '../ai/client'
+import { createEmbeddings, type EmbeddingImage } from '../ai/client'
 import { getAiSettings, type AiSettings } from '../settings.service'
 
 const log = createLogger('search:index')
@@ -17,7 +22,12 @@ export interface IndexDocument {
   metaText: string
   content: string
   sourceLabel?: string | null
+  /** Abschnitt steht für ein Seitenbild; der Vektor entsteht aus dem Bild statt aus dem Text. */
+  imageSource?: SearchImageSource & { checksum: string | null }
 }
+
+/** Seitenbilder bekommen einen eigenen Nummernbereich, damit sie sich nicht mit dem Text verschieben. */
+export const IMAGE_CHUNK_START = 1000
 
 /** Zielgröße eines Textabschnitts in Zeichen – passt zu gängigen Embedding-Fenstern. */
 const CHUNK_SIZE = 1600
@@ -105,7 +115,13 @@ export async function writeDocuments(
   }
 
   for (const doc of documents) {
-    const contentHash = sha256(`${doc.title}\u0000${doc.metaText}\u0000${doc.content}`)
+    // Ein Seitenbild ändert sich nur mit der Datei, nicht mit Titel oder Metadaten.
+    const contentHash = doc.imageSource
+      ? sha256(['bild', doc.imageSource.assetId, doc.imageSource.page, doc.imageSource.checksum ?? ''].join('\u0000'))
+      : sha256(`${doc.title}\u0000${doc.metaText}\u0000${doc.content}`)
+    const imageSource = doc.imageSource
+      ? { assetId: doc.imageSource.assetId, page: doc.imageSource.page }
+      : null
 
     await db
       .insert(searchDocuments)
@@ -117,6 +133,7 @@ export async function writeDocuments(
         metaText: doc.metaText,
         content: doc.content,
         sourceLabel: doc.sourceLabel ?? null,
+        imageSource,
         contentHash,
       })
       .onConflictDoUpdate({
@@ -126,6 +143,7 @@ export async function writeDocuments(
           metaText: doc.metaText,
           content: doc.content,
           sourceLabel: doc.sourceLabel ?? null,
+          imageSource,
           contentHash,
           updatedAt: new Date(),
           // Inhalt geändert → vorhandenes Embedding ist ungültig.
@@ -143,7 +161,10 @@ export async function writeDocuments(
       and(
         eq(searchDocuments.entityType, entityType),
         eq(searchDocuments.entityId, entityId),
-        sql`${searchDocuments.chunkIndex} >= ${documents.length}`,
+        notInArray(
+          searchDocuments.chunkIndex,
+          documents.map((doc) => doc.chunkIndex),
+        ),
       ),
     )
 }
@@ -270,6 +291,13 @@ async function embedBatch(limit: number): Promise<number | null> {
   embedding = true
   try {
     const db = useDatabase()
+    const veraltet = or(
+      isNull(searchDocuments.embedding),
+      sql`${searchDocuments.embeddingModel} is distinct from ${model}`,
+    )
+
+    // Texte zuerst: Sie sind schnell berechnet, und ein Server ohne Bildunterstützung
+    // soll die Textsuche nicht aufhalten.
     const rows = await db
       .select({
         id: searchDocuments.id,
@@ -278,15 +306,12 @@ async function embedBatch(limit: number): Promise<number | null> {
         content: searchDocuments.content,
       })
       .from(searchDocuments)
-      .where(
-        or(
-          isNull(searchDocuments.embedding),
-          sql`${searchDocuments.embeddingModel} is distinct from ${model}`,
-        ),
-      )
+      .where(and(veraltet, isNull(searchDocuments.imageSource)))
       .limit(limit)
 
-    if (rows.length === 0) return 0
+    if (rows.length === 0) {
+      return imageEmbeddingsActive(settings) ? await embedImageBatch(settings, model, veraltet) : 0
+    }
 
     const inputs = rows.map((row) =>
       embeddingDocumentInput(
@@ -296,23 +321,97 @@ async function embedBatch(limit: number): Promise<number | null> {
       ).slice(0, 8000),
     )
     const vectors = await createEmbeddings(settings, inputs, EMBEDDING_DIMENSIONS)
-
-    for (const [index, row] of rows.entries()) {
-      await db
-        .update(searchDocuments)
-        .set({
-          embedding: vectors[index]!,
-          embeddingModel: model,
-          embeddedAt: new Date(),
-        })
-        .where(eq(searchDocuments.id, row.id))
-    }
+    await saveVectors(rows.map((row) => row.id), vectors, model)
 
     log.info('Embeddings erzeugt', { anzahl: rows.length, modell: model })
     return rows.length
   } finally {
     embedding = false
   }
+}
+
+async function saveVectors(ids: string[], vectors: number[][], model: string): Promise<void> {
+  const db = useDatabase()
+  for (const [index, id] of ids.entries()) {
+    await db
+      .update(searchDocuments)
+      .set({
+        embedding: vectors[index]!,
+        embeddingModel: model,
+        embeddedAt: new Date(),
+      })
+      .where(eq(searchDocuments.id, id))
+  }
+}
+
+/** Seitenbilder in kleinen Stapeln – jedes Bild kostet deutlich mehr als ein Textabschnitt. */
+const IMAGE_BATCH_SIZE = 4
+
+async function embedImageBatch(
+  settings: AiSettings,
+  model: string,
+  veraltet: ReturnType<typeof or>,
+): Promise<number> {
+  const db = useDatabase()
+  const rows = await db
+    .select({ id: searchDocuments.id, imageSource: searchDocuments.imageSource })
+    .from(searchDocuments)
+    .where(and(veraltet, isNotNull(searchDocuments.imageSource)))
+    .orderBy(sql`${searchDocuments.imageSource}->>'assetId'`, sql`(${searchDocuments.imageSource}->>'page')::int`)
+    .limit(IMAGE_BATCH_SIZE)
+
+  if (rows.length === 0) return 0
+
+  // Je Datei nur einmal laden bzw. konvertieren.
+  const { seitenRendern } = await import('./seitenbilder')
+  const seitenJeDatei = new Map<string, number[]>()
+  for (const row of rows) {
+    const { assetId, page } = row.imageSource!
+    seitenJeDatei.set(assetId, [...(seitenJeDatei.get(assetId) ?? []), page])
+  }
+  const bilder = new Map<string, EmbeddingImage>()
+  for (const [assetId, seiten] of seitenJeDatei) {
+    for (const [seite, bild] of await seitenRendern(assetId, seiten)) bilder.set(`${assetId}:${seite}`, bild)
+  }
+
+  const fertig = rows.filter((row) => bilder.has(`${row.imageSource!.assetId}:${row.imageSource!.page}`))
+  const fehlend = rows.filter((row) => !fertig.includes(row))
+  if (fehlend.length > 0) {
+    // Nicht renderbar (Datei fehlt, LibreOffice nicht installiert …): Abschnitt entfernen,
+    // sonst würde der Lauf ihn endlos erneut versuchen. Die nächste Neuindizierung legt ihn wieder an.
+    log.warn('Seitenbilder konnten nicht erzeugt werden und werden übersprungen', { anzahl: fehlend.length })
+    await db.delete(searchDocuments).where(
+      inArray(
+        searchDocuments.id,
+        fehlend.map((row) => row.id),
+      ),
+    )
+  }
+  if (fertig.length === 0) return rows.length
+
+  let vectors: number[][]
+  try {
+    vectors = await createEmbeddings(
+      settings,
+      fertig.map((row) => bilder.get(`${row.imageSource!.assetId}:${row.imageSource!.page}`)!),
+      EMBEDDING_DIMENSIONS,
+    )
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'Unbekannter Fehler'
+    throw new Error(
+      `Seitenbilder konnten nicht eingebettet werden. Nimmt der Server Bilder an (llama.cpp: Modell mit --mmproj starten)? ${detail}`,
+      { cause: error },
+    )
+  }
+  await saveVectors(fertig.map((row) => row.id), vectors, model)
+
+  log.info('Seitenbild-Embeddings erzeugt', { anzahl: fertig.length, modell: model })
+  return rows.length
+}
+
+/** Ob Seitenbilder indiziert und eingebettet werden. */
+export function imageEmbeddingsActive(settings: AiSettings): boolean {
+  return Boolean(settings.embedImages && activeEmbeddingModel(settings) && supportsImageEmbeddings(settings.provider))
 }
 
 /**
@@ -373,6 +472,9 @@ export interface IndexStatus {
   models: string[]
   /** Aktuell wirksames Modell; null, wenn die Vektorsuche aus ist. */
   currentModel: string | null
+  /** Davon Seitenbilder (zählen in `documents`, `embedded` und `pending` mit). */
+  images: number
+  imagesEmbedded: number
   job: EmbeddingJobState
 }
 
@@ -385,6 +487,8 @@ export async function getIndexStatus(): Promise<IndexStatus> {
     documents: number
     embedded: number
     outdated: number
+    images: number
+    imagesEmbedded: number
     models: string[] | null
   }>(
     sql`select count(*)::int as documents,
@@ -392,6 +496,9 @@ export async function getIndexStatus(): Promise<IndexStatus> {
         and embedding_model = ${currentModel}::text))::int as embedded,
       (count(*) filter (where embedding is not null
         and embedding_model is distinct from ${currentModel}::text))::int as outdated,
+      (count(*) filter (where image_source is not null))::int as images,
+      (count(*) filter (where image_source is not null and embedding is not null
+        and embedding_model = ${currentModel}::text))::int as "imagesEmbedded",
       array_remove(array_agg(distinct embedding_model), null) as models
       from search_documents`,
   )
@@ -405,6 +512,8 @@ export async function getIndexStatus(): Promise<IndexStatus> {
     outdated: row?.outdated ?? 0,
     models: row?.models ?? [],
     currentModel,
+    images: row?.images ?? 0,
+    imagesEmbedded: row?.imagesEmbedded ?? 0,
     job: { ...embeddingJob },
   }
 }
@@ -458,4 +567,14 @@ export async function reindexAll(): Promise<{ materialien: number; stunden: numb
     stunden: (lessonIds as unknown as unknown[]).length,
     reihen: (seriesIds as unknown as unknown[]).length,
   }
+}
+
+/**
+ * Reiht alle Materialien zur Neuindizierung ein, z. B. wenn Seitenbilder ein-
+ * oder ausgeschaltet werden. Läuft im Hintergrund über die Warteschlange.
+ */
+export async function materialienNeuIndizieren(db: Database = useDatabase()): Promise<number> {
+  const ids = (await db.execute(sql`select id from materials`)) as unknown as { id: string }[]
+  for (const { id } of ids) queueReindex('material', id)
+  return ids.length
 }

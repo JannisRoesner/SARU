@@ -354,9 +354,31 @@ interface EmbeddingResponse {
   error?: { message?: string }
 }
 
+/** Bild als Embedding-Eingabe, z. B. eine gerenderte Arbeitsblattseite. */
+export interface EmbeddingImage {
+  type: 'image'
+  mimeType: string
+  base64: string
+}
+
+export type EmbeddingInput = string | EmbeddingImage
+
+/**
+ * Bilder gehen als Objekt mit `content`-Array im Chat-Format an den Server.
+ * Das ist kein Teil der OpenAI-API, wird aber von llama.cpp und OpenRouter verstanden.
+ */
+function serializeEmbeddingInput(input: EmbeddingInput, maxZeichen: number): unknown {
+  if (typeof input === 'string') return input.slice(0, maxZeichen)
+  return {
+    content: [
+      { type: 'image_url', image_url: { url: `data:${input.mimeType};base64,${input.base64}` } },
+    ],
+  }
+}
+
 export async function createEmbeddings(
   settings: AiSettings,
-  inputs: string[],
+  inputs: EmbeddingInput[],
   targetDimensions: number,
 ): Promise<number[][]> {
   if (inputs.length === 0) return []
@@ -366,7 +388,7 @@ export async function createEmbeddings(
   }
   const model = resolveEmbeddingModel(settings.provider, configured)
 
-  const body: Record<string, unknown> = { model, input: inputs }
+  const body: Record<string, unknown> = { model }
   // OpenAI kann die Ausgabedimension direkt begrenzen (Matryoshka-Modelle).
   if (settings.provider === 'openai' && /text-embedding-3/.test(model)) {
     body.dimensions = targetDimensions
@@ -374,14 +396,15 @@ export async function createEmbeddings(
 
   // Lokale Server (llama.cpp) lehnen Texte über ihrer Batchgröße ab, z. B. 512 Tokens.
   // Dann schrittweise kürzen statt den ganzen Lauf abzubrechen.
+  const texte = inputs.filter((input): input is string => typeof input === 'string')
   let payload: EmbeddingResponse | null = null
-  let maxZeichen = Math.max(...inputs.map((text) => text.length))
+  let maxZeichen = texte.length ? Math.max(...texte.map((text) => text.length)) : 0
   for (let versuch = 0; !payload; versuch += 1) {
     try {
       payload = await request<EmbeddingResponse>(
         settings,
         '/embeddings',
-        { ...body, input: inputs.map((text) => text.slice(0, maxZeichen)) },
+        { ...body, input: inputs.map((input) => serializeEmbeddingInput(input, maxZeichen)) },
         'Die Anfrage an das Embedding-Modell',
       )
     } catch (error) {

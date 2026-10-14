@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AiProvider } from '#shared/types/domain'
-import { OLLAMA_EMBEDDING_MODEL } from '#shared/utils/embeddings'
+import { OLLAMA_EMBEDDING_MODEL, supportsImageEmbeddings } from '#shared/utils/embeddings'
 import { aiProviders } from '#shared/utils/labels'
 import type { KombiOption } from '~/components/ui/Kombifeld.vue'
 
@@ -33,6 +33,7 @@ const { data, refresh } = await useFetch<{
     embeddingsEnabled: boolean
     embeddingModel: string
     vectorOnlySearch: boolean
+    embedImages: boolean
     embeddingModelEffektiv?: string
     embeddingModelWarnung?: string | null
     temperature: number
@@ -58,6 +59,7 @@ const formular = reactive({
   embeddingsEnabled: false,
   embeddingModel: '',
   vectorOnlySearch: false,
+  embedImages: false,
   temperature: 0.2,
   maxOutputTokens: 4096,
   timeoutMs: 180000,
@@ -86,8 +88,12 @@ interface IndexStatus {
   outdated: number
   models: string[]
   currentModel: string | null
+  images: number
+  imagesEmbedded: number
   job: { running: boolean; error: string | null }
 }
+
+const bildEmbeddingsMoeglich = computed(() => supportsImageEmbeddings(formular.provider))
 
 const { data: indexStatus, refresh: indexStatusLaden } =
   await useFetch<IndexStatus>('/api/search/index-status')
@@ -139,7 +145,7 @@ const hinweise = computed(() => {
       vision: 'aus der Liste wählen',
       embedding: 'aus der Liste wählen',
       text: 'Für llama.cpp (llama-server), LM Studio, vLLM und andere Server mit OpenAI-Schnittstelle. Arbeitsblätter werden als Seitenbilder übergeben – für Musterlösungen ein multimodales Modell wählen (bei llama.cpp mit --mmproj gestartet).',
-      embeddingHinweis: 'Ein Embedding-Modell des Servers, z. B. qwen3-embedding. Nach einem Wechsel die Vektoren neu berechnen.',
+      embeddingHinweis: 'Ein Embedding-Modell des Servers, z. B. qwen3-embedding oder embeddinggemma-2 (mit --mmproj gestartet auch für Seitenbilder). Nach einem Wechsel die Vektoren neu berechnen.',
     }
   }
   if (formular.provider === 'openai') {
@@ -413,7 +419,28 @@ async function testen() {
             >
             Nur Vektorsuche (ohne Volltext)
           </label>
+          <label
+            class="flex items-center gap-2"
+            :class="{ 'opacity-50': !formular.embeddingsEnabled || !bildEmbeddingsMoeglich }"
+            :title="bildEmbeddingsMoeglich ? undefined : 'Ollama und OpenAI nehmen für Embeddings nur Text an.'"
+          >
+            <input
+              v-model="formular.embedImages"
+              type="checkbox"
+              class="accent-[var(--color-primary)]"
+              :disabled="!formular.embeddingsEnabled || !bildEmbeddingsMoeglich"
+            >
+            Seitenbilder einbetten (multimodale Embedding-Modelle)
+          </label>
         </div>
+        <p
+          v-if="formular.embeddingsEnabled && formular.embedImages && bildEmbeddingsMoeglich"
+          class="text-xs text-ink-muted"
+        >
+          Seiten von PDFs, Office-Dateien und Bildern werden zusätzlich als Bild vektorisiert, damit auch
+          Abbildungen, Diagramme und Scans gefunden werden. Benötigt ein multimodales Embedding-Modell wie
+          EmbeddingGemma 2 – bei llama.cpp mit <code>--mmproj</code> gestartet.
+        </p>
 
         <p v-if="testErgebnis" class="rounded-lg bg-surface-sunken px-3 py-2 text-sm text-ink-muted">
           {{ testErgebnis }}
@@ -447,6 +474,9 @@ async function testen() {
               </span>
               <span class="text-ink-muted">
                 {{ indexStatus.embedded }} von {{ indexStatus.documents }} Abschnitten berechnet
+                <template v-if="indexStatus.images">
+                  (davon {{ indexStatus.imagesEmbedded }} von {{ indexStatus.images }} Seitenbildern)
+                </template>
               </span>
             </div>
             <div

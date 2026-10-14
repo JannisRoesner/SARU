@@ -29,6 +29,17 @@ export function resolveEmbeddingModel(provider: AiProvider, model: string): stri
   return trimmed
 }
 
+/**
+ * Anbieter, deren `/embeddings` neben Text auch Bilder annimmt – als Objekt mit
+ * `content`-Array im Chat-Format. Das können llama.cpp (Modell mit `--mmproj`
+ * geladen) und OpenRouter; Ollama und OpenAI nehmen nur Text an.
+ */
+const IMAGE_EMBEDDING_PROVIDERS: AiProvider[] = ['openai_kompatibel', 'openrouter']
+
+export function supportsImageEmbeddings(provider: AiProvider): boolean {
+  return IMAGE_EMBEDDING_PROVIDERS.includes(provider)
+}
+
 /** Hinweis für die Einstellungs-UI, wenn ein gespeichertes Modell zum Anbieter passt. */
 export function getEmbeddingModelWarning(provider: AiProvider, model: string): string | null {
   const trimmed = model.trim()

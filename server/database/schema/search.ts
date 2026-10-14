@@ -22,6 +22,12 @@ import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
  */
 export const EMBEDDING_DIMENSIONS = 1536
 
+export interface SearchImageSource {
+  assetId: string
+  /** 1-basierte Seite; Rasterbilder haben nur Seite 1. */
+  page: number
+}
+
 const tsvector = customType<{ data: string; driverData: string }>({
   dataType: () => 'tsvector',
 })
@@ -44,6 +50,11 @@ export const searchDocuments = pgTable(
     content: text().notNull().default(''),
     /** Quelle des Chunks, z. B. der Dateiname eines PDFs. */
     sourceLabel: text(),
+    /**
+     * Gesetzt, wenn der Abschnitt eine Seite als Bild repräsentiert. Der Vektor
+     * wird dann aus dem gerenderten Seitenbild statt aus `content` berechnet.
+     */
+    imageSource: jsonb().$type<SearchImageSource>(),
     contentHash: text().notNull(),
     embedding: vector({ dimensions: EMBEDDING_DIMENSIONS }),
     embeddingModel: text(),

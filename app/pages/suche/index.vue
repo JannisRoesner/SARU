@@ -282,6 +282,13 @@ const { favoritSetzen } = useMaterialAktionen(() => refresh())
             :text="treffer.snippet"
             class="treffer -mt-1 mb-3 rounded-lg bg-surface-sunken/60 px-3 py-2 text-xs leading-relaxed text-ink-muted"
           />
+          <p
+            v-else-if="treffer.matchedIn.includes('bild') && treffer.sourceLabel"
+            class="-mt-1 mb-3 flex items-center gap-1.5 rounded-lg bg-surface-sunken/60 px-3 py-2 text-xs text-ink-muted"
+          >
+            <UiIcon name="image" />
+            Passendes Seitenbild: {{ treffer.sourceLabel }}
+          </p>
         </template>
       </div>
     </template>

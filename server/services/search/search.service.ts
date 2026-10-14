@@ -18,7 +18,7 @@ export interface SearchHit {
   sourceLabel: string | null
   score: number
   /** Woher der Treffer stammt – für die Anzeige „auch im Dokumenttext gefunden“. */
-  matchedIn: ('titel' | 'metadaten' | 'inhalt')[]
+  matchedIn: ('titel' | 'metadaten' | 'inhalt' | 'bild')[]
   usedVectorSearch: boolean
 }
 
@@ -107,6 +107,7 @@ interface RawHit {
   titleMatch: boolean
   metaMatch: boolean
   contentMatch: boolean
+  imageMatch: boolean
 }
 
 export async function search(
@@ -149,6 +150,8 @@ export async function search(
         (array_agg(d.id order by ts_rank_cd(d.tsv, p.tsq) desc))[1] as best_document
       from search_documents d, parameter p
       where ${lexical}::boolean and d.entity_type = any(p.types) and d.tsv @@ p.tsq
+        -- Seitenbilder tragen nur Titel und Metadaten von Abschnitt 0 – doppelt zählen bringt nichts.
+        and d.image_source is null
       group by d.entity_type, d.entity_id
       order by score desc
       limit ${limit}
@@ -230,12 +233,16 @@ export async function search(
       f.trigram_rank::int as "trigramRank",
       f.vector_rank::int as "vectorRank",
       d.source_label as "sourceLabel",
-      nullif(ts_headline('german', coalesce(nullif(d.content, ''), d.meta_text), p.tsq,
-        'StartSel=<mark>, StopSel=</mark>, MaxFragments=2, MaxWords=28, MinWords=8, FragmentDelimiter=" … "'
-      ), '') as snippet,
+      -- Ein Seitenbild hat keinen eigenen Text, der Metadatenauszug wäre irreführend.
+      case when d.image_source is null then
+        nullif(ts_headline('german', coalesce(nullif(d.content, ''), d.meta_text), p.tsq,
+          'StartSel=<mark>, StopSel=</mark>, MaxFragments=2, MaxWords=28, MinWords=8, FragmentDelimiter=" … "'
+        ), '')
+      end as snippet,
       to_tsvector('german', d.title) @@ p.tsq as "titleMatch",
       to_tsvector('german', d.meta_text) @@ p.tsq as "metaMatch",
-      to_tsvector('german', d.content) @@ p.tsq as "contentMatch"
+      to_tsvector('german', d.content) @@ p.tsq as "contentMatch",
+      d.image_source is not null as "imageMatch"
     from fused f
     join search_documents d on d.id = f.best_document
     cross join parameter p
@@ -248,6 +255,7 @@ export async function search(
     if (row.titleMatch || row.trigramRank !== null) matchedIn.push('titel')
     if (row.metaMatch) matchedIn.push('metadaten')
     if (row.contentMatch) matchedIn.push('inhalt')
+    if (row.imageMatch) matchedIn.push('bild')
 
     return {
       entityType: row.entityType,

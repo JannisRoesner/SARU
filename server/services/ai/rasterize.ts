@@ -20,6 +20,8 @@ export async function rasterizePdf(
     scale?: number
     /** Nur diese 1-basierte Seite rendern. */
     page?: number
+    /** Nur diese 1-basierten Seiten rendern (überschreibt `maxPages`). */
+    pages?: number[]
   } = {},
 ): Promise<RasterizedPage[]> {
   const maxPages = options.maxPages ?? 8
@@ -60,7 +62,11 @@ export async function rasterizePdf(
 
     if (onlyPage && onlyPage > document.numPages) return []
 
-    for (let pageNumber = start; pageNumber <= end; pageNumber++) {
+    const pageNumbers = options.pages
+      ? [...new Set(options.pages)].filter((n) => n >= 1 && n <= document.numPages).sort((a, b) => a - b)
+      : Array.from({ length: Math.max(0, end - start + 1) }, (_, i) => start + i)
+
+    for (const pageNumber of pageNumbers) {
       const page = await document.getPage(pageNumber)
       const viewport = page.getViewport({ scale })
       const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height))

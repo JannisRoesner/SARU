@@ -181,6 +181,27 @@ describe('createEmbeddings', () => {
     await expect(createEmbeddings(embeddingSettings, ['x'.repeat(8000)], 4)).rejects.toThrow(/Embedding-Modell/)
     expect(fetchMock).toHaveBeenCalledOnce()
   })
+
+  it('übergibt Bilder als content-Array mit Data-URL (llama.cpp mit --mmproj)', async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const { input } = JSON.parse(String(init?.body)) as { input: unknown[] }
+      return new Response(JSON.stringify({ data: input.map(() => ({ embedding: [0, 1, 0] })) }), { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const vektoren = await createEmbeddings(
+      embeddingSettings,
+      ['Text', { type: 'image', mimeType: 'image/jpeg', base64: 'QUJD' }],
+      4,
+    )
+
+    expect(vektoren).toHaveLength(2)
+    const body = JSON.parse(String(fetchMock.mock.calls[0]![1]!.body)) as { input: unknown[] }
+    expect(body.input).toEqual([
+      'Text',
+      { content: [{ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,QUJD' } }] },
+    ])
+  })
 })
 
 /** Gekürzte Antwort eines llama.cpp-Routers (llama-server mit Modell-Presets). */

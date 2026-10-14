@@ -211,6 +211,13 @@ watch(offen, async (istOffen) => {
                     <UiIcon name="file-magnifying-glass" />
                     Fundstelle in {{ eintrag.treffer.sourceLabel }}
                   </span>
+                  <span
+                    v-else-if="eintrag.treffer.matchedIn.includes('bild') && eintrag.treffer.sourceLabel"
+                    class="mt-1 flex items-center gap-1 text-[0.7rem] text-ink-subtle"
+                  >
+                    <UiIcon name="image" />
+                    Passendes Seitenbild: {{ eintrag.treffer.sourceLabel }}
+                  </span>
                 </span>
               </template>
 

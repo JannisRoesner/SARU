@@ -1,4 +1,8 @@
-import { startEmbeddingJob } from '../../services/search/indexer'
+import {
+  imageEmbeddingsActive,
+  materialienNeuIndizieren,
+  startEmbeddingJob,
+} from '../../services/search/indexer'
 import { getAiSettings, saveAiSettings } from '../../services/settings.service'
 import { recordAudit } from '../../services/audit.service'
 import { maskSecret } from '../../utils/crypto'
@@ -10,6 +14,7 @@ export default defineEventHandler(async (event) => {
   const user = await requireAdmin(event)
   const patch = await readZodBody(event, aiSettingsSchema)
 
+  const bilderVorher = imageEmbeddingsActive(await getAiSettings())
   await saveAiSettings(patch, user.id)
   await recordAudit(
     {
@@ -26,9 +31,16 @@ export default defineEventHandler(async (event) => {
     event,
   )
 
-  // Nach einem Modellwechsel die Vektoren im Hintergrund neu berechnen (ohne Wirkung, wenn nichts aussteht).
-  void startEmbeddingJob()
-
   const saved = await getAiSettings()
+
+  // Seitenbilder ein- oder ausgeschaltet: Die Materialien bekommen ihre Bildabschnitte
+  // über die Warteschlange, die danach selbst die Vektoren nachzieht.
+  if (imageEmbeddingsActive(saved) !== bilderVorher) {
+    void materialienNeuIndizieren()
+  } else {
+    // Nach einem Modellwechsel die Vektoren im Hintergrund neu berechnen (ohne Wirkung, wenn nichts aussteht).
+    void startEmbeddingJob()
+  }
+
   return { ...saved, apiKey: maskSecret(saved.apiKey), apiKeyGesetzt: Boolean(saved.apiKey) }
 })
