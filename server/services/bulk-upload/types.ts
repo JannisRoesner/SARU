@@ -14,8 +14,12 @@ export const BULK_PDF_ADAPTER_ID = 'bulk-pdf-materials'
 export const BULK_PDF_ADAPTER_VERSION = '2'
 export const BULK_PDF_ADAPTER_LABEL = 'Stapel-Upload'
 
-/** Sicherheitsgrenze gegen ZIP-Bomben; die Paketgröße begrenzt zusätzlich. */
-export const MAX_BULK_FILES = 400
+/**
+ * Großzügige Plausibilitätsgrenze, damit Lehrwerke mit einigen tausend Dateien
+ * in einen Stapel passen. Gegen ZIP-Bomben schützt die Größenprüfung vor dem
+ * Entpacken (`maxImportBytes`), nicht diese Zahl.
+ */
+export const MAX_BULK_FILES = 10_000
 
 /** Parallele Textextraktion inkl. Vision-OCR. */
 export const BULK_EXTRACT_CONCURRENCY = 4
