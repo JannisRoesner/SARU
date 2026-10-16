@@ -158,13 +158,29 @@ Kapitel 01 Arbeitsblätter/
 
 → ein Material „Hunde und Katzen im Vergleich“ mit drei Varianten (Hauptvariante: „Basis“).
 
-**Einschränkung:** Fassungen und Lösung lassen sich nicht automatisch in einem Bündel kombinieren.
-`X - Lösung.pdf` neben `X - Fassung A.pdf` landet im selben Schlüssel und zerstört das
-Variantenbündel. Lösungen zu Fassungsmaterialien daher in einen **eigenen Unterordner** legen
-(z. B. `Lösungen zu Fassungen/X - Lösung.pdf`); sie werden dann als eigenständige Musterlösung
-angelegt und können nachträglich verknüpft werden. Der Ordnername darf dabei **weder
-„Kopiervorlage“ noch „Klausur“** enthalten – sonst setzt die Ordnerrolle die Art auf
-`arbeitsblatt` bzw. `klausur` statt `musterloesung` (Abschnitt 5.1).
+**Lösungen zu Fassungen** heißen `<Titel> - Lösung - Fassung <Bezeichnung>` und liegen im
+**selben Ordner** wie die Fassungen:
+
+```
+Arbeitsblätter/
+  Wald - Fassung Basis.pdf
+  Wald - Fassung Erweitert.pdf
+  Wald - Lösung - Fassung Basis.pdf
+  Wald - Lösung - Fassung Erweitert.pdf
+```
+
+Die Lösungsdateien bilden ein eigenes Bündel (mit mehreren Lösungsdateien wieder ein
+Variantenbündel, mit einer ein Einzelmaterial). Es wird automatisch per `musterloesung` mit dem
+Fassungsmaterial verknüpft. Auch eine einzelne Lösung (`Wald - Lösung - Fassung Basis.pdf`)
+wird verknüpft.
+
+- **Nicht** `Wald - Lösung.pdf` neben die Fassungen legen: Diese Datei fällt in denselben
+  Schlüssel wie die Fassungen und macht daraus ein `unklar`-Bündel.
+- **Fassungen samt Lösungen nicht in einen Ordner mit „Kopiervorlage“ oder „Klausur“ im Namen
+  legen.** Dort setzt die Ordnerrolle das Lösungsbündel auf `arbeitsblatt` bzw. `klausur`.
+  Verknüpft wird es trotzdem, nur die Art ist falsch (Abschnitt 5.1). In einem neutralen Ordner
+  wie `Arbeitsblätter/` wird es `musterloesung`, und das Fassungsmaterial bekommt die
+  Standard-Materialart des Stapels.
 
 ### 3.4 Anhänge (eine Hauptdatei + Beiwerk)
 
@@ -409,6 +425,7 @@ Der Stapel erzeugt nur diese Verknüpfungen:
 | Station → Lernzirkel | `gehoert_zu` | Station → Lernzirkel | Lernzirkel-Erkennung |
 | Lernzirkel → Lehrwerk | `gehoert_zu` | Lernzirkel → Lehrwerk | Lernzirkel + Lehrwerk |
 | Versuch → GFB | `gehoert_zu` | Versuch → Gefährdungsbeurteilung | Themenabgleich (unten) |
+| Fassungsmaterial → Lösung | `musterloesung` | Fassungsmaterial → Lösungsbündel | `<Titel> - Lösung - Fassung …` im selben Ordner (Abschnitt 3.3) |
 | Fassungen | – (Varianten) | – | `varianten`-Cluster |
 
 Die übrigen Beziehungstypen (`zusatzmaterial`, `differenzierung`, `nachfolger`, `quelle`, `loesung`)
@@ -519,11 +536,12 @@ Natura 7 Paket.zip
     │   ├── K1 AB 01 Bau der Pflanzenzelle - Lösung.pdf
     │   ├── K1 AB 02 Mikroskopieren.docx
     │   ├── K1 AB 02 Mikroskopieren - Lösung.docx
+    │   └── K2 Steckbrief Laubbaum.pdf
+    ├── Arbeitsblätter/
     │   ├── K2 AB 01 Fotosynthese - Fassung Basis (S040-01).pdf
     │   ├── K2 AB 01 Fotosynthese - Fassung Erweitert (S040-02).pdf
-    │   └── K2 Steckbrief Laubbaum.pdf
-    ├── Lösungen zu Fassungen/
-    │   └── K2 AB 01 Fotosynthese - Lösung.pdf
+    │   ├── K2 AB 01 Fotosynthese - Lösung - Fassung Basis.pdf
+    │   └── K2 AB 01 Fotosynthese - Lösung - Fassung Erweitert.pdf
     ├── Klausuren/
     │   ├── Klausur 01 Zellbiologie.docx
     │   ├── Klausur 01 Zellbiologie - Lösung.docx
@@ -560,7 +578,7 @@ Erwartetes Ergebnis:
 | Serviceband (2 Fassungen) | 1 × `serviceband` mit Varianten „Digital“ (Haupt) und „Druck“ |
 | Loesungsheft | 1 × `loesungsbuch` |
 | K1 AB 01 / AB 02 | je `arbeitsblatt` + verknüpfte `musterloesung` |
-| K2 AB 01 Fotosynthese | `arbeitsblatt` mit 2 Varianten; Lösung separat als `musterloesung` (nachträglich verknüpfen) |
+| K2 AB 01 Fotosynthese | `arbeitsblatt` mit 2 Varianten, verknüpft mit einer `musterloesung` mit 2 Varianten |
 | K2 Steckbrief | `arbeitsblatt` |
 | Klausur 01 / 02 | `klausur` (01 mit verknüpfter Lösung) |
 | K1 Lernkontrolle | `lernkontrolle` |
@@ -578,8 +596,8 @@ Warum es funktioniert:
 - Jede Aufgabe hat höchstens **eine** Begleitdatei, und die trägt die Lösungs-Endung.
 - Keine Office-Datei liegt neben einem gleichnamigen PDF-Export.
 - Stämme sind dank `K1`/`K2`-Präfix paketweit eindeutig.
-- Die Fassungslösung liegt in einem eigenen Ordner ohne „Kopiervorlage“ im Namen, damit das
-  Variantenbündel intakt bleibt und die Lösung `musterloesung` wird.
+- Die Fassungen und ihre Lösungen (`… - Lösung - Fassung …`) liegen gemeinsam in einem Ordner
+  ohne „Kopiervorlage“ im Namen. So werden sie verknüpft, und die Lösung wird `musterloesung`.
 - Versuch und GFB teilen dasselbe Stichwort, liegen aber in verschiedenen Ordnern.
 - „Loesungsheft“ mit „oe“ ergibt `loesungsbuch`.
 
@@ -597,7 +615,8 @@ Vor dem Packen prüfen:
 - [ ] Für jeden Schlüssel `<Elternordner>::<Stamm>` gilt genau eins:
   - eine Datei, **oder**
   - Aufgabe + **eine** Datei mit Lösungs-Endung, **oder**
-  - ≥ 2 Dateien, alle `<Titel> - Fassung <verschiedene Bezeichnung>`.
+  - ≥ 2 Dateien, alle `<Titel> - Fassung <verschiedene Bezeichnung>`; Lösungen dazu als
+    `<Titel> - Lösung - Fassung <Bezeichnung>` (nie `<Titel> - Lösung` daneben).
 - [ ] Keine Office-Datei neben ihrem eigenen PDF-Export.
 - [ ] Lösungen enden auf `Lösung`/`Loesung`/`Lösungen`/`Musterlösung`/`lsg`; Nicht-Lösungen
       enthalten nirgends `lösung`/`loesung`/`_lsg`/`-lsg`.
