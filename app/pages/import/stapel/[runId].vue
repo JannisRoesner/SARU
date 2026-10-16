@@ -32,6 +32,7 @@ interface DetectedFile {
   hasText: boolean
   textPreview: string | null
   duplicate: { materialId: string; title: string; reason: string } | null
+  stagingMissing?: boolean
   warnings: string[]
 }
 
@@ -108,6 +109,11 @@ interface RunOverview {
   canCancel?: boolean
   canDiscard?: boolean
   canUndo: boolean
+  undoneAt: string | null
+  clusterOutcomes: Record<string, { outcome: 'erstellt' | 'fehlgeschlagen' | 'uebersprungen'; message: string | null }>
+  retryableClusterIds: string[]
+  canRetry: boolean
+  canDiscardLeftovers: boolean
 }
 
 const { data, status, error, refresh } = await useFetch<RunOverview>(
@@ -222,7 +228,7 @@ watch(
 )
 
 const autosave = useAutosave(mapping, {
-  gueltig: () => geladen.value && Boolean(data.value?.canCommit),
+  gueltig: () => geladen.value && Boolean(data.value?.canCommit || data.value?.canRetry),
   speichern: async (daten) => {
     await $fetch(`/api/materials/bulk/${runId.value}/mapping`, {
       method: 'PATCH',
@@ -255,6 +261,25 @@ function clusterMaterialzahl(clusterId: string): number {
 const ausgewaehlt = computed(
   () => Object.values(mapping.records).filter((r) => r.include).length,
 )
+
+const nachholbar = computed(() => new Set(data.value?.retryableClusterIds ?? []))
+
+/** Vor dem Anlegen alle Bündel; bei teilweiser Übernahme nur die noch nicht angelegten. */
+function bearbeitbar(clusterId: string): boolean {
+  if (data.value?.canCommit) return true
+  return Boolean(data.value?.canRetry) && nachholbar.value.has(clusterId)
+}
+
+/** Ausgewählte, noch nicht angelegte Bündel bei teilweiser Übernahme. */
+const nachzuholen = computed(
+  () => [...nachholbar.value].filter((id) => mapping.records[id]?.include).length,
+)
+
+const ergebnisLabels = {
+  erstellt: { label: 'Angelegt', ton: 'gruen', icon: 'circle-check' },
+  fehlgeschlagen: { label: 'Fehlgeschlagen', ton: 'rot', icon: 'circle-xmark' },
+  uebersprungen: { label: 'Übersprungen', ton: 'neutral', icon: 'forward' },
+} as const
 
 /** Erkannte Lernzirkel mit der Zahl ihrer ausgewählten Stationen. */
 const lernzirkelListe = computed(() => {
@@ -311,17 +336,29 @@ const gruppen = computed(() => {
 })
 
 async function committen() {
+  const nachholen = Boolean(data.value?.canRetry)
   await autosave.jetztSpeichern()
   if (autosave.zustand.value === 'fehler') return
   const ergebnis = await aufruf(`/api/materials/bulk/${runId.value}/commit`, {
     method: 'POST',
-    erfolgsmeldung: 'Materialien angelegt.',
+    erfolgsmeldung: nachholen ? 'Bündel erneut angelegt.' : 'Materialien angelegt.',
   })
   if (ergebnis) await refresh()
 }
 
 const abbrechenOffen = ref(false)
 const verwerfenOffen = ref(false)
+const rueckgaengigOffen = ref(false)
+const resteVerwerfenOffen = ref(false)
+
+async function resteVerwerfen() {
+  const ok = await aufruf(`/api/materials/bulk/${runId.value}/leftovers`, {
+    method: 'DELETE',
+    erfolgsmeldung: 'Übrige Dateien verworfen.',
+  })
+  resteVerwerfenOffen.value = false
+  if (ok) await refresh()
+}
 
 async function analyseAbbrechen() {
   const ok = await aufruf(`/api/materials/bulk/${runId.value}/cancel`, {
@@ -344,8 +381,9 @@ async function verwerfen() {
 async function rueckgaengig() {
   const ok = await aufruf(`/api/materials/bulk/${runId.value}/undo`, {
     method: 'POST',
-    erfolgsmeldung: 'Stapel rückgängig gemacht.',
+    erfolgsmeldung: 'Stapel rückgängig gemacht. Die Vorschau ist wieder bearbeitbar.',
   })
+  rueckgaengigOffen.value = false
   if (ok) await refresh()
 }
 
@@ -445,13 +483,32 @@ function hatLoesung(clusterId: string): boolean {
             {{ materialzahl }} Materialien anlegen
           </UiButton>
           <UiButton
+            v-if="data.canRetry"
+            variante="primaer"
+            icon="rotate-right"
+            :laedt="laeuft"
+            :disabled="!nachzuholen"
+            @click="committen"
+          >
+            Fehlgeschlagene erneut anlegen ({{ nachzuholen }})
+          </UiButton>
+          <UiButton
             v-if="data.canUndo"
             variante="sekundaer"
             icon="rotate-left"
             :laedt="laeuft"
-            @click="rueckgaengig"
+            @click="rueckgaengigOffen = true"
           >
             Rückgängig
+          </UiButton>
+          <UiButton
+            v-if="data.canDiscardLeftovers"
+            variante="still"
+            icon="trash"
+            :laedt="laeuft"
+            @click="resteVerwerfenOffen = true"
+          >
+            Übrige Dateien verwerfen
           </UiButton>
           <UiButton
             v-if="data.canCancel"
@@ -503,6 +560,27 @@ function hatLoesung(clusterId: string): boolean {
 
       <p v-if="data.errorMessage" class="mb-4 rounded-lg bg-danger-soft px-4 py-3 text-sm text-danger">
         {{ data.errorMessage }}
+      </p>
+      <p
+        v-if="data.undoneAt && data.canCommit"
+        class="mb-4 rounded-lg bg-surface-sunken px-4 py-3 text-sm text-ink-muted"
+      >
+        Am {{ formatDatumZeit(data.undoneAt) }} rückgängig gemacht. Dateien, KI-Vorschläge und Entscheidungen
+        sind erhalten – nach dem Korrigieren lässt sich der Stapel erneut anlegen.
+      </p>
+      <p
+        v-else-if="data.status === 'rueckgaengig'"
+        class="mb-4 rounded-lg bg-surface-sunken px-4 py-3 text-sm text-ink-muted"
+      >
+        Dieser Stapel wurde rückgängig gemacht, bevor dabei die Dateien aufbewahrt wurden. Zum erneuten Anlegen
+        bitte neu hochladen; der Eintrag lässt sich verwerfen.
+      </p>
+      <p
+        v-else-if="data.canRetry"
+        class="mb-4 rounded-lg bg-warning-soft px-4 py-3 text-sm text-warning"
+      >
+        {{ data.retryableClusterIds.length }} Bündel wurden noch nicht angelegt. Sie lassen sich unten korrigieren
+        und erneut anlegen – Lehrwerk, Lernzirkel und angelegte Materialien bleiben bestehen.
       </p>
 
       <UiCard v-if="analyseLaeuft" titel="Analyse läuft" icon="spinner" class="mb-6">
@@ -639,7 +717,7 @@ function hatLoesung(clusterId: string): boolean {
                     class="rounded-xl border border-line p-3"
                   >
                     <div class="flex flex-wrap items-start gap-3">
-                      <label v-if="data.canCommit && mapping.records[cluster.clusterId]" class="mt-2">
+                      <label v-if="bearbeitbar(cluster.clusterId) && mapping.records[cluster.clusterId]" class="mt-2">
                         <input
                           v-model="mapping.records[cluster.clusterId]!.include"
                           type="checkbox"
@@ -664,6 +742,20 @@ function hatLoesung(clusterId: string): boolean {
                               · Station in „{{ mapping.lernzirkel[cluster.lernzirkel.id]!.title }}“
                             </template>
                           </p>
+                          <p v-if="data.clusterOutcomes[cluster.clusterId]" class="mt-1 flex flex-wrap items-center gap-2">
+                            <UiBadge
+                              :ton="ergebnisLabels[data.clusterOutcomes[cluster.clusterId]!.outcome].ton"
+                              :icon="ergebnisLabels[data.clusterOutcomes[cluster.clusterId]!.outcome].icon"
+                            >
+                              {{ ergebnisLabels[data.clusterOutcomes[cluster.clusterId]!.outcome].label }}
+                            </UiBadge>
+                            <span
+                              v-if="data.clusterOutcomes[cluster.clusterId]!.outcome === 'fehlgeschlagen' && data.clusterOutcomes[cluster.clusterId]!.message"
+                              class="text-xs text-danger"
+                            >
+                              {{ data.clusterOutcomes[cluster.clusterId]!.message }}
+                            </span>
+                          </p>
                           <ul class="mt-1 space-y-0.5">
                             <li
                               v-for="ref in cluster.fileRefs"
@@ -678,6 +770,12 @@ function hatLoesung(clusterId: string): boolean {
                               <template v-if="dateiNachRef.get(ref)?.duplicate">
                                 · Dublette: {{ dateiNachRef.get(ref)!.duplicate!.title }}
                               </template>
+                              <span
+                                v-if="dateiNachRef.get(ref)?.stagingMissing && data.clusterOutcomes[cluster.clusterId]?.outcome !== 'erstellt'"
+                                class="text-danger"
+                              >
+                                · Datei fehlt
+                              </span>
                             </li>
                           </ul>
                           <ul v-if="cluster.warnings.length" class="mt-1 space-y-0.5">
@@ -691,7 +789,7 @@ function hatLoesung(clusterId: string): boolean {
                           </ul>
                         </div>
 
-                        <template v-if="data.canCommit && mapping.records[cluster.clusterId]">
+                        <template v-if="bearbeitbar(cluster.clusterId) && mapping.records[cluster.clusterId]">
                           <div class="grid gap-3 sm:grid-cols-2">
                             <UiField label="Titel" class="sm:col-span-2">
                               <UiInput v-model="mapping.records[cluster.clusterId]!.title" />
@@ -812,6 +910,22 @@ function hatLoesung(clusterId: string): boolean {
       text="Der Stapel und alle hochgeladenen Dateien werden entfernt. Es werden keine Materialien angelegt. Eine laufende Analyse wird dabei abgebrochen."
       bestaetigen="Ja, verwerfen"
       @bestaetigt="verwerfen"
+    />
+    <UiConfirm
+      v-model="rueckgaengigOffen"
+      gefahr
+      titel="Stapel rückgängig machen?"
+      text="Alle in diesem Stapel angelegten Materialien werden gelöscht. Der Stapel kehrt mit Dateien, KI-Vorschlägen und Entscheidungen zur Vorschau zurück und lässt sich korrigiert erneut anlegen – ohne neuen Upload und ohne neue Analyse."
+      bestaetigen="Rückgängig machen"
+      @bestaetigt="rueckgaengig"
+    />
+    <UiConfirm
+      v-model="resteVerwerfenOffen"
+      gefahr
+      titel="Übrige Dateien verwerfen?"
+      text="Die Dateien der nicht angelegten Bündel werden gelöscht; diese Bündel lassen sich danach nicht mehr anlegen. Angelegte Materialien bleiben bestehen und lassen sich weiterhin rückgängig machen."
+      bestaetigen="Ja, verwerfen"
+      @bestaetigt="resteVerwerfen"
     />
   </div>
 </template>

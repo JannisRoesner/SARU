@@ -3,11 +3,12 @@ import { eq } from 'drizzle-orm'
 import { samplePdf } from '../fixtures'
 import { closeConnections, createTestUser, resetDatabase, withTempUploadDir } from './helpers'
 
-const { createMaterial } = await import('../../server/services/material.service')
+const { createMaterial, deleteMaterial } = await import('../../server/services/material.service')
 const {
   analyzeBulkPdfUpload,
   cancelBulkUpload,
   commitBulkUpload,
+  discardBulkLeftovers,
   discardBulkUpload,
   getBulkRunOverview,
   processBulkPdfUpload,
@@ -390,6 +391,264 @@ describe('PDF-Stapel-Upload', () => {
         expect(undo.removed.materialien).toBe(5)
         const rest = await listMaterials({ pageSize: 50 })
         expect(rest.items).toHaveLength(0)
+      })
+    })
+  })
+
+  describe('Erneut anlegen', () => {
+    it('legt nach dem Rückgängigmachen die Dateien zurück und lässt den Stapel erneut anlegen', async () => {
+      await withTempUploadDir(async () => {
+        const other = Buffer.concat([pdf, Buffer.from('x')])
+        const { runId } = await analyzeBulkPdfUpload(
+          [
+            { buffer: pdf, fileName: 'AB_Herz.pdf' },
+            { buffer: other, fileName: 'AB_Lunge.pdf' },
+          ],
+          userId,
+          { createLehrwerk: true, lehrwerkTitle: 'Natura 1' },
+        )
+        const first = await commitBulkUpload(runId, userId)
+        expect(first.status).toBe('importiert')
+        expect(first.stats.materialien).toBe(3)
+        const vorher = await getBulkRunOverview(runId)
+        expect(await fileExists(vorher.files[0]!.stagingPath)).toBe(false)
+
+        const undone = await undoBulkUpload(runId)
+        expect(undone.removed.materialien).toBe(3)
+        expect(undone.restoredFiles).toBe(2)
+        expect(undone.missingClusters).toBe(0)
+        expect((await listMaterials({ pageSize: 20 })).total).toBe(0)
+
+        const overview = await getBulkRunOverview(runId)
+        expect(overview.status).toBe('vorschau')
+        expect(overview.undoneAt).not.toBeNull()
+        expect(overview.canCommit).toBe(true)
+        expect(overview.canUndo).toBe(false)
+        expect(overview.clusterOutcomes).toEqual({})
+        // Das mitangelegte Lehrwerk ist gelöscht und wird beim nächsten Anlegen neu erzeugt.
+        expect(overview.mapping?.lehrwerkId).toBeNull()
+        for (const file of overview.files) {
+          expect(file.stagingMissing).toBe(false)
+          expect(await fileExists(file.stagingPath)).toBe(true)
+          if (file.hasText) expect(await fileExists(file.extractedTextKey!)).toBe(true)
+        }
+
+        // Entscheidungen bleiben erhalten und lassen sich korrigieren.
+        const herz = overview.clusters.find((c) => c.stem.toLowerCase().includes('herz'))!
+        await updateBulkMapping(runId, {
+          records: {
+            ...overview.mapping!.records,
+            [herz.clusterId]: { ...overview.mapping!.records![herz.clusterId]!, title: 'Das Herz' },
+          },
+        })
+
+        const second = await commitBulkUpload(runId, userId)
+        expect(second.status).toBe('importiert')
+        expect(second.stats.materialien).toBe(3)
+        expect(second.stats.fehlgeschlagen).toBe(0)
+        const materials = await listMaterials({ pageSize: 20 })
+        expect(materials.items.map((m) => m.title)).toContain('Das Herz')
+        expect(materials.items.filter((m) => m.materialType === 'lehrwerk')).toHaveLength(1)
+        const herzNeu = materials.items.find((m) => m.title === 'Das Herz')!
+        const detail = await getMaterialDetail(herzNeu.id)
+        expect(detail?.variants[0]?.assets.length).toBeGreaterThan(0)
+
+        // Ein zweites Rückgängig entfernt nur, was der zweite Durchgang angelegt hat.
+        const again = await undoBulkUpload(runId)
+        expect(again.removed.materialien).toBe(3)
+        expect((await listMaterials({ pageSize: 20 })).total).toBe(0)
+        expect((await getBulkRunOverview(runId)).canCommit).toBe(true)
+      })
+    })
+
+    it('wählt beim Rückgängigmachen Bündel ab, deren Datei nicht mehr vorliegt', async () => {
+      await withTempUploadDir(async () => {
+        const other = Buffer.concat([pdf, Buffer.from('x')])
+        const { runId } = await analyzeBulkPdfUpload(
+          [
+            { buffer: pdf, fileName: 'AB_Knochen.pdf' },
+            { buffer: other, fileName: 'AB_Muskel.pdf' },
+          ],
+          userId,
+        )
+        const commit = await commitBulkUpload(runId, userId)
+        const knochen = (await listMaterials({ pageSize: 20 })).items.find((m) =>
+          m.title.toLowerCase().includes('knochen'),
+        )!
+        // Jemand hat das Material zwischendurch gelöscht – seine Datei ist weg.
+        await deleteMaterial(knochen.id)
+        expect(commit.materialIds).toContain(knochen.id)
+
+        const undone = await undoBulkUpload(runId)
+        expect(undone.removed.materialien).toBe(1)
+        expect(undone.missingClusters).toBe(1)
+
+        const overview = await getBulkRunOverview(runId)
+        const cluster = overview.clusters.find((c) => c.stem.toLowerCase().includes('knochen'))!
+        expect(overview.mapping?.records?.[cluster.clusterId]?.include).toBe(false)
+        expect(cluster.warnings.some((w) => /liegt nicht mehr vor/.test(w))).toBe(true)
+        expect(overview.files.find((f) => f.fileName === 'AB_Knochen.pdf')?.stagingMissing).toBe(true)
+
+        const second = await commitBulkUpload(runId, userId)
+        expect(second.status).toBe('importiert')
+        expect(second.stats.materialien).toBe(1)
+        expect(second.stats.uebersprungen).toBe(1)
+
+        // Wer das Bündel trotzdem wieder anwählt, bekommt einen Fehler statt eines leeren Materials.
+        await undoBulkUpload(runId)
+        const nochmal = await getBulkRunOverview(runId)
+        await updateBulkMapping(runId, {
+          records: {
+            ...nochmal.mapping!.records,
+            [cluster.clusterId]: { ...nochmal.mapping!.records![cluster.clusterId]!, include: true },
+          },
+        })
+        const third = await commitBulkUpload(runId, userId)
+        expect(third.status).toBe('teilweise_importiert')
+        expect(third.errors[0]?.message).toMatch(/liegt nicht mehr vor/)
+        expect((await listMaterials({ pageSize: 20 })).total).toBe(1)
+      })
+    })
+
+    it('legt bei teilweiser Übernahme nur die fehlgeschlagenen Bündel erneut an', async () => {
+      await withTempUploadDir(async () => {
+        const other = Buffer.concat([pdf, Buffer.from('x')])
+        const { runId } = await analyzeBulkPdfUpload(
+          [
+            { buffer: pdf, fileName: 'AB_Auge.pdf' },
+            { buffer: other, fileName: 'AB_Ohr.pdf' },
+          ],
+          userId,
+          { createLehrwerk: true, lehrwerkTitle: 'Natura 2' },
+        )
+        const overview = await getBulkRunOverview(runId)
+        const ohr = overview.clusters.find((c) => c.stem.toLowerCase().includes('ohr'))!
+        const records = overview.mapping!.records!
+        await updateBulkMapping(runId, {
+          records: { ...records, [ohr.clusterId]: { ...records[ohr.clusterId]!, title: '  ' } },
+        })
+
+        const first = await commitBulkUpload(runId, userId)
+        expect(first.status).toBe('teilweise_importiert')
+        expect(first.stats.materialien).toBe(2)
+        expect(first.stats.fehlgeschlagen).toBe(1)
+
+        const partial = await getBulkRunOverview(runId)
+        expect(partial.canRetry).toBe(true)
+        expect(partial.canDiscard).toBe(false)
+        expect(partial.retryableClusterIds).toEqual([ohr.clusterId])
+        expect(partial.clusterOutcomes[ohr.clusterId]?.outcome).toBe('fehlgeschlagen')
+        expect(Object.values(partial.clusterOutcomes).filter((o) => o.outcome === 'erstellt')).toHaveLength(1)
+        const ohrFile = partial.files.find((f) => f.fileName === 'AB_Ohr.pdf')!
+        expect(await fileExists(ohrFile.stagingPath)).toBe(true)
+
+        // Titel korrigieren und nachholen.
+        await updateBulkMapping(runId, {
+          records: { ...partial.mapping!.records, [ohr.clusterId]: { ...records[ohr.clusterId]!, title: 'Das Ohr' } },
+        })
+        const retry = await commitBulkUpload(runId, userId)
+        expect(retry.status).toBe('importiert')
+        expect(retry.materialIds).toHaveLength(1)
+        expect(retry.stats.materialien).toBe(3)
+        expect(retry.stats.dateien).toBe(2)
+        expect(retry.stats.fehlgeschlagen).toBe(0)
+        expect(await fileExists(ohrFile.stagingPath)).toBe(false)
+
+        const lehrwerke = await listMaterials({ pageSize: 20, filters: { materialTypes: ['lehrwerk'] } })
+        expect(lehrwerke.total).toBe(1)
+        const detail = await getMaterialDetail(retry.materialIds[0]!)
+        expect(detail?.title).toBe('Das Ohr')
+        expect(
+          detail?.relations.some((r) => r.relationType === 'gehoert_zu' && r.material.id === lehrwerke.items[0]!.id),
+        ).toBe(true)
+
+        const done = await getBulkRunOverview(runId)
+        expect(done.canRetry).toBe(false)
+        expect(done.stats?.fehlgeschlagen).toBe(0)
+        expect(done.errorMessage).toBeNull()
+
+        // Rückgängig entfernt alles, was beide Durchgänge angelegt haben.
+        const undone = await undoBulkUpload(runId)
+        expect(undone.removed.materialien).toBe(3)
+        expect((await listMaterials({ pageSize: 20 })).total).toBe(0)
+      })
+    })
+
+    it('hängt nachgeholte Stationen an den schon angelegten Lernzirkel', async () => {
+      await withTempUploadDir(async () => {
+        const { zipSync } = await import('fflate')
+        const archive = Buffer.from(
+          zipSync({
+            'Katze/Lernzirkel Katze/Station 1 - Knochen.pdf': new Uint8Array(pdf),
+            'Katze/Lernzirkel Katze/Station 2 - Auge.pdf': new Uint8Array(Buffer.concat([pdf, Buffer.from('a')])),
+            'Katze/Lernzirkel Katze/Station 3 - Ohr.pdf': new Uint8Array(Buffer.concat([pdf, Buffer.from('b')])),
+          }),
+        )
+        const { runId } = await analyzeBulkPdfUpload([{ buffer: archive, fileName: 'Katze.zip' }], userId)
+        const overview = await getBulkRunOverview(runId)
+        const auge = overview.clusters.find((c) => c.stem.toLowerCase().includes('auge'))!
+        const records = overview.mapping!.records!
+        await updateBulkMapping(runId, {
+          records: { ...records, [auge.clusterId]: { ...records[auge.clusterId]!, title: '' } },
+        })
+
+        const first = await commitBulkUpload(runId, userId)
+        expect(first.status).toBe('teilweise_importiert')
+        expect(first.stats.lernzirkel).toBe(1)
+
+        await updateBulkMapping(runId, {
+          records: { ...records, [auge.clusterId]: { ...records[auge.clusterId]!, title: 'Station Auge' } },
+        })
+        const retry = await commitBulkUpload(runId, userId)
+        expect(retry.status).toBe('importiert')
+        expect(retry.stats.lernzirkel).toBe(1)
+
+        const alle = await listMaterials({ pageSize: 50 })
+        const lernzirkel = alle.items.filter((m) => m.materialType === 'lernzirkel')
+        expect(lernzirkel).toHaveLength(1)
+        const detail = await getMaterialDetail(lernzirkel[0]!.id)
+        expect(
+          detail?.relations.filter((r) => r.relationType === 'gehoert_zu' && r.direction === 'eingehend'),
+        ).toHaveLength(3)
+      })
+    })
+
+    it('verwirft übrige Dateien einer teilweisen Übernahme, ohne Materialien zu löschen', async () => {
+      await withTempUploadDir(async () => {
+        const other = Buffer.concat([pdf, Buffer.from('x')])
+        const { runId } = await analyzeBulkPdfUpload(
+          [
+            { buffer: pdf, fileName: 'AB_Zunge.pdf' },
+            { buffer: other, fileName: 'AB_Nase.pdf' },
+          ],
+          userId,
+        )
+        const overview = await getBulkRunOverview(runId)
+        const nase = overview.clusters.find((c) => c.stem.toLowerCase().includes('nase'))!
+        const records = overview.mapping!.records!
+        await updateBulkMapping(runId, {
+          records: { ...records, [nase.clusterId]: { ...records[nase.clusterId]!, title: '' } },
+        })
+        await commitBulkUpload(runId, userId)
+        const naseFile = overview.files.find((f) => f.fileName === 'AB_Nase.pdf')!
+        expect(await fileExists(naseFile.stagingPath)).toBe(true)
+        expect((await getBulkRunOverview(runId)).canDiscardLeftovers).toBe(true)
+
+        await discardBulkLeftovers(runId)
+        expect(await fileExists(naseFile.stagingPath)).toBe(false)
+        const after = await getBulkRunOverview(runId)
+        expect(after.status).toBe('teilweise_importiert')
+        expect(after.canRetry).toBe(false)
+        expect(after.canDiscardLeftovers).toBe(false)
+        expect(after.canUndo).toBe(true)
+        expect((await listMaterials({ pageSize: 20 })).total).toBe(1)
+
+        // Rückgängig geht weiterhin; das verworfene Bündel bleibt abgewählt.
+        const undone = await undoBulkUpload(runId)
+        expect(undone.removed.materialien).toBe(1)
+        expect(undone.missingClusters).toBe(1)
+        const reset = await getBulkRunOverview(runId)
+        expect(reset.mapping?.records?.[nase.clusterId]?.include).toBe(false)
       })
     })
   })

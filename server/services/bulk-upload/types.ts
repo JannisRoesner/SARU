@@ -51,6 +51,11 @@ export interface BulkUploadDetectedFile {
   sizeBytes: number
   checksum: string
   stagingPath: string
+  /**
+   * Keine Kopie mehr im Zwischenspeicher (übrige Dateien verworfen oder beim Rückgängigmachen
+   * nicht wiederherstellbar). Das Bündel lässt sich dann nicht mehr anlegen.
+   */
+  stagingMissing?: boolean
   /** Sidecar mit dem einmalig extrahierten Volltext (Textebene oder Vision). */
   extractedTextKey?: string | null
   extractionMethod?: 'text_layer' | 'vision' | 'none'

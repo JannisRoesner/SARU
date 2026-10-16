@@ -60,9 +60,10 @@ describe('Verwaiste Stapel abschließen', () => {
       reason: 'neustart',
     })
     expect(decision.status).toBe('teilweise_importiert')
-    expect(decision.discardStaging).toBe(true)
+    expect(decision.discardStaging).toBe(false)
     expect(decision.errorMessage).toContain('3 Materialien wurden')
     expect(decision.errorMessage).toMatch(/rückgängig/)
+    expect(decision.errorMessage).toMatch(/erneut anlegen/)
   })
 
   it('formuliert die Einzahl richtig', () => {
