@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import {
   AI_PROVIDERS,
+  AI_ROLLEN,
+  AI_ROLLEN_ANBIETER,
   DIFFERENTIATION_LEVELS,
   DIFFERENZIERUNG_PROFILE,
   LESSON_STATUSES,
@@ -398,7 +400,16 @@ export const aiMaterialCreateCommitSchema = z.object({
 
 // --------------------------------------------------------------- Einstellungen
 
-export const aiSettingsSchema = z
+const aiRollenAnbieterSchema = z
+  .object({
+    provider: z.enum(AI_ROLLEN_ANBIETER),
+    baseUrl: z.string().max(500),
+    /** Wie beim Standardanbieter: weggelassen = unverändert, leer = löschen. */
+    apiKey: z.string().max(500).nullable().optional(),
+  })
+  .partial()
+
+const aiSettingsFelder = z
   .object({
     enabled: z.boolean(),
     provider: z.enum(AI_PROVIDERS),
@@ -420,8 +431,13 @@ export const aiSettingsSchema = z
     timeoutMs: z.coerce.number().int().min(5000).max(600_000),
     refererUrl: z.string().max(300),
     appTitle: z.string().max(120),
+    rollen: z
+      .object({ chat: aiRollenAnbieterSchema, vision: aiRollenAnbieterSchema, embedding: aiRollenAnbieterSchema })
+      .partial(),
   })
   .partial()
+
+export const aiSettingsSchema = aiSettingsFelder
   .refine(
     (v) => !v.enabled || Boolean(v.chatModel?.trim()),
     { message: 'Bitte ein Chat-Modell angeben.', path: ['chatModel'] },
@@ -430,8 +446,18 @@ export const aiSettingsSchema = z
     (v) => !v.embeddingsEnabled || Boolean(v.embeddingModel?.trim()),
     { message: 'Bitte ein Embedding-Modell angeben.', path: ['embeddingModel'] },
   )
+  .refine(
+    // Ohne eigenes Vision-Modell liefe Vision über den Chat-Anbieter – der eigene Anbieter bliebe wirkungslos.
+    (v) => !v.rollen?.vision?.provider || v.rollen.vision.provider === 'standard' || Boolean(v.visionModel?.trim()),
+    { message: 'Für einen eigenen Vision-Anbieter bitte ein Vision-Modell angeben.', path: ['visionModel'] },
+  )
 
-export const aiTestSchema = aiSettingsSchema
+/**
+ * Verbindungstest und Modellliste: Formularstand plus optional die zu prüfende
+ * Aufgabe. Ohne Pflichtfeld-Prüfungen – die Modellliste wird ja gerade gebraucht,
+ * um die Modelle auszuwählen.
+ */
+export const aiTestSchema = aiSettingsFelder.extend({ rolle: z.enum(AI_ROLLEN).optional() })
 
 export const uploadSettingsSchema = z
   .object({

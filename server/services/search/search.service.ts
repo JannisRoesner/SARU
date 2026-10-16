@@ -4,7 +4,7 @@ import { queryRows, useDatabase, type Database } from '../../database/client'
 import { EMBEDDING_DIMENSIONS } from '../../database/schema'
 import { createLogger } from '../../utils/logger'
 import { createEmbeddings } from '../ai/client'
-import { getAiSettings, type AiSettings } from '../settings.service'
+import { aiVerbindung, getAiSettings, type AiSettings } from '../settings.service'
 import type { IndexEntityType } from './indexer'
 
 const log = createLogger('search')
@@ -66,10 +66,12 @@ async function embedQuery(
 ): Promise<{ vector: number[]; model: string } | null> {
   if (!settings.enabled || !settings.embeddingsEnabled || !settings.embeddingModel) return null
 
-  const modelName = resolveEmbeddingModel(settings.provider, settings.embeddingModel)
+  const verbindung = aiVerbindung(settings, 'embedding')
+  const modelName = resolveEmbeddingModel(verbindung.provider, settings.embeddingModel)
   // Muss zur Kennung passen, unter der der Indexer die Vektoren speichert.
   const model = embeddingIndexKey(modelName)
-  const key = `${model}:${query}`
+  // Der Server gehört zum Schlüssel: Gleichnamige Modelle zweier Server liefern verschiedene Vektoren.
+  const key = `${verbindung.provider}|${verbindung.baseUrl}|${model}:${query}`
   const cached = embeddingCache.get(key)
   if (cached) return cached
 

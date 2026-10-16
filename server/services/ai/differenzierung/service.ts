@@ -10,7 +10,7 @@ import { recordAudit } from '../../audit.service'
 import { getMaterialDetail } from '../../../repositories/material.repository'
 import { addFileAsset, addVariant } from '../../material.service'
 import { deleteFile, storeFile } from '../../storage.service'
-import { getAiSettings } from '../../settings.service'
+import { aiVerbindung, getAiSettings } from '../../settings.service'
 import { chatCompletion } from '../client'
 import { ensureExtractedText } from '../document-text'
 import { loadPrimarySourceAsset } from '../solutions'
@@ -216,7 +216,7 @@ export async function enqueueDifferentiation(
       userId,
       materialId,
       kind: 'differenzierung',
-      provider: settings.provider,
+      provider: aiVerbindung(settings, 'chat').provider,
       model: settings.chatModel,
       status: 'wartend',
       prompt: JSON.stringify({
@@ -356,7 +356,7 @@ export async function generateDifferentiation(jobId: string): Promise<void> {
     draftFileName: fileName,
     draftMimeType: stored.mimeType,
     model: completion.model,
-    provider: settings.provider,
+    provider: aiVerbindung(settings, 'chat').provider,
   }
 
   await db

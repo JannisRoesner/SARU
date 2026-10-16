@@ -1,5 +1,5 @@
 import { extractJsonObject } from '../../../../utils/json-parse'
-import type { AiSettings } from '../../../settings.service'
+import { aiSettingsFuerRolle, type AiSettings } from '../../../settings.service'
 import { chatCompletion, supportsNativePdf, type ChatPart } from '../../client'
 import type { SolutionBBox } from '../../document-fill'
 import { rasterizePdf } from '../../rasterize'
@@ -425,6 +425,8 @@ export async function repairPdfLayoutViaVision(args: {
   focus?: PdfLayoutVisionFocus
   expectedDiagramTargetCount?: number
 }): Promise<PdfVisionLayoutResult | null> {
+  // Anbieter, Adresse und Schlüssel der Vision-Aufgabe – auch für die PDF-Fähigkeit.
+  const settings = aiSettingsFuerRolle(args.settings, 'vision')
   // Auch der Reparatur-Workflow eines bereits gespeicherten Prüfentwurfs soll
   // präzise PDF-Vektoren nutzen. Vision bleibt nur der Fallback, falls die
   // erwartete Anzahl nicht eindeutig aus Führungslinien ableitbar ist.
@@ -459,9 +461,9 @@ export async function repairPdfLayoutViaVision(args: {
     }
   }
 
-  if (supportsNativePdf(args.settings.provider)) {
+  if (supportsNativePdf(settings.provider)) {
     const completion = await chatCompletion(
-      args.settings,
+      settings,
       [{
         role: 'user',
         parts: [
@@ -486,7 +488,7 @@ export async function repairPdfLayoutViaVision(args: {
       {
         model: args.model,
         temperature: 0,
-        maxOutputTokens: Math.min(5000, Math.max(1600, args.settings.maxOutputTokens)),
+        maxOutputTokens: Math.min(5000, Math.max(1600, settings.maxOutputTokens)),
         jsonMode: true,
       },
     )
@@ -530,12 +532,12 @@ export async function repairPdfLayoutViaVision(args: {
       )
     }
     const completion = await chatCompletion(
-      args.settings,
+      settings,
       [{ role: 'user', parts }],
       {
         model: args.model,
         temperature: 0,
-        maxOutputTokens: Math.min(4000, Math.max(1400, args.settings.maxOutputTokens)),
+        maxOutputTokens: Math.min(4000, Math.max(1400, settings.maxOutputTokens)),
         jsonMode: true,
       },
     )

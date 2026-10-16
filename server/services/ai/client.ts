@@ -2,7 +2,14 @@ import { kiAnbieterFehlermeldung } from '#shared/utils/public-error'
 import { resolveEmbeddingModel } from '#shared/utils/embeddings'
 import { appError } from '../../utils/errors'
 import { createLogger } from '../../utils/logger'
-import { DEFAULT_BASE_URLS, type AiProviderId, type AiSettings } from '../settings.service'
+import type { AiRolle } from '#shared/types/domain'
+import {
+  aiSettingsFuerRolle,
+  aiSettingsFuerVerbindungstest,
+  DEFAULT_BASE_URLS,
+  type AiProviderId,
+  type AiSettings,
+} from '../settings.service'
 
 const log = createLogger('ai:client')
 
@@ -232,8 +239,23 @@ async function ollamaChatCompletion(
   }
 }
 
+/**
+ * Ordnet eine Chat-Anfrage der Aufgabe zu, deren Anbieter sie bekommt: ein
+ * ausdrücklich gewähltes Chat- bzw. Vision-Modell entscheidet, sonst ob Bilder
+ * oder Dateien mitgeschickt werden.
+ */
+export function chatRolle(settings: AiSettings, messages: ChatMessage[], model?: string): AiRolle {
+  const gewaehlt = model?.trim()
+  const istChat = Boolean(gewaehlt) && gewaehlt === settings.chatModel?.trim()
+  const istVision = Boolean(gewaehlt) && gewaehlt === settings.visionModel?.trim()
+  if (istChat && !istVision) return 'chat'
+  if (istVision && !istChat) return 'vision'
+  const mitMedien = messages.some((message) => message.parts.some((part) => part.type !== 'text'))
+  return mitMedien ? 'vision' : 'chat'
+}
+
 export async function chatCompletion(
-  settings: AiSettings,
+  gesamt: AiSettings,
   messages: ChatMessage[],
   options: {
     model?: string
@@ -243,8 +265,11 @@ export async function chatCompletion(
     jsonMode?: boolean
     /** Striktes JSON Schema; derzeit nur für den sicher unterstützten OpenAI-Pfad. */
     jsonSchema?: { name: string; schema: Record<string, unknown> }
+    /** Aufgabe, deren Anbieter die Anfrage bekommt; sonst aus Modell und Inhalt abgeleitet. */
+    rolle?: AiRolle
   } = {},
 ): Promise<ChatResult> {
+  const settings = aiSettingsFuerRolle(gesamt, options.rolle ?? chatRolle(gesamt, messages, options.model))
   const model = options.model || settings.chatModel
   if (!model) {
     throw appError('KI_NICHT_KONFIGURIERT', 'Es ist kein Sprachmodell konfiguriert.')
@@ -377,11 +402,12 @@ function serializeEmbeddingInput(input: EmbeddingInput, maxZeichen: number): unk
 }
 
 export async function createEmbeddings(
-  settings: AiSettings,
+  gesamt: AiSettings,
   inputs: EmbeddingInput[],
   targetDimensions: number,
 ): Promise<number[][]> {
   if (inputs.length === 0) return []
+  const settings = aiSettingsFuerRolle(gesamt, 'embedding')
   const configured = settings.embeddingModel
   if (!configured) {
     throw appError('KI_NICHT_KONFIGURIERT', 'Es ist kein Embedding-Modell konfiguriert.')
@@ -626,10 +652,16 @@ export async function listModels(settings: AiSettings, timeoutMs = 20_000): Prom
   return { modelle, warnung }
 }
 
-/** Prüft Erreichbarkeit und Zugangsdaten für die Einstellungsseite. */
+/**
+ * Prüft Erreichbarkeit und Zugangsdaten für die Einstellungsseite – ohne
+ * Rolle den Standardanbieter, sonst die Verbindung der jeweiligen Aufgabe.
+ * Das Embedding-Modell wird mitgeprüft, wenn es über die getestete Verbindung läuft.
+ */
 export async function testConnection(
-  settings: AiSettings,
+  gesamt: AiSettings,
+  rolle?: AiRolle,
 ): Promise<{ ok: boolean; message: string; models?: string[] }> {
+  const settings = rolle ? aiSettingsFuerVerbindungstest(gesamt, rolle) : gesamt
   try {
     const { modelle, warnung } = await listModels(settings, Math.min(settings.timeoutMs, 20_000))
     const models = modelle.map((m) => m.id)
@@ -639,10 +671,14 @@ export async function testConnection(
       ? `Verbindung erfolgreich. ${models.length} Modelle verfügbar.`
       : 'Verbindung erfolgreich.'
 
-    if (settings.embeddingsEnabled && settings.embeddingModel.trim()) {
+    const embeddingHierPruefen = rolle
+      ? rolle === 'embedding'
+      : (gesamt.rollen?.embedding.provider ?? 'standard') === 'standard'
+    if (embeddingHierPruefen && gesamt.embeddingsEnabled && gesamt.embeddingModel.trim()) {
       try {
-        const model = resolveEmbeddingModel(settings.provider, settings.embeddingModel)
-        await createEmbeddings({ ...settings, embeddingModel: model }, ['Verbindungstest'], 1536)
+        const embedding = aiSettingsFuerRolle(gesamt, 'embedding')
+        const model = resolveEmbeddingModel(embedding.provider, gesamt.embeddingModel)
+        await createEmbeddings({ ...embedding, embeddingModel: model }, ['Verbindungstest'], 1536)
         message += ` Embedding-Modell „${model}“ antwortet.`
       } catch (error) {
         const detail = error instanceof Error ? error.message : 'Unbekannter Fehler'

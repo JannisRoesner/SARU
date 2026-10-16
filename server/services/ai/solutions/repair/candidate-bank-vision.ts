@@ -1,5 +1,5 @@
 import { extractJsonObject } from '../../../../utils/json-parse'
-import type { AiSettings } from '../../../settings.service'
+import { aiSettingsFuerRolle, type AiSettings } from '../../../settings.service'
 import { chatCompletion, supportsNativePdf, type ChatPart } from '../../client'
 import { visionExtractionAvailable } from '../../document-text'
 import { rasterizePdf } from '../../rasterize'
@@ -68,9 +68,11 @@ export async function repairCandidateBankViaVision(args: {
   /** 1-basierte Seite mit der Wortliste (Standard: erste Seiten). */
   page?: number
 }): Promise<CandidateBank | null> {
-  if (!visionExtractionAvailable(args.settings)) return null
+  // Anbieter, Adresse und Schlüssel der Vision-Aufgabe – auch für die PDF-Fähigkeit.
+  const settings = aiSettingsFuerRolle(args.settings, 'vision')
+  if (!visionExtractionAvailable(settings)) return null
 
-  const model = (args.settings.visionModel || args.settings.chatModel).trim()
+  const model = (settings.visionModel || settings.chatModel).trim()
   const parts: ChatPart[] = [
     {
       type: 'text',
@@ -78,7 +80,7 @@ export async function repairCandidateBankViaVision(args: {
     },
   ]
 
-  if (supportsNativePdf(args.settings.provider)) {
+  if (supportsNativePdf(settings.provider)) {
     parts.push({
       type: 'file',
       mimeType: 'application/pdf',
@@ -97,7 +99,7 @@ export async function repairCandidateBankViaVision(args: {
     }
   }
 
-  const result = await chatCompletion(args.settings, [{ role: 'user', parts }], {
+  const result = await chatCompletion(settings, [{ role: 'user', parts }], {
     model,
     temperature: 0,
     maxOutputTokens: 1024,

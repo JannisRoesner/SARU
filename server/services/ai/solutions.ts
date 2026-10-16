@@ -18,6 +18,8 @@ import {
 import { extensionOf, resolveStoragePath } from '../storage.service'
 import { convertOfficeFileToPdf } from '../office-convert.service'
 import {
+  aiSettingsFuerRolle,
+  aiVerbindung,
   getAiSettings,
   getPrivacySettings,
   type AiSettings,
@@ -141,7 +143,7 @@ export async function enqueueSolutionGeneration(
         userId,
         materialId,
         kind: 'musterloesung',
-        provider: settings.provider,
+        provider: aiVerbindung(settings, (options.useVision ?? true) ? 'vision' : 'chat').provider,
         model: provisionalModel,
         status: 'wartend',
       })
@@ -186,9 +188,9 @@ export async function generateSolution(
   options: GenerateSolutionOptions = {},
 ): Promise<GenerateSolutionResult> {
   const db = useDatabase()
-  const settings = await getAiSettings()
+  const gesamt = await getAiSettings()
 
-  if (!settings.enabled) {
+  if (!gesamt.enabled) {
     throw appError(
       'KI_NICHT_KONFIGURIERT',
       'Die KI-Unterstützung ist nicht aktiviert. Bitte in den Einstellungen einrichten.',
@@ -208,6 +210,8 @@ export async function generateSolution(
 
   // PDF-Arbeitsblätter brauchen Seitenbilder für Lückenpositionen (bbox).
   const useVision = options.useVision ?? true
+  // Der ganze Lauf nutzt ein Modell und damit den Anbieter dieser Aufgabe.
+  const settings = aiSettingsFuerRolle(gesamt, useVision ? 'vision' : 'chat')
   const model = pickSolutionModel(settings, options.model, useVision)
 
   const documentText = variant

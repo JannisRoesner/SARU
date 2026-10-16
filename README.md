@@ -14,7 +14,7 @@ Selbst gehostetes Archiv für Unterrichtsreihen, Stunden und Materialien – mit
 - KI-Musterlösungen aus PDF- und Office-Dateien — klar als KI gekennzeichnet, mit Ausgangsmaterial verknüpft
 - Moodle-Kursarchive zum Ablegen für Wiederherstellung im SchulMoodle (Archiv-Upload, kein Moodle-API-Import)
 - Mehrbenutzerbetrieb mit Rollen (Administration / Lehrkraft / Lesezugriff)
-- Einstellungen für KI, Uploads, Darstellung und Datenschutz
+- Einstellungen für KI, Uploads, Darstellung und Datenschutz – KI-Anbieter auch je Aufgabe (Texte, Vision, Embeddings), etwa Vision extern und Embeddings lokal
 - Sicherung & Umzug: alle Inhalte als eine ZIP-Datei (lesbar nach Lehrwerk/Fach geordnet) exportieren und in eine andere Instanz einspielen – mit Auswahl, Dublettenerkennung und Rückgängig
 
 ## Schnellstart mit Docker

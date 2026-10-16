@@ -138,6 +138,14 @@ export type SearchEntityType = (typeof SEARCH_ENTITY_TYPES)[number]
 export const AI_PROVIDERS = ['openai', 'ollama', 'openrouter', 'openai_kompatibel'] as const
 export type AiProvider = (typeof AI_PROVIDERS)[number]
 
+/** Aufgaben, für die je ein eigener KI-Anbieter eingestellt werden kann. */
+export const AI_ROLLEN = ['chat', 'vision', 'embedding'] as const
+export type AiRolle = (typeof AI_ROLLEN)[number]
+
+/** `standard` übernimmt die Verbindung des Standardanbieters. */
+export const AI_ROLLEN_ANBIETER = ['standard', ...AI_PROVIDERS] as const
+export type AiRollenAnbieterId = (typeof AI_ROLLEN_ANBIETER)[number]
+
 export const IMPORT_STATUSES = [
   'analysiert',
   'vorschau',

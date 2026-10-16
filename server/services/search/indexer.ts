@@ -10,7 +10,7 @@ import { EMBEDDING_DIMENSIONS, searchDocuments, type SearchImageSource } from '.
 import { sha256 } from '../../utils/crypto'
 import { createLogger } from '../../utils/logger'
 import { createEmbeddings, type EmbeddingImage } from '../ai/client'
-import { getAiSettings, type AiSettings } from '../settings.service'
+import { aiVerbindung, getAiSettings, gleicheVerbindung, type AiSettings } from '../settings.service'
 
 const log = createLogger('search:index')
 
@@ -273,7 +273,7 @@ const EMBED_BATCH_SIZE = 32
 /** Kennung, unter der Vektoren gespeichert und gesucht werden (null = Vektorsuche aus). */
 export function activeEmbeddingModel(settings: AiSettings): string | null {
   if (!settings.enabled || !settings.embeddingsEnabled || !settings.embeddingModel) return null
-  return embeddingIndexKey(resolveEmbeddingModel(settings.provider, settings.embeddingModel))
+  return embeddingIndexKey(resolveEmbeddingModel(aiVerbindung(settings, 'embedding').provider, settings.embeddingModel))
 }
 
 /**
@@ -286,7 +286,7 @@ async function embedBatch(limit: number): Promise<number | null> {
   const settings = await getAiSettings()
   const model = activeEmbeddingModel(settings)
   if (!model) return 0
-  const modelName = resolveEmbeddingModel(settings.provider, settings.embeddingModel)
+  const modelName = resolveEmbeddingModel(aiVerbindung(settings, 'embedding').provider, settings.embeddingModel)
 
   embedding = true
   try {
@@ -411,7 +411,11 @@ async function embedImageBatch(
 
 /** Ob Seitenbilder indiziert und eingebettet werden. */
 export function imageEmbeddingsActive(settings: AiSettings): boolean {
-  return Boolean(settings.embedImages && activeEmbeddingModel(settings) && supportsImageEmbeddings(settings.provider))
+  return Boolean(
+    settings.embedImages &&
+      activeEmbeddingModel(settings) &&
+      supportsImageEmbeddings(aiVerbindung(settings, 'embedding').provider),
+  )
 }
 
 /**
@@ -523,6 +527,28 @@ export async function clearEmbeddings(): Promise<void> {
   await useDatabase()
     .update(searchDocuments)
     .set({ embedding: null, embeddingModel: null, embeddedAt: null })
+}
+
+/**
+ * Gleicher Modellname, aber ein anderer Server: Die gespeicherten Vektoren tragen
+ * dieselbe Kennung, stammen aber womöglich aus einem anderen Modell (etwa einem
+ * llama.cpp-Alias). Dann werden sie verworfen und vollständig neu berechnet,
+ * damit die Suche nie Vektoren zweier Modelle vergleicht. Ein neuer Modellname
+ * braucht das nicht – dessen Vektoren gelten ohnehin als veraltet.
+ */
+export async function embeddingsNachAnbieterwechselVerwerfen(
+  vorher: AiSettings,
+  nachher: AiSettings,
+): Promise<boolean> {
+  const modell = activeEmbeddingModel(vorher)
+  if (modell === null || modell !== activeEmbeddingModel(nachher)) return false
+  if (gleicheVerbindung(aiVerbindung(vorher, 'embedding'), aiVerbindung(nachher, 'embedding'))) return false
+  await clearEmbeddings()
+  log.info('Embedding-Server gewechselt – Vektoren werden neu berechnet', {
+    modell,
+    provider: aiVerbindung(nachher, 'embedding').provider,
+  })
+  return true
 }
 
 /**

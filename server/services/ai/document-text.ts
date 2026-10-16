@@ -8,7 +8,7 @@ import {
   type ExtractionResult,
 } from '../extraction.service'
 import { extensionOf, resolveStoragePath } from '../storage.service'
-import type { AiSettings } from '../settings.service'
+import { aiSettingsFuerRolle, type AiSettings } from '../settings.service'
 import { chatCompletion, supportsNativePdf, type ChatPart } from './client'
 import { rasterizePdf } from './rasterize'
 
@@ -216,11 +216,13 @@ Wenn etwas unleserlich ist, überspringe es still.`
 async function extractTextViaVision(
   buffer: Buffer,
   fileName: string,
-  settings: AiSettings,
+  gesamt: AiSettings,
   maxPages?: number,
   maxOutputTokens?: number,
   ocrHint?: 'lehrwerk' | 'material',
 ): Promise<{ text: string; pageCount?: number; error?: string }> {
+  // Texterkennung läuft immer über den Vision-Anbieter, auch innerhalb von Chat-Aufgaben.
+  const settings = aiSettingsFuerRolle(gesamt, 'vision')
   const model = (settings.visionModel || settings.chatModel).trim()
   const parts: ChatPart[] = [
     {
