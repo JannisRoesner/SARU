@@ -53,6 +53,8 @@ const { data, refresh } = await useFetch<{
     temperature: number
     maxOutputTokens: number
     timeoutMs: number
+    denkmodusMusterloesungen?: boolean
+    denkBudget?: number
     refererUrl: string
     appTitle: string
     rollen?: Record<AiRolle, RollenAnbieter>
@@ -82,6 +84,8 @@ const formular = reactive({
   temperature: 0.2,
   maxOutputTokens: 4096,
   timeoutMs: 180000,
+  denkmodusMusterloesungen: false,
+  denkBudget: 4000,
   refererUrl: '',
   appTitle: 'SARU',
   rollen: { chat: standardRolle(), vision: standardRolle(), embedding: standardRolle() } as Record<
@@ -190,6 +194,19 @@ interface IndexStatus {
 }
 
 const bildEmbeddingsMoeglich = computed(() => supportsImageEmbeddings(wirksamerAnbieter('embedding')))
+
+/** Wie die Anbieter für Musterlösungen (Chat und Vision) mit dem Denkbudget umgehen. */
+const denkmodusHinweis = computed(() => {
+  const anbieter = new Set([wirksamerAnbieter('chat'), wirksamerAnbieter('vision')])
+  if (anbieter.has('openai')) {
+    return 'Bei OpenAI wirkt der Denkmodus nicht – dort bleiben die Anfragen unverändert.'
+  }
+  if (anbieter.has('ollama') || anbieter.has('openai_kompatibel')) {
+    return 'Nur OpenRouter hält das Denkbudget genau ein. Ollama und OpenAI-kompatible Server (llama.cpp, vLLM) ' +
+      'schalten das Denken nur ein und erhöhen das Ausgabelimit um das Budget.'
+  }
+  return null
+})
 
 const { data: indexStatus, refresh: indexStatusLaden } =
   await useFetch<IndexStatus>('/api/search/index-status')
@@ -720,6 +737,38 @@ async function testen(quelle: Quelle = 'standard') {
           <UiField label="Timeout (ms)" hinweis="Vision-Läufe brauchen oft länger">
             <UiInput v-model="formular.timeoutMs" type="number" min="5000" step="1000" />
           </UiField>
+        </div>
+
+        <div class="space-y-2 text-sm">
+          <div class="flex flex-wrap items-center gap-4">
+            <label class="flex items-center gap-2">
+              <input v-model="formular.denkmodusMusterloesungen" type="checkbox" class="accent-[var(--color-primary)]">
+              Denkmodus für Musterlösungen
+            </label>
+            <label class="flex items-center gap-2" :class="{ 'opacity-50': !formular.denkmodusMusterloesungen }">
+              Denkbudget (Tokens)
+              <UiInput
+                v-model="formular.denkBudget"
+                type="number"
+                min="256"
+                max="32000"
+                step="256"
+                class="w-28"
+                :disabled="!formular.denkmodusMusterloesungen"
+              />
+            </label>
+          </div>
+          <p class="text-xs text-ink-muted">
+            Denkmodelle dürfen beim Lösen und Prüfen von Aufgaben zusätzlich nachdenken – mit eigenem Budget, das
+            nicht von der Antwort abgeht. Metadaten, Kurzbeschreibungen und Texterkennung bleiben ohne Denkmodus.
+            Das kostet mehr Zeit und Tokens; ggf. das Timeout erhöhen.
+          </p>
+          <p
+            v-if="formular.denkmodusMusterloesungen && denkmodusHinweis"
+            class="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-ink-muted"
+          >
+            {{ denkmodusHinweis }}
+          </p>
         </div>
 
         <div class="flex flex-wrap gap-4 text-sm">

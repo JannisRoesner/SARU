@@ -62,6 +62,13 @@ export interface AiSettings {
   temperature: number
   maxOutputTokens: number
   timeoutMs: number
+  /**
+   * Denkmodelle dürfen beim Lösen und Prüfen von Musterlösungen nachdenken.
+   * Metadaten, Kurzbeschreibungen und Texterkennung bleiben immer ohne Denkmodus.
+   */
+  denkmodusMusterloesungen: boolean
+  /** Tokens fürs Nachdenken, zusätzlich zum Antwortbudget der jeweiligen Anfrage. */
+  denkBudget: number
   /** Von OpenRouter für die Aufruferkennung ausgewertet. */
   refererUrl: string
   appTitle: string
@@ -133,6 +140,8 @@ export const defaultAiSettings: AiSettings = {
   temperature: 0.2,
   maxOutputTokens: 4000,
   timeoutMs: 180_000,
+  denkmodusMusterloesungen: false,
+  denkBudget: 4000,
   refererUrl: '',
   appTitle: 'SARU',
   rollen: standardRollen(),

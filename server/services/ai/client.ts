@@ -168,28 +168,54 @@ function serializeOllamaNativeParts(parts: ChatPart[]): {
   }
 }
 
+export interface ChatOptions {
+  model?: string
+  temperature?: number
+  maxOutputTokens?: number
+  /** Erzwingt JSON-Ausgabe über das OpenAI-kompatible response_format. */
+  jsonMode?: boolean
+  /** Striktes JSON Schema; derzeit nur für den sicher unterstützten OpenAI-Pfad. */
+  jsonSchema?: { name: string; schema: Record<string, unknown> }
+  /** Aufgabe, deren Anbieter die Anfrage bekommt; sonst aus Modell und Inhalt abgeleitet. */
+  rolle?: AiRolle
+  /**
+   * Tokens, die ein Denkmodell zusätzlich zum Antwortbudget nachdenken darf.
+   * Ohne Angabe bleibt der Denkmodus aus. OpenRouter begrenzt das Denken auf
+   * genau dieses Budget; Ollama und OpenAI-kompatible Server schalten es nur ein
+   * und erhöhen das Ausgabelimit entsprechend. OpenAI bleibt unverändert.
+   */
+  denkBudget?: number
+}
+
+/** Gültiges Denkbudget oder `undefined`, wenn der Denkmodus aus bleiben soll. */
+function gueltigesDenkBudget(denkBudget: number | undefined): number | undefined {
+  return denkBudget && denkBudget > 0 ? Math.floor(denkBudget) : undefined
+}
+
+/** Denkbudget für Musterlösungen laut KI-Einstellungen – `undefined`, wenn der Denkmodus aus ist. */
+export function musterloesungDenkBudget(settings: AiSettings): number | undefined {
+  return settings.denkmodusMusterloesungen ? gueltigesDenkBudget(settings.denkBudget) : undefined
+}
+
 async function ollamaChatCompletion(
   settings: AiSettings,
   messages: ChatMessage[],
-  options: {
-    model?: string
-    temperature?: number
-    maxOutputTokens?: number
-    jsonMode?: boolean
-    jsonSchema?: { name: string; schema: Record<string, unknown> }
-  },
+  options: ChatOptions,
   model: string,
 ): Promise<ChatResult> {
+  const denkBudget = gueltigesDenkBudget(options.denkBudget)
+  const antwortBudget = options.maxOutputTokens ?? settings.maxOutputTokens
   const body: Record<string, unknown> = {
     model,
     stream: false,
     // Gemma 4 E4B ignoriert think:false am OpenAI-kompatiblen Endpunkt und
     // kann sein ganzes Budget im reasoning-Feld verbrauchen. /api/chat
-    // unterstützt die Steuerung verbindlich.
-    think: false,
+    // unterstützt die Steuerung verbindlich. Ein Denkbudget kennt Ollama nicht –
+    // es wird deshalb auf das Ausgabelimit aufgeschlagen.
+    think: Boolean(denkBudget),
     options: {
       temperature: options.temperature ?? settings.temperature,
-      num_predict: options.maxOutputTokens ?? settings.maxOutputTokens,
+      num_predict: antwortBudget + (denkBudget ?? 0),
     },
     messages: messages.map((message) => ({
       role: message.role,
@@ -260,17 +286,7 @@ const DENKEN_PFLICHT = new Set<string>()
 export async function chatCompletion(
   gesamt: AiSettings,
   messages: ChatMessage[],
-  options: {
-    model?: string
-    temperature?: number
-    maxOutputTokens?: number
-    /** Erzwingt JSON-Ausgabe über das OpenAI-kompatible response_format. */
-    jsonMode?: boolean
-    /** Striktes JSON Schema; derzeit nur für den sicher unterstützten OpenAI-Pfad. */
-    jsonSchema?: { name: string; schema: Record<string, unknown> }
-    /** Aufgabe, deren Anbieter die Anfrage bekommt; sonst aus Modell und Inhalt abgeleitet. */
-    rolle?: AiRolle
-  } = {},
+  options: ChatOptions = {},
 ): Promise<ChatResult> {
   const settings = aiSettingsFuerRolle(gesamt, options.rolle ?? chatRolle(gesamt, messages, options.model))
   const model = options.model || settings.chatModel
@@ -282,10 +298,13 @@ export async function chatCompletion(
     return ollamaChatCompletion(settings, messages, options, model)
   }
 
+  // OpenAI-Denkmodelle (o-Serie) brauchen eigene Parameter – dort bleibt alles beim Alten.
+  const denkBudget = settings.provider === 'openai' ? undefined : gueltigesDenkBudget(options.denkBudget)
   const body: Record<string, unknown> = {
     model,
     temperature: options.temperature ?? settings.temperature,
-    max_tokens: options.maxOutputTokens ?? settings.maxOutputTokens,
+    // Das Denken bekommt ein eigenes Budget, damit die Antwort ihres behält.
+    max_tokens: (options.maxOutputTokens ?? settings.maxOutputTokens) + (denkBudget ?? 0),
     messages: messages.map((message) => ({
       role: message.role,
       content: serializeParts(message.parts, settings.provider),
@@ -295,12 +314,15 @@ export async function chatCompletion(
   if (settings.provider === 'openai_kompatibel') {
     // Denkmodus abschalten (llama.cpp, vLLM): Sonst verbrauchen Modelle wie
     // Gemma 4 oder Qwen 3 ihr Budget im Denkkanal. Andere Server ignorieren das Feld.
-    body.chat_template_kwargs = { enable_thinking: false }
+    // Mit Denkbudget wird das Denken eingeschaltet; begrenzt ist es dann nur über max_tokens.
+    body.chat_template_kwargs = { enable_thinking: Boolean(denkBudget) }
   }
 
   // Denkmodelle bei OpenRouter (z. B. DeepSeek) verbrauchen sonst das ganze
   // Ausgabebudget im Denkkanal: Antwort leer oder abgeschnitten (finish_reason „length“).
-  const ohneDenken = settings.provider === 'openrouter' && !DENKEN_PFLICHT.has(model)
+  // Mit Denkbudget darf das Modell genau so viele Tokens nachdenken.
+  if (settings.provider === 'openrouter' && denkBudget) body.reasoning = { max_tokens: denkBudget }
+  const ohneDenken = settings.provider === 'openrouter' && !denkBudget && !DENKEN_PFLICHT.has(model)
   if (ohneDenken) body.reasoning = { effort: 'none' }
 
   // llama.cpp, vLLM und LM Studio erzwingen ein JSON Schema per Grammatik.
@@ -359,7 +381,8 @@ export async function chatCompletion(
   // Einige OpenAI-kompatible Ollama-Versionen legen JSON trotz deaktiviertem
   // Thinking im reasoning/thinking-Feld ab. Nur ein vollständiges JSON-Objekt
   // wird als gleichwertiger Antwortkanal akzeptiert – niemals freier Denktext.
-  const alternateJson = [message?.reasoning, message?.thinking, message?.reasoning_content]
+  // Mit eingeschaltetem Denkmodus steht dort echter Denktext – dann nie als Antwort.
+  const alternateJson = denkBudget ? '' : [message?.reasoning, message?.thinking, message?.reasoning_content]
     .map((value) => value?.trim() ?? '')
     .find((value) => value.startsWith('{') && value.endsWith('}')) ?? ''
   const text = content || alternateJson
@@ -384,6 +407,7 @@ export async function chatCompletion(
     inputTokens: payload.usage?.prompt_tokens,
     outputTokens: payload.usage?.completion_tokens,
     responseChannel: content ? 'content' : 'json_reasoning_fallback',
+    denkBudget: denkBudget ?? null,
   })
 
   return {
