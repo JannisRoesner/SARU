@@ -24,6 +24,7 @@ import {
 } from '../material.service'
 import {
   ensureExtractedText,
+  extractedTextSidecarKey,
   readExtractedTextSidecar,
   storeExtractedTextSidecar,
 } from '../ai/document-text'
@@ -51,6 +52,15 @@ import { suggestFileMetadata, titleFromFileName } from './suggest-metadata'
 import { AI_CREATE_ADAPTER_ID } from '../ai/material-create'
 import { clusterBulkFiles, detectFolderRole, fassungLabel, filesAsSingletonClusters } from './pairing'
 import { expandBulkArchives } from './zip'
+import {
+  abortAnalysis,
+  decideOrphanRecovery,
+  isRunActive,
+  registerAnalysis,
+  registerCommit,
+  unregisterAnalysis,
+  unregisterCommit,
+} from './run-control'
 import {
   BULK_AI_CONCURRENCY,
   BULK_EXTRACT_CONCURRENCY,
@@ -269,11 +279,40 @@ export async function startBulkPdfUpload(
   }
 }
 
+/** Staging-Dateien und Textauszüge eines Stapels entfernen. */
+async function deleteStagedFiles(files: BulkUploadDetectedFile[]): Promise<void> {
+  for (const file of files) {
+    const keys = new Set<string>()
+    if (file.stagingPath) {
+      keys.add(file.stagingPath)
+      // Der Auszug liegt neben der Staging-Datei, auch wenn der Lauf ihn noch nicht vermerkt hat.
+      keys.add(extractedTextSidecarKey(file.stagingPath))
+    }
+    if (file.extractedTextKey) keys.add(file.extractedTextKey)
+    for (const key of keys) await deleteFile(key)
+  }
+}
+
 /** Textextraktion, Cluster und KI-Vorschläge – nicht im HTTP-Request. */
 export async function processBulkPdfUpload(runId: string): Promise<void> {
   const run = await requireBulkRun(runId)
   const detected = (run.detected ?? {}) as unknown as BulkUploadDetected
   if (!detected.analysisPending || run.status !== 'laeuft') return
+
+  const signal = registerAnalysis(runId)
+  try {
+    await analyseBulkRun(runId, run, detected, signal)
+  } finally {
+    unregisterAnalysis(runId, signal)
+  }
+}
+
+async function analyseBulkRun(
+  runId: string,
+  run: typeof importRuns.$inferSelect,
+  detected: BulkUploadDetected,
+  signal: AbortSignal,
+): Promise<void> {
 
   const mapping: BulkUploadMapping = {
     ...((run.mapping as unknown as BulkUploadMapping | null) ?? {}),
@@ -292,13 +331,43 @@ export async function processBulkPdfUpload(runId: string): Promise<void> {
     return
   }
 
+  // Abbruch per Knopf (Signal in diesem Prozess) oder Stapel nicht mehr `laeuft`
+  // (abgebrochen oder verworfen, auch von einem anderen Prozess aus).
+  let cancelled = false
+  const isCancelled = async (): Promise<boolean> => {
+    if (cancelled) return true
+    if (signal.aborted) return (cancelled = true)
+    const [current] = await useDatabase()
+      .select({ status: importRuns.status })
+      .from(importRuns)
+      .where(eq(importRuns.id, runId))
+      .limit(1)
+    if (current?.status !== 'laeuft') cancelled = true
+    return cancelled
+  }
+  const stopAfterCancel = async (): Promise<void> => {
+    const [current] = await useDatabase()
+      .select({ id: importRuns.id })
+      .from(importRuns)
+      .where(eq(importRuns.id, runId))
+      .limit(1)
+    // Schon verworfen: Was nach dem Löschen noch geschrieben wurde, hier wegräumen.
+    // Sonst räumt das spätere Verwerfen auf.
+    if (!current) await deleteStagedFiles(files)
+    log.info('Stapel-Analyse abgebrochen', { runId, verworfen: !current })
+  }
+
   const settings = await getAiSettings()
   const subjectLabel = await resolveSubjectLabel(mapping)
   const duplicates = await findAttachmentDuplicates(files.map((file) => file.checksum))
 
   try {
     await addLog(runId, 'info', 'Texte werden gelesen …')
-    const detectedFiles = await mapLimit(files, BULK_EXTRACT_CONCURRENCY, async (file) => {
+    // Bei Abbruch liefern die Bahnen `null` statt zu werfen, damit mapLimit erst endet,
+    // wenn keine Extraktion mehr nebenher läuft und Dateien schreibt.
+    type Extracted = BulkUploadDetectedFile | null
+    const extracted = await mapLimit(files, BULK_EXTRACT_CONCURRENCY, async (file): Promise<Extracted> => {
+      if (await isCancelled()) return null
       const buffer = await readFile(resolveStoragePath(file.stagingPath))
       const extraction = await ensureExtractedText(buffer, file.fileName, settings)
       const hasText = Boolean(extraction.text.trim())
@@ -346,6 +415,8 @@ export async function processBulkPdfUpload(runId: string): Promise<void> {
         warnings,
       } satisfies BulkUploadDetectedFile
     })
+    if (await isCancelled()) return await stopAfterCancel()
+    const detectedFiles = extracted.filter((file): file is BulkUploadDetectedFile => file !== null)
 
     const filesByRef = new Map<string, BulkUploadDetectedFile>(
       detectedFiles.map((file) => [file.sourceRef, file]),
@@ -373,6 +444,7 @@ export async function processBulkPdfUpload(runId: string): Promise<void> {
     if (settings.enabled) {
       await addLog(runId, 'info', `KI-Vorschläge für ${clusters.length} Bündel werden erzeugt …`)
       await mapLimit(clusters, BULK_AI_CONCURRENCY, async (cluster) => {
+        if (await isCancelled()) return
         const primaryRef =
           cluster.fileRefs.find((ref) => cluster.suggestedRoles[ref] === 'schueler') ??
           cluster.fileRefs.find((ref) => cluster.suggestedRoles[ref] === 'einzeln') ??
@@ -414,6 +486,7 @@ export async function processBulkPdfUpload(runId: string): Promise<void> {
           aiErrors += 1
         }
       })
+      if (await isCancelled()) return await stopAfterCancel()
     }
 
     mapping.records = {}
@@ -449,7 +522,7 @@ export async function processBulkPdfUpload(runId: string): Promise<void> {
       }
     }
 
-    await useDatabase()
+    const [saved] = await useDatabase()
       .update(importRuns)
       .set({
         status: 'vorschau',
@@ -465,7 +538,13 @@ export async function processBulkPdfUpload(runId: string): Promise<void> {
         mapping: mapping as never,
         errorMessage: null,
       })
-      .where(eq(importRuns.id, runId))
+      // Nur solange niemand abgebrochen oder verworfen hat.
+      .where(and(eq(importRuns.id, runId), eq(importRuns.status, 'laeuft')))
+      .returning({ id: importRuns.id })
+    if (!saved) {
+      cancelled = true
+      return await stopAfterCancel()
+    }
 
     await addLog(
       runId,
@@ -493,8 +572,10 @@ export async function processBulkPdfUpload(runId: string): Promise<void> {
       aiEnabled: settings.enabled,
     })
   } catch (error) {
+    // Verworfene Staging-Dateien lassen laufende Extraktionen scheitern – das ist kein Fehler.
+    if (await isCancelled()) return await stopAfterCancel()
     const message = oeffentlicheFehlermeldung(error, 'Die Stapel-Analyse ist fehlgeschlagen.')
-    await useDatabase()
+    const [failed] = await useDatabase()
       .update(importRuns)
       .set({
         status: 'fehlgeschlagen',
@@ -502,7 +583,9 @@ export async function processBulkPdfUpload(runId: string): Promise<void> {
         finishedAt: new Date(),
         detected: { ...detected, analysisPending: false } as never,
       })
-      .where(eq(importRuns.id, runId))
+      .where(and(eq(importRuns.id, runId), eq(importRuns.status, 'laeuft')))
+      .returning({ id: importRuns.id })
+    if (!failed) return await stopAfterCancel()
     await addLog(runId, 'fehler', message)
     log.warn('Stapel-Analyse fehlgeschlagen', { runId, error })
   }
@@ -608,9 +691,38 @@ export async function commitBulkUpload(
   userId: string | null,
   mappingOverride?: BulkUploadMapping,
 ): Promise<BulkCommitResult> {
+  const state = { started: false }
+  registerCommit(runId)
+  try {
+    return await runBulkCommit(runId, userId, mappingOverride, state)
+  } catch (error) {
+    // Sonst bliebe der Stapel für immer `laeuft`; angelegte Materialien bleiben rückgängig machbar.
+    if (state.started) {
+      await recoverInterruptedRun(runId, 'fehler').catch((recoverError) =>
+        log.warn('Abgebrochene Übernahme konnte nicht abgeschlossen werden', {
+          runId,
+          error: recoverError,
+        }),
+      )
+    }
+    throw error
+  } finally {
+    unregisterCommit(runId)
+  }
+}
+
+async function runBulkCommit(
+  runId: string,
+  userId: string | null,
+  mappingOverride: BulkUploadMapping | undefined,
+  state: { started: boolean },
+): Promise<BulkCommitResult> {
   const run = await requireBulkRun(runId)
   if (run.status === 'importiert' || run.status === 'teilweise_importiert') {
     throw appError('KONFLIKT', 'Dieser Stapel wurde bereits übernommen.')
+  }
+  if (run.status === 'laeuft') {
+    throw appError('KONFLIKT', 'Dieser Stapel wird gerade verarbeitet.')
   }
 
   const mapping: BulkUploadMapping = {
@@ -627,6 +739,7 @@ export async function commitBulkUpload(
 
   const db = useDatabase()
   await db.update(importRuns).set({ status: 'laeuft' }).where(eq(importRuns.id, runId))
+  state.started = true
 
   let subjectId: string | null = mapping.subjectId ?? null
   if (!subjectId && mapping.subjectName?.trim()) {
@@ -1096,6 +1209,8 @@ export interface BulkRunOverview {
   finishedAt: string | null
   undoneAt: string | null
   canCommit: boolean
+  canCancel: boolean
+  canDiscard: boolean
   canUndo: boolean
 }
 
@@ -1123,6 +1238,8 @@ export async function getBulkRunOverview(runId: string): Promise<BulkRunOverview
     finishedAt: run.finishedAt?.toISOString() ?? null,
     undoneAt: run.undoneAt?.toISOString() ?? null,
     canCommit: run.status === 'vorschau' || run.status === 'analysiert',
+    canCancel: isAnalysisRunning(run.status, detected),
+    canDiscard: DISCARDABLE_STATUSES.includes(run.status) || isAnalysisRunning(run.status, detected),
     canUndo: !run.undoneAt && ['importiert', 'teilweise_importiert'].includes(run.status),
   }
 }
@@ -1146,19 +1263,142 @@ export async function listBulkUploads(limit = 30) {
     .limit(limit)
 }
 
+const DISCARDABLE_STATUSES = ['vorschau', 'analysiert', 'fehlgeschlagen']
+
+/** Analyse noch nicht fertig: abbrechbar und verwerfbar – egal ob ein Worker noch lebt. */
+function isAnalysisRunning(status: string, detected: BulkUploadDetected): boolean {
+  return status === 'laeuft' && Boolean(detected.analysisPending)
+}
+
 export async function discardBulkUpload(runId: string): Promise<void> {
   const run = await requireBulkRun(runId)
-  if (!['vorschau', 'analysiert', 'fehlgeschlagen'].includes(run.status)) {
+  const detected = (run.detected ?? {}) as unknown as BulkUploadDetected
+  const analysisRunning = isAnalysisRunning(run.status, detected)
+  if (!DISCARDABLE_STATUSES.includes(run.status) && !analysisRunning) {
     throw appError('KONFLIKT', 'Nur offene Stapel können verworfen werden.')
   }
 
-  const detected = (run.detected ?? {}) as unknown as BulkUploadDetected
-  for (const file of detected.files ?? []) {
-    if (file.stagingPath) await deleteFile(file.stagingPath)
-    if (file.extractedTextKey) await deleteFile(file.extractedTextKey)
-  }
+  // Ein Worker in diesem Prozess hört sofort auf; einer in einem anderen Prozess
+  // merkt am fehlenden Stapel, dass er aufhören und hinter sich aufräumen soll.
+  if (analysisRunning) abortAnalysis(runId)
 
   await useDatabase().delete(importRuns).where(eq(importRuns.id, runId))
+  await deleteStagedFiles(detected.files ?? [])
+}
+
+/** Bricht eine laufende Analyse ab; der Stapel bleibt als `fehlgeschlagen` verwerfbar stehen. */
+export async function cancelBulkUpload(runId: string): Promise<void> {
+  const run = await requireBulkRun(runId)
+  const detected = (run.detected ?? {}) as unknown as BulkUploadDetected
+  if (!isAnalysisRunning(run.status, detected)) {
+    throw appError('KONFLIKT', 'Nur eine laufende Analyse kann abgebrochen werden.')
+  }
+
+  const message = 'Die Analyse wurde abgebrochen. Der Stapel kann verworfen werden.'
+  const [updated] = await useDatabase()
+    .update(importRuns)
+    .set({
+      status: 'fehlgeschlagen',
+      errorMessage: message,
+      finishedAt: new Date(),
+      detected: { ...detected, analysisPending: false } as never,
+    })
+    .where(and(eq(importRuns.id, runId), eq(importRuns.status, 'laeuft')))
+    .returning({ id: importRuns.id })
+  if (!updated) throw appError('KONFLIKT', 'Die Analyse ist bereits beendet.')
+
+  abortAnalysis(runId)
+  await addLog(runId, 'warnung', 'Analyse abgebrochen.')
+  log.info('Stapel-Analyse abgebrochen', { runId })
+}
+
+/**
+ * Schließt einen Stapel ab, der in `laeuft` stehen geblieben ist (siehe decideOrphanRecovery).
+ * Gibt `true` zurück, wenn der Stapel geändert wurde.
+ */
+async function recoverInterruptedRun(runId: string, reason: 'neustart' | 'fehler'): Promise<boolean> {
+  const db = useDatabase()
+  const [run] = await db.select().from(importRuns).where(eq(importRuns.id, runId)).limit(1)
+  if (!run || run.status !== 'laeuft') return false
+  const detected = (run.detected ?? {}) as unknown as BulkUploadDetected
+  const analysisPending = Boolean(detected.analysisPending)
+
+  const items = await db
+    .select({
+      action: importRunItems.action,
+      entityType: importRunItems.entityType,
+      entityId: importRunItems.entityId,
+    })
+    .from(importRunItems)
+    .where(eq(importRunItems.runId, runId))
+  const created = new Set(
+    items
+      .filter((item) => item.action === 'erstellt' && item.entityType === 'material' && item.entityId)
+      .map((item) => item.entityId),
+  )
+  const count = (action: string) => items.filter((item) => item.action === action).length
+
+  const decision = decideOrphanRecovery({
+    analysisPending,
+    createdMaterials: created.size,
+    reason,
+  })
+
+  const [updated] = await db
+    .update(importRuns)
+    .set({
+      status: decision.status,
+      errorMessage: decision.errorMessage,
+      finishedAt: new Date(),
+      detected: { ...detected, analysisPending: false } as never,
+      ...(analysisPending
+        ? {}
+        : {
+            stats: {
+              materialien: created.size,
+              verknuepft: count('verknuepft'),
+              uebersprungen: count('uebersprungen'),
+              fehlgeschlagen: count('fehlgeschlagen'),
+            } as ImportStats,
+          }),
+      ...(decision.discardStaging ? { stagingPath: null } : {}),
+    })
+    .where(and(eq(importRuns.id, runId), eq(importRuns.status, 'laeuft')))
+    .returning({ id: importRuns.id })
+  if (!updated) return false
+
+  if (decision.discardStaging) await deleteStagedFiles(detected.files ?? [])
+  await addLog(runId, 'fehler', decision.errorMessage)
+  log.warn('Unterbrochenen Stapel abgeschlossen', {
+    runId,
+    reason,
+    status: decision.status,
+    materialien: created.size,
+  })
+  return true
+}
+
+/**
+ * Beim Serverstart: Stapel, die der vorige Prozess in `laeuft` hinterlassen hat, abschließen.
+ * Analyse und Übernahme laufen nur im Prozess, nichts setzt sie nach einem Neustart fort.
+ */
+export async function recoverOrphanedBulkRuns(): Promise<number> {
+  const runs = await useDatabase()
+    .select({ id: importRuns.id })
+    .from(importRuns)
+    .where(and(eq(importRuns.adapterId, BULK_PDF_ADAPTER_ID), eq(importRuns.status, 'laeuft')))
+
+  let recovered = 0
+  for (const { id } of runs) {
+    // Schon in diesem Prozess gestartet (Anfrage während des Bootstraps) – nicht verwaist.
+    if (isRunActive(id)) continue
+    try {
+      if (await recoverInterruptedRun(id, 'neustart')) recovered += 1
+    } catch (error) {
+      log.warn('Verwaister Stapel konnte nicht abgeschlossen werden', { runId: id, error })
+    }
+  }
+  return recovered
 }
 
 /** Für die Schulportal-Importliste: Stapel-Uploads und KI-Einzelanlagen ausblenden. */

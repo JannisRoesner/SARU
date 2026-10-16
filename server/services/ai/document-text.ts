@@ -162,11 +162,16 @@ export async function ensureExtractedTextFromStorage(
  * Speichert den bereits extrahierten Volltext neben der Staging-Datei,
  * damit Commit denselben Extrakt nutzen kann (kein zweites Vision/OCR).
  */
+/** Speicherort des Textauszugs neben einer Staging-Datei. */
+export function extractedTextSidecarKey(stagingPath: string): string {
+  return `${stagingPath}.extracted.txt`
+}
+
 export async function storeExtractedTextSidecar(
   stagingPath: string,
   text: string,
 ): Promise<string> {
-  const key = `${stagingPath}.extracted.txt`
+  const key = extractedTextSidecarKey(stagingPath)
   await writeFile(resolveStoragePath(key), text, { encoding: 'utf8', mode: 0o640 })
   return key
 }
