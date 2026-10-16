@@ -311,3 +311,49 @@ describe('Lernzirkel-Erkennung', () => {
     expect(handreichung.suggestions.materialType).toBe('zusatzmaterial')
   })
 })
+
+describe('Lösungen zu Arbeitsblättern mit Fassungen', () => {
+  const datei = (ref: string, name: string) => ({
+    sourceRef: ref,
+    fileName: name,
+    relativePath: `Kapitel 01/Arbeitsblätter/${name}`,
+    extension: 'pdf',
+  })
+
+  it('verknüpft das Lösungs-Bündel automatisch mit dem Fassungs-Bündel des Arbeitsblatts', () => {
+    const cluster = clusterBulkFiles([
+      datei('a', 'Atmen im Wasser (2) - Fassung Assistent.pdf'),
+      datei('b', 'Atmen im Wasser (2) - Fassung Handbuch.pdf'),
+      datei('la', 'Atmen im Wasser (2) - Lösung - Fassung Assistent.pdf'),
+      datei('lb', 'Atmen im Wasser (2) - Lösung - Fassung Handbuch.pdf'),
+    ])
+    expect(cluster).toHaveLength(2)
+    const ab = cluster.find((c) => c.fileRefs.includes('a'))!
+    const loesung = cluster.find((c) => c.fileRefs.includes('la'))!
+    expect(ab.kind).toBe('varianten')
+    expect(loesung.kind).toBe('varianten')
+    expect(loesung.suggestions.materialType).toBe('musterloesung')
+    expect(ab.proposedLinks).toEqual([
+      expect.objectContaining({ targetClusterId: loesung.clusterId, relationType: 'musterloesung', confidence: 'hoch' }),
+    ])
+  })
+
+  it('verknüpft auch eine einzelne Lösung mit Fassungs-Zusatz und nennt sie nach dem Material', () => {
+    const cluster = clusterBulkFiles([
+      datei('a', 'Modell Katzenkralle (2) - Fassung Assistent.pdf'),
+      datei('b', 'Modell Katzenkralle (2) - Fassung Handbuch.pdf'),
+      datei('l', 'Modell Katzenkralle (2) - Lösung - Fassung Assistent.pdf'),
+    ])
+    const ab = cluster.find((c) => c.fileRefs.includes('a'))!
+    const loesung = cluster.find((c) => c.fileRefs.includes('l'))!
+    expect(loesung.suggestions.title).toBe('Modell Katzenkralle (2) Lösung')
+    expect(ab.proposedLinks.map((l) => l.targetClusterId)).toEqual([loesung.clusterId])
+  })
+
+  it('lässt reguläre Paare „Titel“ und „Titel - Lösung“ unverändert', () => {
+    const cluster = clusterBulkFiles([datei('a', 'Skelett des Hundes.pdf'), datei('l', 'Skelett des Hundes - Lösung.pdf')])
+    expect(cluster).toHaveLength(1)
+    expect(cluster[0]!.kind).toBe('paar')
+    expect(cluster[0]!.proposedLinks).toEqual([])
+  })
+})

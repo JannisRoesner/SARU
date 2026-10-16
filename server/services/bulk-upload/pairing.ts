@@ -367,6 +367,40 @@ function proposeGfbVersuchLinks(clusters: BulkUploadDetectedCluster[]): void {
   }
 }
 
+/**
+ * Lösungen zu Arbeitsblättern mit mehreren Fassungen: „Titel (2) - Fassung A“ + „Titel (2) - Fassung B“ bilden ein
+ * Fassungs-Bündel, die Lösungen heißen „Titel (2) - Lösung - Fassung A“ usw. und bilden ein eigenes Bündel.
+ * Reguläre Paare („Titel“ + „Titel - Lösung“) verbindet die Paarung selbst; hier werden nur die getrennten
+ * Bündel verknüpft (Arbeitsblatt → Musterlösung).
+ */
+function proposeSolutionLinks(
+  clusters: BulkUploadDetectedCluster[],
+  groupKeyOf: ReadonlyMap<string, string>,
+): void {
+  const byKey = new Map<string, BulkUploadDetectedCluster>()
+  for (const cluster of clusters) {
+    const key = groupKeyOf.get(cluster.clusterId)
+    if (key) byKey.set(key, cluster)
+  }
+  for (const solution of clusters) {
+    const key = groupKeyOf.get(solution.clusterId)
+    if (!key) continue
+    const separator = key.indexOf('::')
+    const folder = key.slice(0, separator)
+    const stem = key.slice(separator + 2)
+    if (!hasSolutionSuffix(stem)) continue
+    const target = byKey.get(`${folder}::${solutionBaseStem(stem)}`)
+    if (!target || target === solution) continue
+    if (target.proposedLinks.some((link) => link.targetClusterId === solution.clusterId)) continue
+    target.proposedLinks.push({
+      targetClusterId: solution.clusterId,
+      relationType: 'musterloesung',
+      reason: `Lösung zu „${target.suggestions.title}“`,
+      confidence: 'hoch',
+    })
+  }
+}
+
 export function clusterBulkFiles(
   files: PairingInputFile[],
   fallbackType: MaterialType = 'arbeitsblatt',
@@ -384,8 +418,10 @@ export function clusterBulkFiles(
   }
 
   const clusters: BulkUploadDetectedCluster[] = []
+  /** Gruppierungsschlüssel (`Ordner::Stamm`) je Bündel – für die Zuordnung von Lösungen zu Fassungs-Bündeln. */
+  const groupKeyOf = new Map<string, string>()
   let index = 0
-  for (const group of groups.values()) {
+  for (const [groupKey, group] of groups) {
     // Klausur.doc + „Klausur - Lösung.doc“: die Lösungsdatei erkennt man am Namen.
     const solutionRefs = new Set(
       group
@@ -408,7 +444,9 @@ export function clusterBulkFiles(
       ? group.find((file) => !solutionRefs.has(file.sourceRef))!
       : group[0]!
     const folderRole = detectFolderRole(first.relativePath, first.fileName)
-    const stem = fassungsGruppe ? fassungInfo(stemOf(first.fileName))!.base : stemOf(first.fileName)
+    // Auch eine einzelne Datei mit Fassungs-Zusatz („… - Lösung - Fassung Assistent“) heißt nach dem Material, nicht nach der Fassung.
+    const einzelFassung = group.length === 1 ? fassungInfo(stemOf(first.fileName)) : null
+    const stem = fassungsGruppe ? fassungInfo(stemOf(first.fileName))!.base : (einzelFassung?.base ?? stemOf(first.fileName))
     const extensions = new Set(group.map((file) => file.extension))
     const isPair =
       group.length === 2 &&
@@ -461,8 +499,11 @@ export function clusterBulkFiles(
       proposedLinks: [],
       warnings,
     })
+    groupKeyOf.set(clusterId, groupKey)
     index += 1
   }
+
+  proposeSolutionLinks(clusters, groupKeyOf)
 
   proposeGfbVersuchLinks(clusters)
   markiereLernzirkel(
