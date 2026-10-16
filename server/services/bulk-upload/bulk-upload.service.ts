@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import { and, desc, eq, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, max, ne, sql } from 'drizzle-orm'
 import { oeffentlicheFehlermeldung } from '#shared/utils/public-error'
 import { isAiMaterialFileName } from '#shared/utils/ai-material-formats'
 import type { MaterialType } from '#shared/types/domain'
@@ -8,6 +8,8 @@ import {
   importLogs,
   importRunItems,
   importRuns,
+  materialAssets,
+  materialVariants,
   type ImportStats,
 } from '../../database/schema'
 import { appError, invalidInput, notFound } from '../../utils/errors'
@@ -33,6 +35,7 @@ import { getAiSettings, getUploadSettings } from '../settings.service'
 import {
   deleteFile,
   extensionOf,
+  fileExists,
   formatBytes,
   resolveStoragePath,
   sanitizeFileName,
@@ -615,7 +618,8 @@ export async function analyzeBulkPdfUpload(
 
 export async function updateBulkMapping(runId: string, mapping: BulkUploadMapping): Promise<void> {
   const run = await requireBulkRun(runId)
-  if (run.status !== 'vorschau' && run.status !== 'analysiert') {
+  // Teilweise übernommen: Korrekturen für das erneute Anlegen der übrigen Bündel.
+  if (!['vorschau', 'analysiert', 'teilweise_importiert'].includes(run.status)) {
     throw appError('KONFLIKT', 'Die Zuordnung kann in diesem Status nicht mehr geändert werden.')
   }
 
@@ -686,6 +690,88 @@ function decisionForCluster(
   return mapping.records?.[cluster.clusterId] ?? mapping.records?.[cluster.fileRefs[0] ?? '']
 }
 
+type RunItem = typeof importRunItems.$inferSelect
+
+/** Markiert Einträge, deren Materialien ein Rückgängigmachen schon entfernt hat. */
+const UNDONE_PAYLOAD_KEY = 'rueckgaengig'
+
+/** Einträge des aktuellen Durchgangs (ohne die eines früheren Rückgängigmachens), aufsteigend. */
+async function activeRunItems(runId: string): Promise<RunItem[]> {
+  const rows = await useDatabase()
+    .select()
+    .from(importRunItems)
+    .where(eq(importRunItems.runId, runId))
+    .orderBy(asc(importRunItems.sequence))
+  return rows.filter((row) => !row.payload?.[UNDONE_PAYLOAD_KEY])
+}
+
+interface BulkRunProgress {
+  /** Primäres (oder einziges) angelegtes Material je Bündel. */
+  primaryByCluster: Map<string, string>
+  /** Bündel, aus denen schon ein Material angelegt wurde – sie werden nicht erneut angelegt. */
+  createdClusters: Set<string>
+  /** Letzter Eintrag je sourceRef. */
+  latest: Map<string, RunItem>
+  lernzirkelIds: Map<string, string>
+  createdMaterialIds: Set<string>
+}
+
+function summarizeRunItems(items: RunItem[]): BulkRunProgress {
+  const progress: BulkRunProgress = {
+    primaryByCluster: new Map(),
+    createdClusters: new Set(),
+    latest: new Map(),
+    lernzirkelIds: new Map(),
+    createdMaterialIds: new Set(),
+  }
+  for (const item of items) {
+    progress.latest.set(item.sourceRef, item)
+    if (item.action !== 'erstellt' || item.entityType !== 'material' || !item.entityId) continue
+    progress.createdMaterialIds.add(item.entityId)
+    if (item.sourceRef === 'lehrwerk') continue
+    if (item.sourceRef.startsWith('lernzirkel:')) {
+      progress.lernzirkelIds.set(item.sourceRef.slice('lernzirkel:'.length), item.entityId)
+    } else if (item.sourceRef.endsWith(':loesung')) {
+      // Nur Lösung ohne Schülerfassung: dann ist sie das primäre Material des Bündels.
+      const clusterId = item.sourceRef.slice(0, -':loesung'.length)
+      progress.createdClusters.add(clusterId)
+      if (!progress.primaryByCluster.has(clusterId)) progress.primaryByCluster.set(clusterId, item.entityId)
+    } else {
+      progress.createdClusters.add(item.sourceRef)
+      progress.primaryByCluster.set(item.sourceRef, item.entityId)
+    }
+  }
+  return progress
+}
+
+export type BulkClusterOutcome = 'erstellt' | 'fehlgeschlagen' | 'uebersprungen'
+
+function clusterOutcome(clusterId: string, progress: BulkRunProgress): BulkClusterOutcome | null {
+  const latest = progress.latest.get(clusterId)
+  // Auch ein Bündel, dessen Lösung nach dem Schülerblatt scheiterte, gilt als fehlgeschlagen.
+  if (latest?.action === 'fehlgeschlagen') return 'fehlgeschlagen'
+  if (progress.createdClusters.has(clusterId)) return 'erstellt'
+  return latest?.action === 'uebersprungen' ? 'uebersprungen' : null
+}
+
+/** Noch nicht angelegte Bündel, deren Dateien im Zwischenspeicher liegen. */
+function retryableClusterIds(
+  clusters: BulkUploadDetectedCluster[],
+  filesByRef: Map<string, BulkUploadDetectedFile>,
+  progress: BulkRunProgress,
+): string[] {
+  return clusters
+    .filter(
+      (cluster) =>
+        !progress.createdClusters.has(cluster.clusterId)
+        && cluster.fileRefs.every((ref) => {
+          const file = filesByRef.get(ref)
+          return Boolean(file?.stagingPath) && !file?.stagingMissing
+        }),
+    )
+    .map((cluster) => cluster.clusterId)
+}
+
 export async function commitBulkUpload(
   runId: string,
   userId: string | null,
@@ -718,12 +804,20 @@ async function runBulkCommit(
   state: { started: boolean },
 ): Promise<BulkCommitResult> {
   const run = await requireBulkRun(runId)
-  if (run.status === 'importiert' || run.status === 'teilweise_importiert') {
+  if (run.status === 'importiert') {
     throw appError('KONFLIKT', 'Dieser Stapel wurde bereits übernommen.')
+  }
+  if (run.status === 'rueckgaengig') {
+    throw appError(
+      'KONFLIKT',
+      'Beim Rückgängigmachen dieses Stapels wurden seine Dateien entfernt. Bitte neu hochladen.',
+    )
   }
   if (run.status === 'laeuft') {
     throw appError('KONFLIKT', 'Dieser Stapel wird gerade verarbeitet.')
   }
+  // Teilweise übernommen: nur die noch nicht angelegten Bündel nachholen.
+  const isRetry = run.status === 'teilweise_importiert'
 
   const mapping: BulkUploadMapping = {
     ...((run.mapping as unknown as BulkUploadMapping | null) ?? {}),
@@ -738,6 +832,12 @@ async function runBulkCommit(
   const clusters = resolveClusters(detected)
 
   const db = useDatabase()
+  const prior = summarizeRunItems(await activeRunItems(runId))
+  const [{ value: highestSequence } = { value: null }] = await db
+    .select({ value: max(importRunItems.sequence) })
+    .from(importRunItems)
+    .where(eq(importRunItems.runId, runId))
+
   await db.update(importRuns).set({ status: 'laeuft' }).where(eq(importRuns.id, runId))
   state.started = true
 
@@ -747,17 +847,18 @@ async function runBulkCommit(
   }
 
   const gradeLevels = resolveBulkGradeLevels(mapping)
+  // Zähler dieses Durchgangs; beim Nachholen werden sie zu den bisherigen addiert.
   const stats: BulkUploadStats = {
     materialien: 0,
     dateien: 0,
     verknuepft: 0,
-    uebersprungen: 0,
-    fehlgeschlagen: 0,
   }
   const errors: { sourceRef: string; message: string }[] = []
   const materialIds: string[] = []
-  const primaryByCluster = new Map<string, string>()
-  let sequence = 0
+  const primaryByCluster = new Map<string, string>(prior.primaryByCluster)
+  /** In diesem Durchgang angelegte Bündel. */
+  const createdNow = new Set<string>()
+  let sequence = (highestSequence ?? -1) + 1
 
   const track = async (
     sourceRef: string,
@@ -817,31 +918,42 @@ async function runBulkCommit(
       },
       userId,
     )
-    const variantId = await defaultVariantId(materialId)
-    for (const asset of input.assets) {
-      await attachStagedAsset(variantId, asset.file, asset.role)
-      stats.dateien = (stats.dateien ?? 0) + 1
-    }
-    if (input.fassungen?.length) {
-      // Bezeichnung der ersten Fassung aus dem Dateinamen („… - Fassung Handbuch“).
-      const hauptLabel = fassungLabel(input.assets.find((a) => a.role === 'haupt')?.file.fileName ?? '')
-      if (hauptLabel) await updateVariant(variantId, { label: hauptLabel })
-      for (const file of input.fassungen) {
-        const extraId = await addVariant(materialId, {
-          label: fassungLabel(file.fileName) ?? 'Weitere Fassung',
-          variantKind: 'standard',
-        })
-        await attachStagedAsset(extraId, file, 'haupt')
-        stats.dateien = (stats.dateien ?? 0) + 1
-        stats.fassungen = (stats.fassungen ?? 0) + 1
+    let dateien = 0
+    let fassungen = 0
+    try {
+      const variantId = await defaultVariantId(materialId)
+      for (const asset of input.assets) {
+        await attachStagedAsset(variantId, asset.file, asset.role)
+        dateien += 1
       }
+      if (input.fassungen?.length) {
+        // Bezeichnung der ersten Fassung aus dem Dateinamen („… - Fassung Handbuch“).
+        const hauptLabel = fassungLabel(input.assets.find((a) => a.role === 'haupt')?.file.fileName ?? '')
+        if (hauptLabel) await updateVariant(variantId, { label: hauptLabel })
+        for (const file of input.fassungen) {
+          const extraId = await addVariant(materialId, {
+            label: fassungLabel(file.fileName) ?? 'Weitere Fassung',
+            variantKind: 'standard',
+          })
+          await attachStagedAsset(extraId, file, 'haupt')
+          dateien += 1
+          fassungen += 1
+        }
+      }
+    } catch (error) {
+      // Sonst bliebe ein halbes Material zurück, das kein Eintrag kennt und kein Undo entfernt.
+      await deleteMaterial(materialId).catch(() => undefined)
+      throw error
     }
+    stats.dateien = (stats.dateien ?? 0) + dateien
+    if (fassungen) stats.fassungen = (stats.fassungen ?? 0) + fassungen
     materialIds.push(materialId)
     stats.materialien = (stats.materialien ?? 0) + 1
     return materialId
   }
 
   let lehrwerkId: string | null = null
+  const priorLehrwerk = prior.latest.get('lehrwerk')
   if (mapping.createLehrwerk && mapping.lehrwerkId) {
     try {
       const existing = await getMaterialDetail(mapping.lehrwerkId)
@@ -850,10 +962,12 @@ async function runBulkCommit(
       }
       lehrwerkId = existing.id
       mapping.lehrwerkId = lehrwerkId
-      await track('lehrwerk', lehrwerkId, 'verknuepft', 'Bestehendes Lehrwerk')
+      // Beim Nachholen ist das Lehrwerk schon vermerkt (auch ein in diesem Stapel angelegtes).
+      if (priorLehrwerk?.entityId !== lehrwerkId) {
+        await track('lehrwerk', lehrwerkId, 'verknuepft', 'Bestehendes Lehrwerk')
+      }
     } catch (error) {
       const message = oeffentlicheFehlermeldung(error, 'Das Lehrwerk konnte nicht zugeordnet werden.')
-      stats.fehlgeschlagen = (stats.fehlgeschlagen ?? 0) + 1
       errors.push({ sourceRef: 'lehrwerk', message })
       await track('lehrwerk', null, 'fehlgeschlagen', message)
     }
@@ -876,7 +990,6 @@ async function runBulkCommit(
       await track('lehrwerk', lehrwerkId, 'erstellt', 'Lehrwerk-Paket')
     } catch (error) {
       const message = oeffentlicheFehlermeldung(error, 'Das Lehrwerk konnte nicht angelegt werden.')
-      stats.fehlgeschlagen = (stats.fehlgeschlagen ?? 0) + 1
       errors.push({ sourceRef: 'lehrwerk', message })
       await track('lehrwerk', null, 'fehlgeschlagen', message)
     }
@@ -884,10 +997,12 @@ async function runBulkCommit(
 
   // Stationenarbeit: Aus den erkannten Blättern wird ein Über-Material, das statt der einzelnen
   // Blätter am Lehrwerk hängt. Die Blätter gehören dann nur dem Lernzirkel an.
-  const lernzirkelIds = new Map<string, string>()
+  // Beim Nachholen hängen weitere Stationen am schon angelegten Lernzirkel.
+  const lernzirkelIds = new Map<string, string>(prior.lernzirkelIds)
   const lernzirkelGruppen = new Map<string, { ref: BulkLernzirkelRef; stationen: number }>()
   for (const cluster of clusters) {
-    if (!cluster.lernzirkel) continue
+    if (!cluster.lernzirkel || lernzirkelIds.has(cluster.lernzirkel.id)) continue
+    if (prior.createdClusters.has(cluster.clusterId)) continue
     if (decisionForCluster(cluster, mapping)?.include === false) continue
     const gruppe = lernzirkelGruppen.get(cluster.lernzirkel.id)
     if (gruppe) gruppe.stationen += 1
@@ -931,9 +1046,10 @@ async function runBulkCommit(
   }
 
   for (const cluster of clusters) {
+    if (prior.createdClusters.has(cluster.clusterId)) continue
     const decision = decisionForCluster(cluster, mapping)
     if (decision?.include === false) {
-      stats.uebersprungen = (stats.uebersprungen ?? 0) + 1
+      if (prior.latest.get(cluster.clusterId)?.action === 'uebersprungen') continue
       await track(
         cluster.clusterId,
         decision.duplicateOfId ?? clusterDuplicate(cluster, filesByRef)?.materialId ?? null,
@@ -946,7 +1062,6 @@ async function runBulkCommit(
 
     const title = (decision?.title ?? cluster.suggestions.title).trim()
     if (!title) {
-      stats.fehlgeschlagen = (stats.fehlgeschlagen ?? 0) + 1
       errors.push({ sourceRef: cluster.clusterId, message: 'Titel fehlt.' })
       await track(cluster.clusterId, null, 'fehlgeschlagen', 'Titel fehlt')
       await addLog(runId, 'fehler', `„${cluster.stem}“: Titel fehlt.`)
@@ -1009,6 +1124,14 @@ async function runBulkCommit(
       if (!primaryFiles.length && !solutionFiles.length) {
         throw invalidInput('Keine Datei mit übernehmbarer Rolle in diesem Bündel.')
       }
+      // Vor dem Anlegen prüfen, damit kein Material ohne seine Dateien entsteht.
+      for (const file of clusterFiles) {
+        if (file.stagingMissing || !file.stagingPath || !(await fileExists(file.stagingPath))) {
+          throw invalidInput(
+            `Die Datei „${file.fileName}“ liegt nicht mehr vor. Bitte den Stapel neu hochladen.`,
+          )
+        }
+      }
 
       let primaryId: string | null = null
       if (primaryFiles.length) {
@@ -1038,6 +1161,7 @@ async function runBulkCommit(
           fassungen: fassungFiles,
         })
         primaryByCluster.set(cluster.clusterId, primaryId)
+        createdNow.add(cluster.clusterId)
         await track(cluster.clusterId, primaryId, 'erstellt')
       }
 
@@ -1068,6 +1192,7 @@ async function runBulkCommit(
           await track(`${cluster.clusterId}:relation`, solutionId, 'verknuepft', 'Musterlösung')
         } else {
           primaryByCluster.set(cluster.clusterId, solutionId)
+          createdNow.add(cluster.clusterId)
         }
       }
 
@@ -1082,7 +1207,6 @@ async function runBulkCommit(
       }
     } catch (error) {
       const message = oeffentlicheFehlermeldung(error, 'Die Datei konnte nicht übernommen werden.')
-      stats.fehlgeschlagen = (stats.fehlgeschlagen ?? 0) + 1
       errors.push({ sourceRef: cluster.clusterId, message })
       await track(cluster.clusterId, null, 'fehlgeschlagen', message)
       await addLog(runId, 'fehler', `„${cluster.stem}“: ${message}`)
@@ -1095,6 +1219,8 @@ async function runBulkCommit(
     const fromId = primaryByCluster.get(cluster.clusterId)
     if (!fromId) continue
     for (const link of cluster.proposedLinks) {
+      // Verknüpfungen zwischen früher angelegten Bündeln bestehen schon.
+      if (!createdNow.has(cluster.clusterId) && !createdNow.has(link.targetClusterId)) continue
       const accepted = decision?.links?.[link.targetClusterId]
       if (accepted === false) continue
       if (accepted !== true && link.confidence !== 'hoch') continue
@@ -1114,10 +1240,34 @@ async function runBulkCommit(
     }
   }
 
+  // Übersprungen und fehlgeschlagen ergeben sich aus dem letzten Ergebnis je Bündel –
+  // so zählt ein nachgeholtes Bündel nicht mehr als fehlgeschlagen.
+  const after = summarizeRunItems(await activeRunItems(runId))
+  let uebersprungen = 0
+  let fehlgeschlagen = after.latest.get('lehrwerk')?.action === 'fehlgeschlagen' ? 1 : 0
+  for (const cluster of clusters) {
+    const outcome = clusterOutcome(cluster.clusterId, after)
+    if (outcome === 'uebersprungen') uebersprungen += 1
+    else if (outcome === 'fehlgeschlagen') fehlgeschlagen += 1
+  }
+  const previous: BulkUploadStats = isRetry
+    ? ((run.stats as unknown as BulkUploadStats | null) ?? {})
+    : {}
+  const summe = (key: keyof BulkUploadStats) => (previous[key] ?? 0) + (stats[key] ?? 0)
+  const total: BulkUploadStats = {
+    materialien: after.createdMaterialIds.size,
+    dateien: summe('dateien'),
+    verknuepft: summe('verknuepft'),
+    ...(summe('fassungen') ? { fassungen: summe('fassungen') } : {}),
+    ...(summe('lernzirkel') ? { lernzirkel: summe('lernzirkel') } : {}),
+    uebersprungen,
+    fehlgeschlagen,
+  }
+
   const status: BulkCommitResult['status'] =
-    (stats.fehlgeschlagen ?? 0) === 0
+    fehlgeschlagen === 0
       ? 'importiert'
-      : (stats.materialien ?? 0) > 0
+      : (total.materialien ?? 0) > 0
         ? 'teilweise_importiert'
         : 'fehlgeschlagen'
 
@@ -1125,8 +1275,9 @@ async function runBulkCommit(
     .update(importRuns)
     .set({
       status,
-      stats: stats as ImportStats,
+      stats: total as ImportStats,
       finishedAt: new Date(),
+      errorMessage: null,
       stagingPath: null,
       mapping: mapping as never,
     })
@@ -1135,32 +1286,128 @@ async function runBulkCommit(
   await addLog(
     runId,
     status === 'importiert' ? 'info' : 'warnung',
-    `Stapel abgeschlossen: ${stats.materialien} Materialien, ${stats.verknuepft ?? 0} Verknüpfungen, ${stats.uebersprungen} übersprungen, ${stats.fehlgeschlagen} fehlgeschlagen.`,
+    isRetry
+      ? `Erneut angelegt: ${materialIds.length} Materialien neu, ${fehlgeschlagen} weiterhin fehlgeschlagen.`
+      : `Stapel abgeschlossen: ${total.materialien} Materialien, ${total.verknuepft ?? 0} Verknüpfungen, ${uebersprungen} übersprungen, ${fehlgeschlagen} fehlgeschlagen.`,
   )
 
   await waitForIndex()
-  log.info('Stapel-Upload committed', { runId, status, stats })
-  return { runId, status, stats, errors, materialIds }
+  log.info('Stapel-Upload committed', { runId, status, stats: total, retry: isRetry })
+  return { runId, status, stats: total, errors, materialIds }
 }
 
-export async function undoBulkUpload(runId: string): Promise<{ removed: BulkUploadStats }> {
+/**
+ * Legt die Dateien angelegter Materialien wieder in den Zwischenspeicher, bevor das
+ * Rückgängigmachen sie löscht. So bleiben Analyse und Entscheidungen nutzbar.
+ * Zuordnung über die Prüfsumme; Dateien, die noch im Zwischenspeicher liegen, bleiben.
+ */
+async function restoreFilesToStaging(
+  files: BulkUploadDetectedFile[],
+  materialIds: string[],
+): Promise<{ files: BulkUploadDetectedFile[]; restored: number; missing: Set<string> }> {
+  const assets = materialIds.length
+    ? await useDatabase()
+        .select({
+          storageKey: materialAssets.storageKey,
+          checksum: materialAssets.checksum,
+          fileName: materialAssets.fileName,
+          extractedText: materialAssets.extractedText,
+        })
+        .from(materialAssets)
+        .innerJoin(materialVariants, eq(materialVariants.id, materialAssets.variantId))
+        .where(inArray(materialVariants.materialId, materialIds))
+    : []
+  const byChecksum = new Map<string, typeof assets>()
+  for (const asset of assets) {
+    if (!asset.checksum || !asset.storageKey) continue
+    byChecksum.set(asset.checksum, [...(byChecksum.get(asset.checksum) ?? []), asset])
+  }
+
+  const missing = new Set<string>()
+  let restored = 0
+  const result: BulkUploadDetectedFile[] = []
+  for (const file of files) {
+    if (!file.stagingMissing && file.stagingPath && (await fileExists(file.stagingPath))) {
+      result.push(file)
+      continue
+    }
+    // Gleichnamige Datei zuerst, falls derselbe Inhalt mehrfach im Stapel lag.
+    const candidates = [...(byChecksum.get(file.checksum) ?? [])].sort(
+      (a, b) => Number(b.fileName === file.fileName) - Number(a.fileName === file.fileName),
+    )
+    let copy: BulkUploadDetectedFile | null = null
+    for (const asset of candidates) {
+      let stagingPath: string | null = null
+      try {
+        const buffer = await readFile(resolveStoragePath(asset.storageKey!))
+        stagingPath = await storeStagingFile(buffer, file.fileName)
+        const text = asset.extractedText?.trim() ? asset.extractedText : null
+        copy = {
+          ...file,
+          stagingPath,
+          stagingMissing: false,
+          extractedTextKey: text ? await storeExtractedTextSidecar(stagingPath, text) : null,
+        }
+        break
+      } catch (error) {
+        if (stagingPath) await deleteStagedFiles([{ ...file, stagingPath, extractedTextKey: null }])
+        log.warn('Datei konnte nicht in den Zwischenspeicher zurückgelegt werden', {
+          fileName: file.fileName,
+          error,
+        })
+      }
+    }
+    if (copy) {
+      restored += 1
+      result.push(copy)
+    } else {
+      missing.add(file.sourceRef)
+      result.push({ ...file, stagingMissing: true, extractedTextKey: null })
+    }
+  }
+  return { files: result, restored, missing }
+}
+
+export interface BulkUndoResult {
+  removed: BulkUploadStats
+  /** Dateien, die wieder im Zwischenspeicher liegen. */
+  restoredFiles: number
+  /** Bündel, die mangels Datei nicht erneut angelegt werden können (abgewählt). */
+  missingClusters: number
+}
+
+/**
+ * Entfernt die angelegten Materialien und setzt den Stapel zurück auf die Vorschau –
+ * mit Analyse, KI-Vorschlägen und allen Entscheidungen, damit er sich korrigiert erneut anlegen lässt.
+ */
+export async function undoBulkUpload(runId: string): Promise<BulkUndoResult> {
   const run = await requireBulkRun(runId)
-  if (run.undoneAt) throw appError('KONFLIKT', 'Dieser Stapel wurde bereits rückgängig gemacht.')
   if (!['importiert', 'teilweise_importiert'].includes(run.status)) {
-    throw appError('KONFLIKT', 'Nur abgeschlossene Stapel können rückgängig gemacht werden.')
+    throw appError(
+      'KONFLIKT',
+      run.undoneAt
+        ? 'Dieser Stapel wurde bereits rückgängig gemacht.'
+        : 'Nur abgeschlossene Stapel können rückgängig gemacht werden.',
+    )
   }
 
   const db = useDatabase()
-  const items = await db
-    .select()
-    .from(importRunItems)
-    .where(eq(importRunItems.runId, runId))
-    .orderBy(desc(importRunItems.sequence))
+  const items = await activeRunItems(runId)
+  const progress = summarizeRunItems(items)
+  const detected = (run.detected ?? {}) as unknown as BulkUploadDetected
+  const mapping: BulkUploadMapping = {
+    ...((run.mapping as unknown as BulkUploadMapping | null) ?? {}),
+    records: { ...(((run.mapping as unknown as BulkUploadMapping | null)?.records) ?? {}) },
+  }
+
+  // Erst kopieren, dann löschen: deleteMaterial entfernt die gespeicherten Dateien.
+  const { files, restored, missing } = await restoreFilesToStaging(detected.files ?? [], [
+    ...progress.createdMaterialIds,
+  ])
 
   const removed: BulkUploadStats = { materialien: 0 }
   const seen = new Set<string>()
-
-  for (const item of items) {
+  for (const item of [...items].reverse()) {
     if (item.action !== 'erstellt' || !item.entityId || item.entityType !== 'material') continue
     if (seen.has(item.entityId)) continue
     seen.add(item.entityId)
@@ -1179,17 +1426,64 @@ export async function undoBulkUpload(runId: string): Promise<{ removed: BulkUplo
     }
   }
 
+  // Ein in diesem Stapel angelegtes Lehrwerk ist jetzt weg; beim nächsten Anlegen neu erzeugen.
+  if (progress.latest.get('lehrwerk')?.action === 'erstellt') mapping.lehrwerkId = null
+
+  let missingClusters = 0
+  const clusters = resolveClusters(detected).map((cluster) => {
+    const fehlend = files.filter(
+      (file) => missing.has(file.sourceRef) && cluster.fileRefs.includes(file.sourceRef),
+    )
+    if (!fehlend.length) return cluster
+    missingClusters += 1
+    mapping.records![cluster.clusterId] = {
+      ...(decisionForCluster(cluster, mapping) ?? {}),
+      include: false,
+    }
+    const warnings = fehlend
+      .map(
+        (file) =>
+          `Datei „${file.fileName}“ liegt nicht mehr vor – Bündel abgewählt. Bitte bei Bedarf neu hochladen.`,
+      )
+      .filter((warning) => !cluster.warnings.includes(warning))
+    return { ...cluster, warnings: [...cluster.warnings, ...warnings] }
+  })
+
+  // Die Einträge bleiben fürs Protokoll, zählen aber nicht mehr zum aktuellen Durchgang.
+  await db
+    .update(importRunItems)
+    .set({
+      payload: sql`coalesce(${importRunItems.payload}, '{}'::jsonb) || ${JSON.stringify({ [UNDONE_PAYLOAD_KEY]: true })}::jsonb`,
+    })
+    .where(eq(importRunItems.runId, runId))
   await db
     .update(importRuns)
-    .set({ status: 'rueckgaengig', undoneAt: new Date() })
+    .set({
+      status: 'vorschau',
+      undoneAt: new Date(),
+      finishedAt: null,
+      errorMessage: null,
+      stats: {},
+      stagingPath: files.find((file) => !file.stagingMissing)?.stagingPath ?? null,
+      detected: { ...detected, files, clusters } satisfies BulkUploadDetected as never,
+      mapping: mapping as never,
+    })
     .where(eq(importRuns.id, runId))
   await addLog(
     runId,
     'info',
-    `Stapel rückgängig gemacht: ${removed.materialien} Materialien entfernt.`,
+    `Stapel rückgängig gemacht: ${removed.materialien} Materialien entfernt. Die Vorschau ist wieder bearbeitbar und kann erneut angelegt werden.`,
   )
+  if (missingClusters) {
+    await addLog(
+      runId,
+      'warnung',
+      `${missing.size} Datei${missing.size === 1 ? '' : 'en'} nicht mehr vorhanden; ${missingClusters} Bündel abgewählt.`,
+    )
+  }
+  log.info('Stapel-Upload rückgängig gemacht', { runId, removed, restored, missing: missing.size })
 
-  return { removed }
+  return { removed, restoredFiles: restored, missingClusters }
 }
 
 export interface BulkRunOverview {
@@ -1212,6 +1506,14 @@ export interface BulkRunOverview {
   canCancel: boolean
   canDiscard: boolean
   canUndo: boolean
+  /** Ergebnis je Bündel nach dem Anlegen; fehlt, solange das Bündel offen ist. */
+  clusterOutcomes: Record<string, { outcome: BulkClusterOutcome; message: string | null }>
+  /** Noch nicht angelegte Bündel, deren Dateien bereitliegen. */
+  retryableClusterIds: string[]
+  /** Teilweise übernommen: die noch nicht angelegten Bündel lassen sich erneut anlegen. */
+  canRetry: boolean
+  /** Übernommen, aber Dateien nicht angelegter Bündel liegen noch im Zwischenspeicher. */
+  canDiscardLeftovers: boolean
 }
 
 export async function getBulkRunOverview(runId: string): Promise<BulkRunOverview> {
@@ -1220,6 +1522,21 @@ export async function getBulkRunOverview(runId: string): Promise<BulkRunOverview
   const analysisPending = Boolean(detected.analysisPending)
   const files = detected.files ?? []
   const clusters = analysisPending ? [] : resolveClusters(detected)
+  const progress = summarizeRunItems(analysisPending ? [] : await activeRunItems(runId))
+  const clusterOutcomes: BulkRunOverview['clusterOutcomes'] = {}
+  for (const cluster of clusters) {
+    const outcome = clusterOutcome(cluster.clusterId, progress)
+    if (outcome) {
+      clusterOutcomes[cluster.clusterId] = {
+        outcome,
+        message: progress.latest.get(cluster.clusterId)?.message ?? null,
+      }
+    }
+  }
+  const imported = run.status === 'importiert' || run.status === 'teilweise_importiert'
+  const retryable = imported
+    ? retryableClusterIds(clusters, new Map(files.map((file) => [file.sourceRef, file])), progress)
+    : []
 
   return {
     runId: run.id,
@@ -1240,7 +1557,11 @@ export async function getBulkRunOverview(runId: string): Promise<BulkRunOverview
     canCommit: run.status === 'vorschau' || run.status === 'analysiert',
     canCancel: isAnalysisRunning(run.status, detected),
     canDiscard: DISCARDABLE_STATUSES.includes(run.status) || isAnalysisRunning(run.status, detected),
-    canUndo: !run.undoneAt && ['importiert', 'teilweise_importiert'].includes(run.status),
+    canUndo: imported,
+    clusterOutcomes,
+    retryableClusterIds: retryable,
+    canRetry: run.status === 'teilweise_importiert' && retryable.length > 0,
+    canDiscardLeftovers: retryable.length > 0,
   }
 }
 
@@ -1263,7 +1584,8 @@ export async function listBulkUploads(limit = 30) {
     .limit(limit)
 }
 
-const DISCARDABLE_STATUSES = ['vorschau', 'analysiert', 'fehlgeschlagen']
+// `rueckgaengig`: Stapel, die vor dem Wiederherstellen der Dateien rückgängig gemacht wurden.
+const DISCARDABLE_STATUSES = ['vorschau', 'analysiert', 'fehlgeschlagen', 'rueckgaengig']
 
 /** Analyse noch nicht fertig: abbrechbar und verwerfbar – egal ob ein Worker noch lebt. */
 function isAnalysisRunning(status: string, detected: BulkUploadDetected): boolean {
@@ -1284,6 +1606,43 @@ export async function discardBulkUpload(runId: string): Promise<void> {
 
   await useDatabase().delete(importRuns).where(eq(importRuns.id, runId))
   await deleteStagedFiles(detected.files ?? [])
+}
+
+/**
+ * Entfernt bei einem übernommenen Stapel die Dateien der nicht angelegten Bündel aus dem
+ * Zwischenspeicher. Angelegte Materialien und der Stapel selbst bleiben (auch rückgängig machbar).
+ */
+export async function discardBulkLeftovers(runId: string): Promise<{ files: number }> {
+  const run = await requireBulkRun(runId)
+  if (run.status !== 'importiert' && run.status !== 'teilweise_importiert') {
+    throw appError('KONFLIKT', 'Nur bei übernommenen Stapeln lassen sich übrige Dateien verwerfen.')
+  }
+  const detected = (run.detected ?? {}) as unknown as BulkUploadDetected
+  const files = detected.files ?? []
+  const leftovers = files.filter((file) => !file.stagingMissing)
+  // Angelegte Dateien liegen nicht mehr im Zwischenspeicher; Löschen ist dort ein No-op.
+  await deleteStagedFiles(leftovers)
+  const progress = summarizeRunItems(await activeRunItems(runId))
+  const uebrig = resolveClusters(detected).filter(
+    (cluster) => !progress.createdClusters.has(cluster.clusterId),
+  ).length
+
+  await useDatabase()
+    .update(importRuns)
+    .set({
+      detected: {
+        ...detected,
+        files: files.map((file) => ({ ...file, stagingMissing: true, extractedTextKey: null })),
+      } satisfies BulkUploadDetected as never,
+      stagingPath: null,
+    })
+    .where(eq(importRuns.id, runId))
+  await addLog(
+    runId,
+    'info',
+    `Übrige Dateien verworfen: ${uebrig} Bündel werden nicht mehr angelegt. Angelegte Materialien bleiben.`,
+  )
+  return { files: leftovers.length }
 }
 
 /** Bricht eine laufende Analyse ab; der Stapel bleibt als `fehlgeschlagen` verwerfbar stehen. */
@@ -1323,14 +1682,7 @@ async function recoverInterruptedRun(runId: string, reason: 'neustart' | 'fehler
   const detected = (run.detected ?? {}) as unknown as BulkUploadDetected
   const analysisPending = Boolean(detected.analysisPending)
 
-  const items = await db
-    .select({
-      action: importRunItems.action,
-      entityType: importRunItems.entityType,
-      entityId: importRunItems.entityId,
-    })
-    .from(importRunItems)
-    .where(eq(importRunItems.runId, runId))
+  const items = await activeRunItems(runId)
   const created = new Set(
     items
       .filter((item) => item.action === 'erstellt' && item.entityType === 'material' && item.entityId)

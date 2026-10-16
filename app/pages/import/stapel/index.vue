@@ -268,6 +268,9 @@ async function analysieren() {
                 <template v-if="lauf.sourceSizeBytes">
                   · {{ formatBytes(lauf.sourceSizeBytes) }}
                 </template>
+                <template v-if="lauf.undoneAt && lauf.status !== 'rueckgaengig'">
+                  · rückgängig gemacht
+                </template>
               </span>
             </span>
             <UiBadge

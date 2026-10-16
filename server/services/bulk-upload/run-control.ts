@@ -50,7 +50,7 @@ export interface OrphanRecoveryInput {
 export interface OrphanRecoveryDecision {
   status: 'fehlgeschlagen' | 'teilweise_importiert'
   errorMessage: string
-  /** Übrige Staging-Dateien gleich entfernen (der Stapel kann nicht erneut übernommen werden). */
+  /** Übrige Staging-Dateien gleich entfernen. */
   discardStaging: boolean
 }
 
@@ -58,7 +58,8 @@ export interface OrphanRecoveryDecision {
  * Was mit einem verwaisten `laeuft`-Stapel passiert:
  * - Analyse unterbrochen → `fehlgeschlagen`; Dateien bleiben, bis jemand verwirft.
  * - Übernahme mit angelegten Materialien → `teilweise_importiert`, damit „Rückgängig“
- *   die bereits angelegten Materialien über import_run_items wieder entfernen kann.
+ *   die bereits angelegten Materialien über import_run_items wieder entfernen kann. Die übrigen
+ *   Dateien bleiben liegen, damit sie sich erneut anlegen oder verwerfen lassen.
  * - Übernahme ohne angelegte Materialien → `fehlgeschlagen`, verwerfbar.
  */
 export function decideOrphanRecovery(input: OrphanRecoveryInput): OrphanRecoveryDecision {
@@ -75,8 +76,8 @@ export function decideOrphanRecovery(input: OrphanRecoveryInput): OrphanRecovery
     const n = input.createdMaterials
     return {
       status: 'teilweise_importiert',
-      errorMessage: `Die Übernahme wurde ${ursache} unterbrochen. ${n} Material${n === 1 ? '' : 'ien'} wurde${n === 1 ? '' : 'n'} schon angelegt und lässt sich rückgängig machen; die übrigen Dateien wurden nicht übernommen.`,
-      discardStaging: true,
+      errorMessage: `Die Übernahme wurde ${ursache} unterbrochen. ${n} Material${n === 1 ? '' : 'ien'} wurde${n === 1 ? '' : 'n'} schon angelegt und lässt sich rückgängig machen; die übrigen Dateien lassen sich erneut anlegen oder verwerfen.`,
+      discardStaging: false,
     }
   }
   return {
