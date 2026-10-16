@@ -59,6 +59,10 @@ Vollständige Liste: [`.env.example`](.env.example)
 
 Unter *Einstellungen → Sicherung & Umzug* lädt die Administration alle Inhalte als ZIP herunter und spielt sie in einer anderen Instanz wieder ein. Benutzerkonten, Einstellungen und API-Schlüssel sind bewusst nicht enthalten. Läuft SARU hinter einem Reverse Proxy, muss dessen Upload-Limit für das Einspielen groß genug sein (z. B. nginx `client_max_body_size 0;` für `/api/sicherung/import`).
 
+### Stapelimport in Lehrwerke
+
+Wie Ordner und Dateinamen eines Importpakets aussehen müssen, damit der Stapel-Upload Materialarten, Lösungspaare, Fassungen, Lernzirkel und Verknüpfungen korrekt erkennt, beschreibt [docs/stapelimport-guide.md](docs/stapelimport-guide.md).
+
 ## Technik
 
 - **Frontend / Backend:** Nuxt 4 (Vue, Nitro)
