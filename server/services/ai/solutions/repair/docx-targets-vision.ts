@@ -1,5 +1,5 @@
 import { extractJsonObject } from '../../../../utils/json-parse'
-import type { AiSettings } from '../../../settings.service'
+import { aiSettingsFuerRolle, type AiSettings } from '../../../settings.service'
 import { chatCompletion, type ChatPart } from '../../client'
 import { visionExtractionAvailable } from '../../document-text'
 import type { SolutionBBox } from '../../document-fill'
@@ -85,7 +85,9 @@ export async function repairDocxTargetsViaVision(args: {
   existingTargets: AnswerTarget[]
   page?: number
 }): Promise<AnswerTarget[]> {
-  if (!visionExtractionAvailable(args.settings)) return []
+  // Anbieter, Adresse und Schlüssel der Vision-Aufgabe – auch für die PDF-Fähigkeit.
+  const settings = aiSettingsFuerRolle(args.settings, 'vision')
+  if (!visionExtractionAvailable(settings)) return []
 
   const pages = await rasterizePdf(args.pdfBuffer, {
     maxPages: MAX_VISION_PAGES,
@@ -112,15 +114,15 @@ export async function repairDocxTargetsViaVision(args: {
   }
 
   const model =
-    args.settings.visionModel?.trim() ||
-    args.settings.chatModel?.trim() ||
+    settings.visionModel?.trim() ||
+    settings.chatModel?.trim() ||
     ''
   if (!model) return []
 
   const completion = await chatCompletion(
-    args.settings,
+    settings,
     [{ role: 'user', parts }],
-    { model, maxOutputTokens: Math.min(2048, args.settings.maxOutputTokens ?? 2048) },
+    { model, maxOutputTokens: Math.min(2048, settings.maxOutputTokens ?? 2048) },
   )
   return parseDocxTargetsVisionResponse(completion.text, args.page ?? 1)
 }

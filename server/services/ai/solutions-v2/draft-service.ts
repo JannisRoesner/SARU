@@ -7,7 +7,7 @@ import { appError } from '../../../utils/errors'
 import { addFileAsset, addRelation, createMaterial, deleteAsset, updateMaterial } from '../../material.service'
 import { deleteFile, resolveStoragePath, storeFile } from '../../storage.service'
 import { chooseMaterialDescription } from '#shared/utils/material-description'
-import { getAiSettings } from '../../settings.service'
+import { aiSettingsFuerRolle, getAiSettings } from '../../settings.service'
 import { suggestShortDescription } from '../suggest-material-metadata'
 import { candidateBankFromWords } from '../solutions/candidate-bank'
 import {
@@ -243,10 +243,12 @@ export async function retrySolutionDraftTask(
     visualPdf = await convertOfficeBufferToPdf(source.buffer, source.fileName)
   }
 
-  const settings = {
-    ...await getAiSettings(),
-    provider: row.job.provider,
-  }
+  // Derselbe Anbieter wie beim ursprünglichen Lauf: Ein Lauf mit dem Chat-Modell
+  // bleibt beim Chat-Anbieter, sonst gilt die Vision-Aufgabe.
+  const gesamt = await getAiSettings()
+  const mitChatModell =
+    row.job.model === gesamt.chatModel.trim() && row.job.model !== gesamt.visionModel.trim()
+  const settings = aiSettingsFuerRolle(gesamt, mitChatModell ? 'chat' : 'vision')
   if (input.redetectTargets) {
     if (!visualPdf || !source) {
       throw appError('UNGUELTIGE_EINGABE', 'Für dieses Dokument ist keine visuelle Zielerkennung verfügbar.')

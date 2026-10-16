@@ -1,11 +1,11 @@
 import {
+  embeddingsNachAnbieterwechselVerwerfen,
   imageEmbeddingsActive,
   materialienNeuIndizieren,
   startEmbeddingJob,
 } from '../../services/search/indexer'
-import { getAiSettings, saveAiSettings } from '../../services/settings.service'
+import { aiSettingsFuerClient, getAiSettings, saveAiSettings } from '../../services/settings.service'
 import { recordAudit } from '../../services/audit.service'
-import { maskSecret } from '../../utils/crypto'
 import { requireAdmin } from '../../utils/auth'
 import { aiSettingsSchema } from '../../utils/schemas'
 import { readZodBody } from '../../utils/validation'
@@ -14,7 +14,8 @@ export default defineEventHandler(async (event) => {
   const user = await requireAdmin(event)
   const patch = await readZodBody(event, aiSettingsSchema)
 
-  const bilderVorher = imageEmbeddingsActive(await getAiSettings())
+  const vorher = await getAiSettings()
+  const bilderVorher = imageEmbeddingsActive(vorher)
   await saveAiSettings(patch, user.id)
   await recordAudit(
     {
@@ -24,14 +25,20 @@ export default defineEventHandler(async (event) => {
       details: {
         provider: patch.provider,
         aktiv: patch.enabled,
-        // Der Schlüssel selbst wird nie protokolliert.
-        schluesselGeaendert: patch.apiKey !== undefined,
+        rollen: patch.rollen
+          ? Object.fromEntries(Object.entries(patch.rollen).map(([rolle, wert]) => [rolle, wert?.provider]))
+          : undefined,
+        // Die Schlüssel selbst werden nie protokolliert.
+        schluesselGeaendert:
+          patch.apiKey !== undefined || Object.values(patch.rollen ?? {}).some((wert) => wert?.apiKey !== undefined),
       },
     },
     event,
   )
 
   const saved = await getAiSettings()
+
+  const embeddingsVerworfen = await embeddingsNachAnbieterwechselVerwerfen(vorher, saved)
 
   // Seitenbilder ein- oder ausgeschaltet: Die Materialien bekommen ihre Bildabschnitte
   // über die Warteschlange, die danach selbst die Vektoren nachzieht.
@@ -42,5 +49,5 @@ export default defineEventHandler(async (event) => {
     void startEmbeddingJob()
   }
 
-  return { ...saved, apiKey: maskSecret(saved.apiKey), apiKeyGesetzt: Boolean(saved.apiKey) }
+  return { ...aiSettingsFuerClient(saved), embeddingsVerworfen }
 })

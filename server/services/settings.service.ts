@@ -1,5 +1,10 @@
 import { eq } from 'drizzle-orm'
-import type { AiProvider } from '#shared/types/domain'
+import {
+  AI_ROLLEN,
+  type AiProvider,
+  type AiRolle,
+  type AiRollenAnbieterId,
+} from '#shared/types/domain'
 import { OLLAMA_EMBEDDING_MODEL } from '#shared/utils/embeddings'
 import { useDatabase } from '../database/client'
 import { appSettings } from '../database/schema'
@@ -17,6 +22,24 @@ export const SETTING_KEYS = {
 } as const
 
 export type AiProviderId = AiProvider
+
+/** Verbindung, über die eine Aufgabe (Chat, Vision, Embeddings) ihre Anfragen schickt. */
+export interface AiVerbindung {
+  provider: AiProviderId
+  baseUrl: string
+  apiKey: string
+}
+
+/** Eigener Anbieter für eine Aufgabe; `standard` übernimmt die Verbindung des Standardanbieters. */
+export interface AiRollenAnbieter {
+  provider: AiRollenAnbieterId
+  /** Leer lassen, um die Standard-URL des Anbieters zu verwenden. */
+  baseUrl: string
+  /** Im Klartext nur im Speicher; in der Datenbank liegt der Wert verschlüsselt. */
+  apiKey: string
+}
+
+export type AiRollenEinstellungen = Record<AiRolle, AiRollenAnbieter>
 
 export interface AiSettings {
   enabled: boolean
@@ -42,6 +65,11 @@ export interface AiSettings {
   /** Von OpenRouter für die Aufruferkennung ausgewertet. */
   refererUrl: string
   appTitle: string
+  /**
+   * Anbieter je Aufgabe. Fehlt der Eintrag (ältere Installationen), gilt für
+   * alle Aufgaben der Standardanbieter oben.
+   */
+  rollen?: AiRollenEinstellungen
 }
 
 export const DEFAULT_BASE_URLS: Record<AiProviderId, string> = {
@@ -84,6 +112,12 @@ export const PROVIDER_MODEL_HINTS: Record<
   },
 }
 
+export const STANDARD_ROLLE: AiRollenAnbieter = { provider: 'standard', baseUrl: '', apiKey: '' }
+
+export function standardRollen(): AiRollenEinstellungen {
+  return { chat: { ...STANDARD_ROLLE }, vision: { ...STANDARD_ROLLE }, embedding: { ...STANDARD_ROLLE } }
+}
+
 export const defaultAiSettings: AiSettings = {
   enabled: false,
   provider: 'ollama',
@@ -101,6 +135,105 @@ export const defaultAiSettings: AiSettings = {
   timeoutMs: 180_000,
   refererUrl: '',
   appTitle: 'SARU',
+  rollen: standardRollen(),
+}
+
+function verbindungDesStandards(settings: AiSettings): AiVerbindung {
+  return {
+    provider: settings.provider,
+    baseUrl: settings.baseUrl || DEFAULT_BASE_URLS[settings.provider],
+    apiKey: settings.apiKey,
+  }
+}
+
+function eigeneVerbindung(rolle: AiRollenAnbieter | undefined): AiVerbindung | null {
+  if (!rolle || rolle.provider === 'standard') return null
+  return {
+    provider: rolle.provider,
+    baseUrl: rolle.baseUrl || DEFAULT_BASE_URLS[rolle.provider],
+    apiKey: rolle.apiKey,
+  }
+}
+
+/**
+ * Verbindung, über die eine Aufgabe ihre Anfragen schickt. Ohne eigenes
+ * Vision-Modell arbeitet Vision mit dem Chat-Modell – und damit auch über
+ * dessen Anbieter.
+ */
+export function aiVerbindung(settings: AiSettings, rolle: AiRolle): AiVerbindung {
+  if (rolle === 'vision' && !settings.visionModel?.trim()) return aiVerbindung(settings, 'chat')
+  return eigeneVerbindung(settings.rollen?.[rolle]) ?? verbindungDesStandards(settings)
+}
+
+/**
+ * Konfiguration, die direkt den Server einer Aufgabe anspricht – für Modellliste
+ * und Verbindungstest, auch solange deren Modell noch nicht gewählt ist.
+ * Ohne eigenen Anbieter gilt die wirksame Verbindung der Aufgabe.
+ */
+export function aiSettingsFuerVerbindungstest(settings: AiSettings, rolle: AiRolle): AiSettings {
+  const eigene = eigeneVerbindung(settings.rollen?.[rolle])
+  return eigene ? { ...aiSettingsFuerRolle(settings, rolle), ...eigene } : aiSettingsFuerRolle(settings, rolle)
+}
+
+/** Modell, das eine Aufgabe ohne ausdrückliche Vorgabe verwendet. */
+export function aiModell(settings: AiSettings, rolle: AiRolle): string {
+  if (rolle === 'embedding') return settings.embeddingModel?.trim() ?? ''
+  if (rolle === 'vision') return settings.visionModel?.trim() || settings.chatModel?.trim() || ''
+  return settings.chatModel?.trim() ?? ''
+}
+
+/** Ob zwei Verbindungen denselben Server mit demselben Anbietertyp ansprechen. */
+export function gleicheVerbindung(a: AiVerbindung, b: AiVerbindung): boolean {
+  const url = (wert: string) => wert.trim().replace(/\/+$/, '').toLowerCase()
+  return a.provider === b.provider && url(a.baseUrl) === url(b.baseUrl)
+}
+
+function alsRolle(verbindung: AiVerbindung): AiRollenAnbieter {
+  return { provider: verbindung.provider, baseUrl: verbindung.baseUrl, apiKey: verbindung.apiKey }
+}
+
+/**
+ * Konfiguration aus Sicht einer Aufgabe: Anbieter, Adresse und Schlüssel oben
+ * sind die der Aufgabe; die übrigen Aufgaben behalten ihre Verbindung. So
+ * prüfen etwa PDF-Pfade die Fähigkeiten des richtigen Anbieters, und eine
+ * Texterkennung innerhalb eines Chat-Laufs geht weiterhin an den Vision-Anbieter.
+ *
+ * Für Vision werden Chat- und Vision-Modell zum wirksamen Vision-Modell und
+ * Chat folgt der Vision-Verbindung: Folgeschritte eines Vision-Laufs (auch
+ * reine Textanfragen mit demselben Modell) bleiben beim selben Anbieter.
+ */
+export function aiSettingsFuerRolle(settings: AiSettings, rolle: AiRolle): AiSettings {
+  const rollen = standardRollen()
+  if (rolle !== 'embedding') rollen.embedding = alsRolle(aiVerbindung(settings, 'embedding'))
+  if (rolle !== 'vision' && settings.visionModel?.trim()) rollen.vision = alsRolle(aiVerbindung(settings, 'vision'))
+  if (rolle === 'embedding') rollen.chat = alsRolle(aiVerbindung(settings, 'chat'))
+
+  const flach: AiSettings = { ...settings, ...aiVerbindung(settings, rolle), rollen }
+  if (rolle !== 'vision') return flach
+  const modell = aiModell(settings, 'vision')
+  return { ...flach, chatModel: modell, visionModel: modell }
+}
+
+type GespeicherteRollen = Partial<Record<AiRolle, Partial<AiRollenAnbieter>>>
+
+/** Rollen aus der Datenbank mit Standardwerten auffüllen (fehlende Einträge = Standardanbieter). */
+function rollenAuffuellen(stored: GespeicherteRollen | undefined): AiRollenEinstellungen {
+  const rollen = standardRollen()
+  for (const rolle of AI_ROLLEN) rollen[rolle] = { ...STANDARD_ROLLE, ...stored?.[rolle] }
+  return rollen
+}
+
+function schluesselEntschluesseln(wert: string, wo: string): string {
+  if (!wert) return ''
+  try {
+    return decryptSecret(wert)
+  } catch (error) {
+    log.error(
+      `API-Schlüssel (${wo}) konnte nicht entschlüsselt werden – vermutlich wurde NUXT_ENCRYPTION_KEY geändert.`,
+      error,
+    )
+    return ''
+  }
 }
 
 export interface UploadSettings {
@@ -167,50 +300,110 @@ async function writeRaw(key: string, value: unknown, userId?: string): Promise<v
     })
 }
 
-/** Liefert die KI-Konfiguration inklusive entschlüsseltem Schlüssel (nur serverseitig verwenden!). */
+/** Liefert die KI-Konfiguration inklusive entschlüsselter Schlüssel (nur serverseitig verwenden!). */
 export async function getAiSettings(): Promise<AiSettings> {
   const stored = (await readRaw<AiSettings>(SETTING_KEYS.ai)) ?? {}
-  const merged = { ...defaultAiSettings, ...stored }
+  const rollen = rollenAuffuellen(stored.rollen)
+  const merged: AiSettings = { ...defaultAiSettings, ...stored, rollen }
 
-  if (merged.apiKey) {
-    try {
-      merged.apiKey = decryptSecret(merged.apiKey)
-    } catch (error) {
-      log.error('API-Schlüssel konnte nicht entschlüsselt werden – vermutlich wurde NUXT_ENCRYPTION_KEY geändert.', error)
-      merged.apiKey = ''
+  merged.apiKey = schluesselEntschluesseln(merged.apiKey, 'Standardanbieter')
+  if (!merged.baseUrl) merged.baseUrl = DEFAULT_BASE_URLS[merged.provider]
+  for (const rolle of AI_ROLLEN) {
+    const eintrag = rollen[rolle]
+    eintrag.apiKey = schluesselEntschluesseln(eintrag.apiKey, rolle)
+    if (eintrag.provider !== 'standard' && !eintrag.baseUrl) eintrag.baseUrl = DEFAULT_BASE_URLS[eintrag.provider]
+  }
+  return merged
+}
+
+export interface AiRollenAnbieterFuerClient extends AiRollenAnbieter {
+  apiKeyGesetzt: boolean
+}
+
+export type AiSettingsFuerClient = Omit<AiSettings, 'rollen'> & {
+  apiKeyGesetzt: boolean
+  rollen: Record<AiRolle, AiRollenAnbieterFuerClient>
+}
+
+/** Variante für die Auslieferung an den Client: alle Schlüssel werden maskiert. */
+export function aiSettingsFuerClient(settings: AiSettings): AiSettingsFuerClient {
+  const rollen = settings.rollen ?? standardRollen()
+  const maskiert = (rolle: AiRolle): AiRollenAnbieterFuerClient => ({
+    ...rollen[rolle],
+    apiKey: maskSecret(rollen[rolle].apiKey),
+    apiKeyGesetzt: Boolean(rollen[rolle].apiKey),
+  })
+  return {
+    ...settings,
+    apiKey: maskSecret(settings.apiKey),
+    apiKeyGesetzt: Boolean(settings.apiKey),
+    rollen: { chat: maskiert('chat'), vision: maskiert('vision'), embedding: maskiert('embedding') },
+  }
+}
+
+export type AiRollenPatch = Partial<
+  Record<AiRolle, Partial<Omit<AiRollenAnbieter, 'apiKey'>> & { apiKey?: string | null }>
+>
+
+export type AiSettingsPatch = Partial<Omit<AiSettings, 'apiKey' | 'rollen'>> & {
+  apiKey?: string | null
+  rollen?: AiRollenPatch
+}
+
+/**
+ * Wendet einen noch nicht gespeicherten Formularstand auf die Konfiguration an,
+ * etwa für Verbindungstest und Modellliste. Leere Schlüssel bleiben wie gespeichert.
+ */
+export function aiSettingsMitEntwurf(stored: AiSettings, patch: AiSettingsPatch): AiSettings {
+  const { rollen: rollenPatch, apiKey, ...rest } = patch
+  const rollen = rollenAuffuellen(stored.rollen)
+  for (const rolle of AI_ROLLEN) {
+    const eintrag = rollenPatch?.[rolle]
+    if (!eintrag) continue
+    const provider = eintrag.provider ?? rollen[rolle].provider
+    rollen[rolle] = {
+      provider,
+      baseUrl: eintrag.baseUrl || (provider === 'standard' ? '' : DEFAULT_BASE_URLS[provider]),
+      apiKey: eintrag.apiKey || rollen[rolle].apiKey,
     }
   }
+  const merged: AiSettings = { ...stored, ...rest, apiKey: apiKey || stored.apiKey, rollen }
   if (!merged.baseUrl) merged.baseUrl = DEFAULT_BASE_URLS[merged.provider]
   return merged
 }
 
-/** Variante für die Auslieferung an den Client: der Schlüssel wird maskiert. */
-export async function getAiSettingsForClient(): Promise<
-  Omit<AiSettings, 'apiKey'> & { apiKeyMasked: string; apiKeySet: boolean }
-> {
-  const settings = await getAiSettings()
-  const { apiKey, ...rest } = settings
-  return { ...rest, apiKeyMasked: maskSecret(apiKey), apiKeySet: apiKey.length > 0 }
+/** `undefined` = unverändert lassen, `null` oder "" = löschen, sonst neu verschlüsseln. */
+function schluesselFuerSpeicher(neu: string | null | undefined, gespeichert: string | undefined): string {
+  if (neu === undefined) return gespeichert ?? ''
+  if (!neu) return ''
+  return encryptSecret(neu)
 }
 
-export async function saveAiSettings(
-  patch: Partial<AiSettings> & { apiKey?: string | null },
-  userId?: string,
-): Promise<void> {
+export async function saveAiSettings(patch: AiSettingsPatch, userId?: string): Promise<void> {
   const stored = (await readRaw<AiSettings>(SETTING_KEYS.ai)) ?? {}
-  const next: Record<string, unknown> = { ...defaultAiSettings, ...stored, ...patch }
+  const { rollen: rollenPatch, ...rest } = patch
+  const next: Record<string, unknown> = { ...defaultAiSettings, ...stored, ...rest }
+  next.apiKey = schluesselFuerSpeicher(patch.apiKey, stored.apiKey)
 
-  // `undefined` = unverändert lassen, `null` oder "" = löschen, sonst neu verschlüsseln.
-  if (patch.apiKey === undefined) {
-    next.apiKey = stored.apiKey ?? ''
-  } else if (!patch.apiKey) {
-    next.apiKey = ''
-  } else {
-    next.apiKey = encryptSecret(patch.apiKey)
+  // Die Schlüssel der Rollen liegen wie der Hauptschlüssel verschlüsselt in der Datenbank.
+  const rollen = rollenAuffuellen(stored.rollen)
+  for (const rolle of AI_ROLLEN) {
+    const eintrag = rollenPatch?.[rolle]
+    if (!eintrag) continue
+    rollen[rolle] = {
+      provider: eintrag.provider ?? rollen[rolle].provider,
+      baseUrl: (eintrag.baseUrl ?? rollen[rolle].baseUrl).trim(),
+      apiKey: schluesselFuerSpeicher(eintrag.apiKey, rollen[rolle].apiKey),
+    }
   }
+  next.rollen = rollen
 
   await writeRaw(SETTING_KEYS.ai, next, userId)
-  log.info('KI-Konfiguration aktualisiert', { provider: next.provider, enabled: next.enabled })
+  log.info('KI-Konfiguration aktualisiert', {
+    provider: next.provider,
+    enabled: next.enabled,
+    rollen: { chat: rollen.chat.provider, vision: rollen.vision.provider, embedding: rollen.embedding.provider },
+  })
 }
 
 export async function getUploadSettings(): Promise<UploadSettings> {

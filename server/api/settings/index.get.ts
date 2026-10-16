@@ -3,6 +3,8 @@ import {
   resolveEmbeddingModel,
 } from '#shared/utils/embeddings'
 import {
+  aiSettingsFuerClient,
+  aiVerbindung,
   getAiSettings,
   getAppearanceSettings,
   getCollaboraSettings,
@@ -10,7 +12,7 @@ import {
   getUploadSettings,
   PROVIDER_MODEL_HINTS,
 } from '../../services/settings.service'
-import { maskSecret } from '../../utils/crypto'
+import { EMBEDDING_DIMENSIONS } from '../../database/schema'
 import { requireAdmin } from '../../utils/auth'
 
 export default defineEventHandler(async (event) => {
@@ -24,14 +26,17 @@ export default defineEventHandler(async (event) => {
     getCollaboraSettings(),
   ])
 
-  // Der API-Schlüssel verlässt den Server nie im Klartext.
+  // Die API-Schlüssel verlassen den Server nie im Klartext.
+  const embedding = aiVerbindung(ai, 'embedding')
+  const embeddingProvider = embedding.provider
   return {
     ai: {
-      ...ai,
-      apiKey: maskSecret(ai.apiKey),
-      apiKeyGesetzt: Boolean(ai.apiKey),
-      embeddingModelEffektiv: resolveEmbeddingModel(ai.provider, ai.embeddingModel),
-      embeddingModelWarnung: getEmbeddingModelWarning(ai.provider, ai.embeddingModel),
+      ...aiSettingsFuerClient(ai),
+      embeddingModelEffektiv: resolveEmbeddingModel(embeddingProvider, ai.embeddingModel),
+      embeddingModelWarnung: getEmbeddingModelWarning(embeddingProvider, ai.embeddingModel),
+      /** Gespeicherte Embedding-Verbindung – die Oberfläche warnt, wenn das Formular davon abweicht. */
+      embeddingVerbindung: { provider: embedding.provider, baseUrl: embedding.baseUrl },
+      embeddingDimensionen: EMBEDDING_DIMENSIONS,
     },
     uploads,
     privacy,

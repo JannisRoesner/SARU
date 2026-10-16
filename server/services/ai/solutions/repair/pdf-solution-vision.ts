@@ -1,5 +1,5 @@
 import { extractJsonObject } from '../../../../utils/json-parse'
-import type { AiSettings } from '../../../settings.service'
+import { aiSettingsFuerRolle, type AiSettings } from '../../../settings.service'
 import { chatCompletion, supportsNativePdf, type ChatPart } from '../../client'
 import type { SolutionBBox } from '../../document-fill'
 import { rasterizePdf } from '../../rasterize'
@@ -87,10 +87,12 @@ export async function verifyPdfSolutionViaVision(args: {
   model: string
   expectedOverlays?: Array<{ text: string; page: number; bbox: SolutionBBox }>
 }): Promise<PdfSolutionQualityResult> {
+  // Anbieter, Adresse und Schlüssel der Vision-Aufgabe – auch für die PDF-Fähigkeit.
+  const settings = aiSettingsFuerRolle(args.settings, 'vision')
   const runCheck = async (parts: ChatPart[]): Promise<PdfSolutionQualityResult> => {
     try {
       const completion = await chatCompletion(
-        args.settings,
+        settings,
         [{ role: 'user', parts }],
         { model: args.model, temperature: 0, maxOutputTokens: 1200, jsonMode: true },
       )
@@ -108,7 +110,7 @@ export async function verifyPdfSolutionViaVision(args: {
     }
   }
 
-  if (supportsNativePdf(args.settings.provider)) {
+  if (supportsNativePdf(settings.provider)) {
     return runCheck([
       { type: 'text', text: qualityPrompt(args.expectedOverlays ?? []) },
       {
