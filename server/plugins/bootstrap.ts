@@ -7,6 +7,7 @@ import { purgeExpiredSessions } from '../utils/auth'
 import { startSolutionWorker } from '../services/ai/solutions-v2/worker'
 import { startDifferentiationWorker } from '../services/ai/differenzierung/worker'
 import { ueberlangeAbschnitteNeuAufbauen } from '../services/search/indexer'
+import { recoverOrphanedBulkRuns } from '../services/bulk-upload/bulk-upload.service'
 
 const log = createLogger('bootstrap')
 
@@ -41,6 +42,15 @@ export default defineNitroPlugin(async () => {
     await startDifferentiationWorker()
   } catch (error) {
     log.error('Differenzierungs-Worker konnte nicht gestartet werden', error)
+  }
+
+  // Stapel-Analysen und -Übernahmen laufen nur im Prozess; was der vorige Prozess
+  // in `laeuft` hinterlassen hat, setzt niemand fort.
+  try {
+    const recovered = await recoverOrphanedBulkRuns()
+    if (recovered) log.warn('Unterbrochene Stapel-Uploads abgeschlossen', { anzahl: recovered })
+  } catch (error) {
+    log.error('Unterbrochene Stapel-Uploads konnten nicht geprüft werden', error)
   }
 
   // Im Hintergrund: Altlasten im Suchindex bereinigen, ohne den Start zu verzögern.

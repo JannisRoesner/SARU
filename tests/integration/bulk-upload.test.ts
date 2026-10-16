@@ -1,23 +1,48 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { eq } from 'drizzle-orm'
 import { samplePdf } from '../fixtures'
 import { closeConnections, createTestUser, resetDatabase, withTempUploadDir } from './helpers'
 
 const { createMaterial } = await import('../../server/services/material.service')
 const {
   analyzeBulkPdfUpload,
+  cancelBulkUpload,
   commitBulkUpload,
+  discardBulkUpload,
   getBulkRunOverview,
   processBulkPdfUpload,
+  recoverOrphanedBulkRuns,
   startBulkPdfUpload,
   undoBulkUpload,
   updateBulkMapping,
 } = await import('../../server/services/bulk-upload/bulk-upload.service')
+const { useDatabase } = await import('../../server/database/client')
+const { importLogs, importRuns } = await import('../../server/database/schema')
+const { fileExists } = await import('../../server/services/storage.service')
 const { listMaterials, getMaterialDetail } = await import(
   '../../server/repositories/material.repository'
 )
 
 let userId: string
 let pdf: Buffer
+
+async function runRow(runId: string) {
+  const [row] = await useDatabase().select().from(importRuns).where(eq(importRuns.id, runId))
+  return row
+}
+
+async function logMessages(runId: string) {
+  const rows = await useDatabase().select().from(importLogs).where(eq(importLogs.runId, runId))
+  return rows.map((row) => row.message)
+}
+
+/** Simuliert einen Prozess, der mitten in der Übernahme gestorben ist. */
+async function zurueckAufLaeuft(runId: string) {
+  await useDatabase()
+    .update(importRuns)
+    .set({ status: 'laeuft', stats: {}, finishedAt: null })
+    .where(eq(importRuns.id, runId))
+}
 
 beforeAll(async () => {
   pdf = await samplePdf()
@@ -365,6 +390,123 @@ describe('PDF-Stapel-Upload', () => {
         expect(undo.removed.materialien).toBe(5)
         const rest = await listMaterials({ pageSize: 50 })
         expect(rest.items).toHaveLength(0)
+      })
+    })
+  })
+
+  describe('Hängende Stapel', () => {
+    it('schließt eine beim Neustart unterbrochene Analyse ab und lässt sie verwerfen', async () => {
+      await withTempUploadDir(async () => {
+        const { runId } = await startBulkPdfUpload([{ buffer: pdf, fileName: 'AB_Meiose.pdf' }], userId)
+        const stagingPath = (await getBulkRunOverview(runId)).files[0]!.stagingPath
+
+        expect(await recoverOrphanedBulkRuns()).toBe(1)
+
+        const overview = await getBulkRunOverview(runId)
+        expect(overview.status).toBe('fehlgeschlagen')
+        expect(overview.analysisPending).toBe(false)
+        expect(overview.errorMessage).toMatch(/Neustart/)
+        expect(overview.canDiscard).toBe(true)
+        expect(overview.canCancel).toBe(false)
+        expect((await logMessages(runId)).some((m) => /Neustart/.test(m))).toBe(true)
+        expect(await fileExists(stagingPath)).toBe(true)
+
+        // Ein zweiter Start ändert nichts mehr.
+        expect(await recoverOrphanedBulkRuns()).toBe(0)
+
+        await discardBulkUpload(runId)
+        expect(await runRow(runId)).toBeUndefined()
+        expect(await fileExists(stagingPath)).toBe(false)
+      })
+    })
+
+    it('macht eine unterbrochene Übernahme rückgängig-fähig', async () => {
+      await withTempUploadDir(async () => {
+        const other = Buffer.concat([pdf, Buffer.from('x')])
+        const { runId } = await analyzeBulkPdfUpload(
+          [
+            { buffer: pdf, fileName: 'AB_Herz.pdf' },
+            { buffer: other, fileName: 'AB_Lunge.pdf' },
+          ],
+          userId,
+        )
+        await commitBulkUpload(runId, userId)
+        await zurueckAufLaeuft(runId)
+
+        expect(await recoverOrphanedBulkRuns()).toBe(1)
+
+        const overview = await getBulkRunOverview(runId)
+        expect(overview.status).toBe('teilweise_importiert')
+        expect(overview.errorMessage).toMatch(/2 Materialien/)
+        expect(overview.stats?.materialien).toBe(2)
+        expect(overview.canUndo).toBe(true)
+        expect(overview.canDiscard).toBe(false)
+        await expect(discardBulkUpload(runId)).rejects.toMatchObject({ statusCode: 409 })
+
+        const undone = await undoBulkUpload(runId)
+        expect(undone.removed.materialien).toBe(2)
+        expect((await listMaterials({ pageSize: 20 })).total).toBe(0)
+      })
+    })
+
+    it('setzt eine Übernahme ohne angelegte Materialien auf fehlgeschlagen', async () => {
+      await withTempUploadDir(async () => {
+        const { runId } = await analyzeBulkPdfUpload([{ buffer: pdf, fileName: 'AB_Niere.pdf' }], userId)
+        const stagingPath = (await getBulkRunOverview(runId)).files[0]!.stagingPath
+        await zurueckAufLaeuft(runId)
+
+        expect(await recoverOrphanedBulkRuns()).toBe(1)
+
+        const overview = await getBulkRunOverview(runId)
+        expect(overview.status).toBe('fehlgeschlagen')
+        expect(overview.errorMessage).toMatch(/bevor Materialien angelegt wurden/)
+        expect(await fileExists(stagingPath)).toBe(true)
+        await discardBulkUpload(runId)
+        expect(await fileExists(stagingPath)).toBe(false)
+      })
+    })
+
+    it('verwirft eine verwaiste Analyse ohne Worker samt Dateien', async () => {
+      await withTempUploadDir(async () => {
+        const { runId } = await startBulkPdfUpload([{ buffer: pdf, fileName: 'AB_Leber.pdf' }], userId)
+        const overview = await getBulkRunOverview(runId)
+        expect(overview.status).toBe('laeuft')
+        expect(overview.canDiscard).toBe(true)
+
+        await discardBulkUpload(runId)
+        expect(await runRow(runId)).toBeUndefined()
+        expect(await fileExists(overview.files[0]!.stagingPath)).toBe(false)
+      })
+    })
+
+    it('bricht eine Analyse ab, bevor der Worker sie fortsetzt', async () => {
+      await withTempUploadDir(async () => {
+        const { runId } = await startBulkPdfUpload([{ buffer: pdf, fileName: 'AB_Milz.pdf' }], userId)
+        expect((await getBulkRunOverview(runId)).canCancel).toBe(true)
+
+        await cancelBulkUpload(runId)
+        await processBulkPdfUpload(runId)
+
+        const overview = await getBulkRunOverview(runId)
+        expect(overview.status).toBe('fehlgeschlagen')
+        expect(overview.errorMessage).toMatch(/abgebrochen/)
+        expect(overview.canCancel).toBe(false)
+        expect(overview.canDiscard).toBe(true)
+        expect(await logMessages(runId)).toContain('Analyse abgebrochen.')
+        await expect(cancelBulkUpload(runId)).rejects.toMatchObject({ statusCode: 409 })
+      })
+    })
+
+    it('lehnt Übernahme und Abbruch während einer laufenden Übernahme ab', async () => {
+      await withTempUploadDir(async () => {
+        const { runId } = await analyzeBulkPdfUpload([{ buffer: pdf, fileName: 'AB_Darm.pdf' }], userId)
+        await useDatabase().update(importRuns).set({ status: 'laeuft' }).where(eq(importRuns.id, runId))
+
+        await expect(commitBulkUpload(runId, userId)).rejects.toMatchObject({ statusCode: 409 })
+        await expect(cancelBulkUpload(runId)).rejects.toMatchObject({ statusCode: 409 })
+        await expect(discardBulkUpload(runId)).rejects.toMatchObject({ statusCode: 409 })
+        // Die abgelehnte Übernahme darf den Stapel nicht als unterbrochen abschließen.
+        expect((await runRow(runId))?.status).toBe('laeuft')
       })
     })
   })

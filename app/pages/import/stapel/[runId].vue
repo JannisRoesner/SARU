@@ -105,6 +105,8 @@ interface RunOverview {
   aiEnabled: boolean
   analysisPending?: boolean
   canCommit: boolean
+  canCancel?: boolean
+  canDiscard?: boolean
   canUndo: boolean
 }
 
@@ -318,6 +320,27 @@ async function committen() {
   if (ergebnis) await refresh()
 }
 
+const abbrechenOffen = ref(false)
+const verwerfenOffen = ref(false)
+
+async function analyseAbbrechen() {
+  const ok = await aufruf(`/api/materials/bulk/${runId.value}/cancel`, {
+    method: 'POST',
+    erfolgsmeldung: 'Analyse abgebrochen.',
+  })
+  abbrechenOffen.value = false
+  if (ok) await refresh()
+}
+
+async function verwerfen() {
+  const ok = await aufruf(`/api/materials/bulk/${runId.value}`, {
+    method: 'DELETE',
+    erfolgsmeldung: 'Stapel verworfen.',
+  })
+  verwerfenOffen.value = false
+  if (ok) await navigateTo('/import/stapel')
+}
+
 async function rueckgaengig() {
   const ok = await aufruf(`/api/materials/bulk/${runId.value}/undo`, {
     method: 'POST',
@@ -429,6 +452,24 @@ function hatLoesung(clusterId: string): boolean {
             @click="rueckgaengig"
           >
             Rückgängig
+          </UiButton>
+          <UiButton
+            v-if="data.canCancel"
+            variante="sekundaer"
+            icon="xmark"
+            :laedt="laeuft"
+            @click="abbrechenOffen = true"
+          >
+            Analyse abbrechen
+          </UiButton>
+          <UiButton
+            v-if="data.canDiscard"
+            variante="still"
+            icon="trash"
+            :laedt="laeuft"
+            @click="verwerfenOffen = true"
+          >
+            Verwerfen
           </UiButton>
           <UiButton
             v-if="data.mapping?.lehrwerkId"
@@ -755,5 +796,22 @@ function hatLoesung(clusterId: string): boolean {
         </aside>
       </div>
     </template>
+
+    <UiConfirm
+      v-model="abbrechenOffen"
+      titel="Analyse abbrechen?"
+      text="Die Analyse hört nach der Datei auf, an der sie gerade arbeitet. Der Stapel bleibt als fehlgeschlagen stehen und kann danach verworfen werden."
+      bestaetigen="Analyse abbrechen"
+      abbrechen="Weiterlaufen lassen"
+      @bestaetigt="analyseAbbrechen"
+    />
+    <UiConfirm
+      v-model="verwerfenOffen"
+      gefahr
+      titel="Stapel verwerfen?"
+      text="Der Stapel und alle hochgeladenen Dateien werden entfernt. Es werden keine Materialien angelegt. Eine laufende Analyse wird dabei abgebrochen."
+      bestaetigen="Ja, verwerfen"
+      @bestaetigt="verwerfen"
+    />
   </div>
 </template>
