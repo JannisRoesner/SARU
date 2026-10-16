@@ -31,7 +31,7 @@ import {
   storeExtractedTextSidecar,
 } from '../ai/document-text'
 import { MATERIAL_METADATA_PROMPT_VERSION } from '../ai/suggest-material-metadata'
-import { getAiSettings, getUploadSettings } from '../settings.service'
+import { getAiSettings, getUploadSettings, type AiSettings } from '../settings.service'
 import {
   deleteFile,
   extensionOf,
@@ -59,10 +59,14 @@ import {
   abortAnalysis,
   decideOrphanRecovery,
   isRunActive,
+  kiNachholenFortschritt,
   registerAnalysis,
   registerCommit,
+  registerKiNachholen,
   unregisterAnalysis,
   unregisterCommit,
+  unregisterKiNachholen,
+  type KiNachholFortschritt,
 } from './run-control'
 import {
   BULK_AI_CONCURRENCY,
@@ -310,6 +314,60 @@ export async function processBulkPdfUpload(runId: string): Promise<void> {
   }
 }
 
+/**
+ * Holt KI-Metadaten für ein Bündel und übernimmt sie in `cluster.suggestions`.
+ * Gibt zurück, ob die KI tatsächlich geantwortet hat; sonst bleibt der Vorschlag
+ * aus Dateiname und Ordner.
+ */
+async function clusterKiVorschlag(
+  cluster: BulkUploadDetectedCluster,
+  filesByRef: Map<string, BulkUploadDetectedFile>,
+  mapping: BulkUploadMapping,
+  subjectLabel: string | null,
+  settings: AiSettings,
+): Promise<boolean> {
+  const primaryRef =
+    cluster.fileRefs.find((ref) => cluster.suggestedRoles[ref] === 'schueler') ??
+    cluster.fileRefs.find((ref) => cluster.suggestedRoles[ref] === 'einzeln') ??
+    cluster.fileRefs[0]
+  const primary = primaryRef ? filesByRef.get(primaryRef) : undefined
+  const extractedText = primary?.extractedTextKey
+    ? ((await readExtractedTextSidecar(primary.extractedTextKey)) ?? '')
+    : ''
+  const extraContext = [
+    primary?.relativePath && primary.relativePath !== primary.fileName
+      ? `Pfad im Paket: ${primary.relativePath}`
+      : null,
+    primary?.folderRole && primary.folderRole !== 'sonstiges'
+      ? `Ordner: ${BULK_FOLDER_ROLE_LABELS[primary.folderRole]}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join('\n')
+
+  try {
+    const suggestions = await suggestFileMetadata({
+      fileName: primary?.relativePath || primary?.fileName || cluster.stem,
+      extractedText,
+      mapping: {
+        ...mapping,
+        defaultMaterialType: cluster.suggestions.materialType,
+      },
+      subjectLabel,
+      extraContext: extraContext || null,
+      settings,
+    })
+    cluster.suggestions = {
+      ...suggestions,
+      title: suggestions.title || cluster.suggestions.title,
+      materialType: cluster.suggestions.materialType,
+    }
+    return cluster.suggestions.aiUsed
+  } catch {
+    return false
+  }
+}
+
 async function analyseBulkRun(
   runId: string,
   run: typeof importRuns.$inferSelect,
@@ -448,46 +506,7 @@ async function analyseBulkRun(
       await addLog(runId, 'info', `KI-Vorschläge für ${clusters.length} Bündel werden erzeugt …`)
       await mapLimit(clusters, BULK_AI_CONCURRENCY, async (cluster) => {
         if (await isCancelled()) return
-        const primaryRef =
-          cluster.fileRefs.find((ref) => cluster.suggestedRoles[ref] === 'schueler') ??
-          cluster.fileRefs.find((ref) => cluster.suggestedRoles[ref] === 'einzeln') ??
-          cluster.fileRefs[0]
-        const primary = primaryRef ? filesByRef.get(primaryRef) : undefined
-        const extractedText = primary?.extractedTextKey
-          ? ((await readExtractedTextSidecar(primary.extractedTextKey)) ?? '')
-          : ''
-        const extraContext = [
-          primary?.relativePath && primary.relativePath !== primary.fileName
-            ? `Pfad im Paket: ${primary.relativePath}`
-            : null,
-          primary?.folderRole && primary.folderRole !== 'sonstiges'
-            ? `Ordner: ${BULK_FOLDER_ROLE_LABELS[primary.folderRole]}`
-            : null,
-        ]
-          .filter(Boolean)
-          .join('\n')
-
-        try {
-          const suggestions = await suggestFileMetadata({
-            fileName: primary?.relativePath || primary?.fileName || cluster.stem,
-            extractedText,
-            mapping: {
-              ...mapping,
-              defaultMaterialType: cluster.suggestions.materialType,
-            },
-            subjectLabel,
-            extraContext: extraContext || null,
-            settings,
-          })
-          cluster.suggestions = {
-            ...suggestions,
-            title: suggestions.title || cluster.suggestions.title,
-            materialType: cluster.suggestions.materialType,
-          }
-          if (!cluster.suggestions.aiUsed) aiErrors += 1
-        } catch {
-          aiErrors += 1
-        }
+        if (!(await clusterKiVorschlag(cluster, filesByRef, mapping, subjectLabel, settings))) aiErrors += 1
       })
       if (await isCancelled()) return await stopAfterCancel()
     }
@@ -621,6 +640,10 @@ export async function updateBulkMapping(runId: string, mapping: BulkUploadMappin
   // Teilweise übernommen: Korrekturen für das erneute Anlegen der übrigen Bündel.
   if (!['vorschau', 'analysiert', 'teilweise_importiert'].includes(run.status)) {
     throw appError('KONFLIKT', 'Die Zuordnung kann in diesem Status nicht mehr geändert werden.')
+  }
+
+  if (kiNachholenFortschritt(runId)) {
+    throw appError('KONFLIKT', 'Gerade werden KI-Vorschläge nachgeholt. Bitte kurz warten.')
   }
 
   const previous = (run.mapping as unknown as BulkUploadMapping | null) ?? {}
@@ -777,6 +800,9 @@ export async function commitBulkUpload(
   userId: string | null,
   mappingOverride?: BulkUploadMapping,
 ): Promise<BulkCommitResult> {
+  if (kiNachholenFortschritt(runId)) {
+    throw appError('KONFLIKT', 'Gerade werden KI-Vorschläge nachgeholt. Bitte kurz warten.')
+  }
   const state = { started: false }
   registerCommit(runId)
   try {
@@ -1514,6 +1540,11 @@ export interface BulkRunOverview {
   canRetry: boolean
   /** Übernommen, aber Dateien nicht angelegter Bündel liegen noch im Zwischenspeicher. */
   canDiscardLeftovers: boolean
+  /** Bündel, für die die KI keine Vorschläge geliefert hat. */
+  kiOhneVorschlag: number
+  /** Fortschritt, solange fehlende KI-Vorschläge nachgeholt werden. */
+  kiNachholen: KiNachholFortschritt | null
+  canKiNachholen: boolean
 }
 
 export async function getBulkRunOverview(runId: string): Promise<BulkRunOverview> {
@@ -1538,6 +1569,9 @@ export async function getBulkRunOverview(runId: string): Promise<BulkRunOverview
     ? retryableClusterIds(clusters, new Map(files.map((file) => [file.sourceRef, file])), progress)
     : []
 
+  const kiNachholen = kiNachholenFortschritt(runId)
+  const kiOhneVorschlag = clusters.filter((cluster) => !cluster.suggestions.aiUsed).length
+
   return {
     runId: run.id,
     adapterLabel: BULK_PDF_ADAPTER_LABEL,
@@ -1554,7 +1588,7 @@ export async function getBulkRunOverview(runId: string): Promise<BulkRunOverview
     startedAt: run.startedAt.toISOString(),
     finishedAt: run.finishedAt?.toISOString() ?? null,
     undoneAt: run.undoneAt?.toISOString() ?? null,
-    canCommit: run.status === 'vorschau' || run.status === 'analysiert',
+    canCommit: (run.status === 'vorschau' || run.status === 'analysiert') && !kiNachholen,
     canCancel: isAnalysisRunning(run.status, detected),
     canDiscard: DISCARDABLE_STATUSES.includes(run.status) || isAnalysisRunning(run.status, detected),
     canUndo: imported,
@@ -1562,7 +1596,137 @@ export async function getBulkRunOverview(runId: string): Promise<BulkRunOverview
     retryableClusterIds: retryable,
     canRetry: run.status === 'teilweise_importiert' && retryable.length > 0,
     canDiscardLeftovers: retryable.length > 0,
+    kiOhneVorschlag,
+    kiNachholen,
+    canKiNachholen:
+      run.status === 'vorschau' && Boolean(detected.aiEnabled) && kiOhneVorschlag > 0 && !kiNachholen,
   }
+}
+
+/** Felder eines Eintrags, die aus dem KI-Vorschlag kommen. */
+function recordAusVorschlag(suggestions: BulkUploadDetectedCluster['suggestions']) {
+  return {
+    title: suggestions.title,
+    materialType: suggestions.materialType,
+    description: suggestions.description,
+    tagNames: suggestions.tagNames,
+    learningObjectives: suggestions.learningObjectives ?? [],
+    content: suggestions.contentSummary ?? '',
+  }
+}
+
+function gleicherWert(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
+}
+
+/**
+ * Fordert KI-Vorschläge für die Bündel neu an, bei denen die KI in der Analyse
+ * nichts geliefert hat – etwa weil ein Denkmodell sein Ausgabebudget aufgebraucht
+ * hat. Läuft im Hintergrund; Bearbeiten und Anlegen sind solange gesperrt.
+ */
+export async function startKiNachholen(runId: string): Promise<{ gesamt: number }> {
+  const run = await requireBulkRun(runId)
+  if (run.status !== 'vorschau') {
+    throw appError('KONFLIKT', 'KI-Vorschläge lassen sich nur in der Vorschau nachholen.')
+  }
+  if (kiNachholenFortschritt(runId)) {
+    throw appError('KONFLIKT', 'Die KI-Vorschläge werden bereits nachgeholt.')
+  }
+  const settings = await getAiSettings()
+  if (!settings.enabled) {
+    throw appError('KI_NICHT_KONFIGURIERT', 'Die KI-Unterstützung ist nicht aktiviert.')
+  }
+
+  const detected = (run.detected ?? {}) as unknown as BulkUploadDetected
+  const offen = resolveClusters(detected)
+    .filter((cluster) => !cluster.suggestions.aiUsed)
+    .map((cluster) => cluster.clusterId)
+  if (!offen.length) return { gesamt: 0 }
+
+  const fortschritt = registerKiNachholen(runId, offen.length)
+  void kiNachholenAusfuehren(runId, offen, settings, fortschritt)
+    .catch((error) => log.warn('KI-Vorschläge konnten nicht nachgeholt werden', { runId, error }))
+    .finally(() => unregisterKiNachholen(runId))
+  return { gesamt: offen.length }
+}
+
+async function kiNachholenAusfuehren(
+  runId: string,
+  clusterIds: string[],
+  settings: AiSettings,
+  fortschritt: KiNachholFortschritt,
+): Promise<void> {
+  const run = await requireBulkRun(runId)
+  const detected = (run.detected ?? {}) as unknown as BulkUploadDetected
+  const mapping = (run.mapping as unknown as BulkUploadMapping | null) ?? {}
+  const files = detected.files ?? []
+  const filesByRef = new Map(files.map((file) => [file.sourceRef, file]))
+  const clusters = resolveClusters(detected)
+  const offen = new Set(clusterIds)
+  const subjectLabel = await resolveSubjectLabel(mapping)
+
+  await addLog(runId, 'info', `KI-Vorschläge für ${clusterIds.length} Bündel werden nachgeholt …`)
+  const vorher = new Map<string, BulkUploadDetectedCluster['suggestions']>()
+  const neu = new Set<string>()
+  await mapLimit(
+    clusters.filter((cluster) => offen.has(cluster.clusterId)),
+    BULK_AI_CONCURRENCY,
+    async (cluster) => {
+      vorher.set(cluster.clusterId, cluster.suggestions)
+      if (await clusterKiVorschlag(cluster, filesByRef, mapping, subjectLabel, settings)) {
+        neu.add(cluster.clusterId)
+      }
+      fortschritt.fertig += 1
+    },
+  )
+
+  // Frischen Stand lesen: Nur Felder ersetzen, die noch dem alten Vorschlag entsprechen.
+  const [aktuell] = await useDatabase().select().from(importRuns).where(eq(importRuns.id, runId)).limit(1)
+  if (!aktuell || aktuell.status !== 'vorschau') return
+  const aktuellesMapping: BulkUploadMapping = {
+    ...((aktuell.mapping as unknown as BulkUploadMapping | null) ?? {}),
+  }
+  const records = { ...(aktuellesMapping.records ?? {}) }
+  for (const cluster of clusters) {
+    if (!neu.has(cluster.clusterId)) continue
+    const alt = recordAusVorschlag(vorher.get(cluster.clusterId)!)
+    const vorschlag = recordAusVorschlag(cluster.suggestions)
+    const record = records[cluster.clusterId]
+    if (record) {
+      const ersetzt = { ...record }
+      for (const feld of Object.keys(vorschlag) as (keyof typeof vorschlag)[]) {
+        const wert = record[feld]
+        if (wert === undefined || gleicherWert(wert, alt[feld]) || (Array.isArray(wert) && !wert.length) || wert === '') {
+          ;(ersetzt as Record<string, unknown>)[feld] = vorschlag[feld]
+        }
+      }
+      records[cluster.clusterId] = ersetzt
+    }
+    for (const ref of cluster.fileRefs) {
+      const file = filesByRef.get(ref)
+      if (file) file.suggestions = cluster.suggestions
+    }
+  }
+  aktuellesMapping.records = records
+
+  const aiErrors = clusters.filter((cluster) => !cluster.suggestions.aiUsed).length
+  await useDatabase()
+    .update(importRuns)
+    .set({
+      detected: { ...detected, files, clusters, aiErrors } as never,
+      mapping: aktuellesMapping as never,
+    })
+    .where(and(eq(importRuns.id, runId), eq(importRuns.status, 'vorschau')))
+
+  const fehlend = clusterIds.length - neu.size
+  await addLog(
+    runId,
+    fehlend ? 'warnung' : 'info',
+    fehlend
+      ? `KI-Vorschläge für ${neu.size} von ${clusterIds.length} Bündeln nachgeholt; ${fehlend} weiterhin ohne KI.`
+      : `KI-Vorschläge für alle ${clusterIds.length} Bündel nachgeholt.`,
+  )
+  log.info('KI-Vorschläge nachgeholt', { runId, angefragt: clusterIds.length, erhalten: neu.size })
 }
 
 export async function listBulkUploads(limit = 30) {
