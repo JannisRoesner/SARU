@@ -441,6 +441,23 @@ describe('Materialverwaltung', () => {
       await addRelation(ab, loesung, 'musterloesung')
       await addRelation(station, lernzirkel, 'gehoert_zu')
 
+      // Der Upload prüft den Inhalt gegen die Endung – daher echte PDF- und DOCX-Dateien.
+      const { readFile } = await import('node:fs/promises')
+      const { fileURLToPath } = await import('node:url')
+      const { zipSync, strToU8 } = await import('fflate')
+      const pdf = await readFile(fileURLToPath(new URL('../fixtures/sample.pdf', import.meta.url)))
+      const docx = (text: string) =>
+        Buffer.from(
+          zipSync({
+            '[Content_Types].xml': strToU8(
+              '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>',
+            ),
+            'word/document.xml': strToU8(
+              `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:body></w:document>`,
+            ),
+          }),
+        )
+
       for (const [id, fileName] of [
         [lehrwerk, 'natura_komplett.pdf'],
         [service, 'sb.pdf'],
@@ -450,7 +467,8 @@ describe('Materialverwaltung', () => {
         [versteckt, 'geheim.pdf'],
       ] as const) {
         const detail = await getMaterialDetail(id)
-        await addFileAsset(detail!.variants[0]!.id, { buffer: Buffer.from(fileName, 'utf8'), fileName })
+        const buffer = fileName.endsWith('.pdf') ? pdf : docx(fileName)
+        await addFileAsset(detail!.variants[0]!.id, { buffer, fileName })
       }
 
       const erlaubt = new Set([lehrwerk, service, ab, loesung, lernzirkel, station])
