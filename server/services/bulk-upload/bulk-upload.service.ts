@@ -57,7 +57,6 @@ import {
   BULK_PDF_ADAPTER_ID,
   BULK_PDF_ADAPTER_LABEL,
   BULK_PDF_ADAPTER_VERSION,
-  MAX_BULK_FILES,
   type BulkFileRole,
   type BulkUploadDetected,
   type BulkUploadDetectedCluster,
@@ -155,21 +154,12 @@ export async function startBulkPdfUpload(
 ): Promise<{ runId: string; fileCount: number; status: 'laeuft'; aiEnabled: boolean }> {
   if (!files.length) throw invalidInput('Bitte mindestens eine Datei auswählen.')
 
-  const expanded = expandBulkArchives(files)
+  const uploadSettings = await getUploadSettings()
+  const expanded = expandBulkArchives(files, { maxTotalBytes: uploadSettings.maxImportBytes })
   if (!expanded.files.length) {
     throw invalidInput('Im Paket wurden keine unterstützten Dokumente gefunden.')
   }
-  if (expanded.files.length > MAX_BULK_FILES) {
-    throw invalidInput(`Maximal ${MAX_BULK_FILES} Dateien pro Stapel sind erlaubt.`)
-  }
-
-  const uploadSettings = await getUploadSettings()
-  const totalIncoming = expanded.files.reduce((sum, file) => sum + file.buffer.length, 0)
-  if (totalIncoming > uploadSettings.maxImportBytes) {
-    throw invalidInput(
-      `Das Paket ist mit ${formatBytes(totalIncoming)} größer als das Limit von ${formatBytes(uploadSettings.maxImportBytes)}.`,
-    )
-  }
+  const totalIncoming = expanded.totalBytes
 
   const prepared: BulkUploadInputFile[] = []
   const rejected: string[] = []
