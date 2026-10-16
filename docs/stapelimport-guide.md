@@ -47,8 +47,8 @@ Dateien im selben Cluster landen – und die falschen nicht.
 | Erlaubte Dateiformate | `pdf`, `doc`, `docx`, `ppt`, `pptx`, `xls`, `xlsx`, `odt`, `odp`, `ods`, `txt`, `md`, `csv` |
 | Container | `.zip` (nur auf oberster Ebene – **ZIPs im ZIP werden übersprungen**) |
 | Wird stillschweigend übersprungen | alle anderen Formate, **insbesondere Bilder (`png`, `jpg` …), Videos, `.h5p`, `.mbz`, Links (`.url`)**, leere Dateien, `__MACOSX/`, `.DS_Store`, `Thumbs.db`, Pfade mit `..` |
-| Max. Dateien pro Stapel | 400 (nach dem Entpacken) |
-| Max. Paketgröße | `NUXT_MAX_IMPORT_BYTES` (Standard 512 MiB, Summe aller entpackten Dateien) |
+| Max. Dateien pro Stapel | 10.000 (nach dem Entpacken, nur unterstützte Dokumente gezählt) |
+| Max. Paketgröße | `NUXT_MAX_IMPORT_BYTES` (Standard 512 MiB, Summe aller entpackten Dokumente; bei ZIPs schon vor dem Entpacken aus dem ZIP-Verzeichnis geprüft) |
 | Max. Einzeldatei | `NUXT_MAX_UPLOAD_BYTES` (Standard 256 MiB) |
 | Dateinamen | Steuerzeichen und `< > : " \| ? *` werden entfernt, Länge auf 180 Zeichen gekürzt |
 
@@ -590,7 +590,7 @@ Warum es funktioniert:
 Vor dem Packen prüfen:
 
 - [ ] Nur erlaubte Formate (Abschnitt 2); Bilder in PDF umgewandelt; keine ZIPs im ZIP.
-- [ ] ≤ 400 Dateien, Gesamtgröße unter dem Importlimit.
+- [ ] ≤ 10.000 Dateien, Gesamtgröße unter dem Importlimit.
 - [ ] Ein Fach, ein Jahrgangsbereich pro Paket.
 - [ ] Wurzelordner enthält weder `lehrwerk`, `schulbuch`, `schülerbuch` noch `handreichung`.
 - [ ] Inhalte nach Rolle in die empfohlenen Ordner sortiert (Abschnitt 4).
