@@ -163,6 +163,9 @@ export async function suggestMaterialMetadata(
           })
 
   const maxTokens = Math.min(Math.max(options.settings.maxOutputTokens || 800, 400), 800)
+  // Der zweite Versuch bekommt mehr Budget: Meist war die Antwort abgeschnitten
+  // (finish_reason „length“) oder ein Denkmodell hat das Budget aufgebraucht.
+  const maxTokensWiederholung = Math.max(maxTokens, 2000)
 
   let lastError: unknown
   let lastRawResponse = ''
@@ -185,7 +188,11 @@ export async function suggestMaterialMetadata(
           },
           { role: 'user', parts: [{ type: 'text', text: prompt }] },
         ],
-        { temperature: 0.1, maxOutputTokens: maxTokens, jsonMode: true },
+        {
+          temperature: 0.1,
+          maxOutputTokens: attempt === 0 ? maxTokens : maxTokensWiederholung,
+          jsonMode: true,
+        },
       )
 
       lastRawResponse = result.text

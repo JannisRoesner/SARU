@@ -254,6 +254,9 @@ export function chatRolle(settings: AiSettings, messages: ChatMessage[], model?:
   return mitMedien ? 'vision' : 'chat'
 }
 
+/** Modelle, bei denen OpenRouter das Abschalten des Denkmodus abgelehnt hat (pro Prozess). */
+const DENKEN_PFLICHT = new Set<string>()
+
 export async function chatCompletion(
   gesamt: AiSettings,
   messages: ChatMessage[],
@@ -295,6 +298,11 @@ export async function chatCompletion(
     body.chat_template_kwargs = { enable_thinking: false }
   }
 
+  // Denkmodelle bei OpenRouter (z. B. DeepSeek) verbrauchen sonst das ganze
+  // Ausgabebudget im Denkkanal: Antwort leer oder abgeschnitten (finish_reason „length“).
+  const ohneDenken = settings.provider === 'openrouter' && !DENKEN_PFLICHT.has(model)
+  if (ohneDenken) body.reasoning = { effort: 'none' }
+
   // llama.cpp, vLLM und LM Studio erzwingen ein JSON Schema per Grammatik.
   if (options.jsonSchema && (settings.provider === 'openai' || settings.provider === 'openai_kompatibel')) {
     body.response_format = {
@@ -312,12 +320,39 @@ export async function chatCompletion(
   }
 
   const started = Date.now()
-  const payload = await request<ChatCompletionResponse>(
-    settings,
-    '/chat/completions',
-    body,
-    'Die Anfrage an das Sprachmodell',
-  )
+  let payload: ChatCompletionResponse
+  try {
+    payload = await request<ChatCompletionResponse>(
+      settings,
+      '/chat/completions',
+      body,
+      'Die Anfrage an das Sprachmodell',
+    )
+  } catch (error) {
+    // Modelle mit Pflicht-Denkmodus lehnen `effort: none` ab – dann ohne Vorgabe wiederholen.
+    const ursache = (error as { cause?: unknown }).cause
+    if (
+      !ohneDenken ||
+      !(ursache instanceof AnbieterFehler) ||
+      ursache.status !== 400 ||
+      !/reason|think|effort/i.test(ursache.meldung)
+    ) {
+      throw error
+    }
+    DENKEN_PFLICHT.add(model)
+    log.warn('Modell lässt sich das Denken nicht abschalten – wiederhole ohne Vorgabe', {
+      provider: settings.provider,
+      model,
+      meldung: ursache.meldung,
+    })
+    delete body.reasoning
+    payload = await request<ChatCompletionResponse>(
+      settings,
+      '/chat/completions',
+      body,
+      'Die Anfrage an das Sprachmodell',
+    )
+  }
 
   const message = payload.choices?.[0]?.message
   const content = message?.content?.trim() ?? ''

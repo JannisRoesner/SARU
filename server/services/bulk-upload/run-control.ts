@@ -35,6 +35,29 @@ export function unregisterCommit(runId: string): void {
   commits.delete(runId)
 }
 
+export interface KiNachholFortschritt {
+  fertig: number
+  gesamt: number
+}
+
+/** Stapel, deren fehlende KI-Vorschläge gerade nachgeholt werden. */
+const kiNachholungen = new Map<string, KiNachholFortschritt>()
+
+export function registerKiNachholen(runId: string, gesamt: number): KiNachholFortschritt {
+  const fortschritt = { fertig: 0, gesamt }
+  kiNachholungen.set(runId, fortschritt)
+  return fortschritt
+}
+
+export function unregisterKiNachholen(runId: string): void {
+  kiNachholungen.delete(runId)
+}
+
+export function kiNachholenFortschritt(runId: string): KiNachholFortschritt | null {
+  const fortschritt = kiNachholungen.get(runId)
+  return fortschritt ? { ...fortschritt } : null
+}
+
 export function isRunActive(runId: string): boolean {
   return analyses.has(runId) || commits.has(runId)
 }

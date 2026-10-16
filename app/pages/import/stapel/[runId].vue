@@ -114,6 +114,9 @@ interface RunOverview {
   retryableClusterIds: string[]
   canRetry: boolean
   canDiscardLeftovers: boolean
+  kiOhneVorschlag?: number
+  kiNachholen?: { fertig: number; gesamt: number } | null
+  canKiNachholen?: boolean
 }
 
 const { data, status, error, refresh } = await useFetch<RunOverview>(
@@ -238,6 +241,17 @@ const autosave = useAutosave(mapping, {
 })
 
 const analyseLaeuft = computed(() => Boolean(data.value?.analysisPending))
+const kiNachholenLaeuft = computed(() => Boolean(data.value?.kiNachholen))
+
+async function kiNachholen() {
+  // Offene Änderungen zuerst sichern – während des Nachholens ist die Zuordnung gesperrt.
+  await autosave.jetztSpeichern()
+  if (autosave.zustand.value === 'fehler') return
+  const ergebnis = await aufruf<{ gesamt: number }>(`/api/materials/bulk/${runId.value}/ki-nachholen`, {
+    method: 'POST',
+  })
+  if (ergebnis) await refresh()
+}
 
 const schritt = computed(() => {
   const s = data.value?.status
@@ -402,7 +416,7 @@ watch(
 
 let analysePoll: ReturnType<typeof setInterval> | undefined
 watch(
-  analyseLaeuft,
+  () => analyseLaeuft.value || kiNachholenLaeuft.value,
   (an) => {
     if (analysePoll) {
       clearInterval(analysePoll)
@@ -481,6 +495,15 @@ function hatLoesung(clusterId: string): boolean {
             @click="committen"
           >
             {{ materialzahl }} Materialien anlegen
+          </UiButton>
+          <UiButton
+            v-if="data.canKiNachholen"
+            variante="sekundaer"
+            icon="wand-magic-sparkles"
+            :laedt="laeuft"
+            @click="kiNachholen"
+          >
+            KI-Vorschläge nachholen ({{ data.kiOhneVorschlag }})
           </UiButton>
           <UiButton
             v-if="data.canRetry"
@@ -581,6 +604,32 @@ function hatLoesung(clusterId: string): boolean {
       >
         {{ data.retryableClusterIds.length }} Bündel wurden noch nicht angelegt. Sie lassen sich unten korrigieren
         und erneut anlegen – Lehrwerk, Lernzirkel und angelegte Materialien bleiben bestehen.
+      </p>
+
+      <UiCard v-if="data.kiNachholen" titel="KI-Vorschläge werden nachgeholt" icon="spinner" class="mb-6">
+        <p class="text-sm text-ink-muted">
+          {{ data.kiNachholen.fertig }} von {{ data.kiNachholen.gesamt }} Bündeln bearbeitet. Bis zum Ende sind
+          Zuordnung und Anlegen gesperrt; eigene Änderungen an Titeln und Beschreibungen bleiben erhalten.
+        </p>
+        <div
+          class="mt-3 h-2 overflow-hidden rounded-full bg-surface-sunken"
+          role="progressbar"
+          :aria-valuenow="data.kiNachholen.fertig"
+          aria-valuemin="0"
+          :aria-valuemax="data.kiNachholen.gesamt"
+        >
+          <div
+            class="h-full rounded-full bg-[var(--color-primary)] transition-all"
+            :style="{ width: `${Math.round((data.kiNachholen.fertig / Math.max(1, data.kiNachholen.gesamt)) * 100)}%` }"
+          />
+        </div>
+      </UiCard>
+      <p
+        v-else-if="data.canKiNachholen"
+        class="mb-4 rounded-lg bg-warning-soft px-4 py-3 text-sm text-warning"
+      >
+        {{ data.kiOhneVorschlag }} Bündel haben keine KI-Vorschläge erhalten und nutzen nur Dateiname und Ordner.
+        „KI-Vorschläge nachholen“ fragt sie erneut an.
       </p>
 
       <UiCard v-if="analyseLaeuft" titel="Analyse läuft" icon="spinner" class="mb-6">
