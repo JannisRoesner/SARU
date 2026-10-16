@@ -1,6 +1,6 @@
 import { extractJsonObject } from '../../../../utils/json-parse'
 import { aiSettingsFuerRolle, type AiSettings } from '../../../settings.service'
-import { chatCompletion, supportsNativePdf, type ChatPart } from '../../client'
+import { chatCompletion, musterloesungDenkBudget, supportsNativePdf, type ChatPart } from '../../client'
 import type { SolutionBBox } from '../../document-fill'
 import { rasterizePdf } from '../../rasterize'
 
@@ -94,7 +94,13 @@ export async function verifyPdfSolutionViaVision(args: {
       const completion = await chatCompletion(
         settings,
         [{ role: 'user', parts }],
-        { model: args.model, temperature: 0, maxOutputTokens: 1200, jsonMode: true },
+        {
+          model: args.model,
+          temperature: 0,
+          maxOutputTokens: 1200,
+          jsonMode: true,
+          denkBudget: musterloesungDenkBudget(settings),
+        },
       )
       return parsePdfSolutionQualityResponse(completion.text, completion.model)
     } catch (error) {

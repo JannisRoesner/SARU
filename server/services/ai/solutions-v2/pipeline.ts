@@ -1,5 +1,5 @@
 import type { AiSettings } from '../../settings.service'
-import { chatCompletion, type ChatPart } from '../client'
+import { chatCompletion, musterloesungDenkBudget, type ChatPart } from '../client'
 import { matchAnswerToCandidate } from '../solutions/candidate-bank'
 import { maximumWeightAssignment } from '../solutions/solvers/bipartite-matching'
 import {
@@ -294,6 +294,7 @@ async function solveTask(
           maxOutputTokens: Math.min(6000, Math.max(900, 350 + promptTask.answerSlots.length * 180)),
           jsonMode: true,
           jsonSchema: { name: 'solution_task_v2', schema: taskSolutionSchema(promptTask) },
+          denkBudget: musterloesungDenkBudget(settings),
         },
       )
     } catch (error) {
@@ -411,6 +412,7 @@ async function verifyCandidateAssignment(
           maxOutputTokens: Math.min(5000, Math.max(900, 350 + task.answerSlots.length * 140)),
           jsonMode: true,
           jsonSchema: { name: 'solution_candidate_assignment_v2', schema: taskSolutionSchema(task) },
+          denkBudget: musterloesungDenkBudget(settings),
         },
       )
     } catch (error) {
@@ -517,6 +519,7 @@ async function verifyTask(
         maxOutputTokens: 1200,
         jsonMode: true,
         jsonSchema: { name: 'solution_semantic_verdict_v2', schema: semanticVerdictSchema(task) },
+        denkBudget: musterloesungDenkBudget(settings),
       },
     )
   } catch (error) {

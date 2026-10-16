@@ -429,6 +429,8 @@ const aiSettingsFelder = z
     temperature: z.coerce.number().min(0).max(2),
     maxOutputTokens: z.coerce.number().int().min(256).max(32_000),
     timeoutMs: z.coerce.number().int().min(5000).max(600_000),
+    denkmodusMusterloesungen: z.boolean(),
+    denkBudget: z.coerce.number().int().min(256).max(32_000),
     refererUrl: z.string().max(300),
     appTitle: z.string().max(120),
     rollen: z
