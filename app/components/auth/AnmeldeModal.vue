@@ -43,7 +43,12 @@ async function absenden() {
   try {
     await anmelden(emailNorm, passwort.value)
     offen.value = false
-    await navigateTo(props.weiter || '/')
+    // Nur interne Pfade; „//host“ wäre eine fremde Adresse.
+    const ziel = props.weiter?.startsWith('/') && !props.weiter.startsWith('//') ? props.weiter : '/'
+    // Gleichzeitiger Layoutwechsel (landing → default) und Seitenübergang
+    // (out-in) lässt die Zielseite leer („reading 'parentNode'“). Für andere
+    // Ziele als das Dashboard daher die Seite vollständig neu laden.
+    await navigateTo(ziel, { external: ziel !== '/' })
   } catch (error) {
     const apiFehler = toApiFehler(error)
     const feldMeldungen = Object.values(apiFehler.felder).flat()
