@@ -79,6 +79,12 @@ export const materialTypes = definitions<MaterialType>({
     tone: 'accent',
     description: 'Interaktives H5P-Lernpaket (.h5p) zum Einbetten oder Hochladen in Moodle',
   },
+  interaktiv: {
+    label: 'Interaktiver Inhalt',
+    icon: 'hand-pointer',
+    tone: 'accent',
+    description: 'Interaktive Animation oder Simulation (z. B. .swf), direkt im Browser abspielbar',
+  },
   sonstiges: { label: 'Sonstiges', icon: 'shapes', tone: 'neutral' },
 })
 

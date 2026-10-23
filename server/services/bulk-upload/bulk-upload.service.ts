@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises'
 import { and, asc, desc, eq, inArray, max, ne, sql } from 'drizzle-orm'
 import { oeffentlicheFehlermeldung } from '#shared/utils/public-error'
-import { isAiMaterialFileName } from '#shared/utils/ai-material-formats'
+import { isBulkDocumentFileName } from '#shared/utils/ai-material-formats'
+import { istInteraktivDatei } from '#shared/utils/interaktiv'
 import type { MaterialType } from '#shared/types/domain'
 import { useDatabase } from '../../database/client'
 import {
@@ -182,7 +183,7 @@ export async function startBulkPdfUpload(
   const rejected: string[] = []
   for (const file of expanded.files) {
     const { fileName, relativePath } = splitUploadPath(file)
-    if (!isAiMaterialFileName(fileName)) {
+    if (!isBulkDocumentFileName(fileName)) {
       rejected.push(fileName)
       continue
     }
@@ -430,7 +431,11 @@ async function analyseBulkRun(
     const extracted = await mapLimit(files, BULK_EXTRACT_CONCURRENCY, async (file): Promise<Extracted> => {
       if (await isCancelled()) return null
       const buffer = await readFile(resolveStoragePath(file.stagingPath))
-      const extraction = await ensureExtractedText(buffer, file.fileName, settings)
+      // Interaktive Inhalte (SWF) haben keinen auslesbaren Text.
+      const interaktiv = istInteraktivDatei(file.fileName)
+      const extraction = interaktiv
+        ? { text: '', method: 'none' as const, pageCount: null }
+        : await ensureExtractedText(buffer, file.fileName, settings)
       const hasText = Boolean(extraction.text.trim())
       const warnings: string[] = []
 
@@ -439,7 +444,7 @@ async function analyseBulkRun(
         extractedTextKey = await storeExtractedTextSidecar(file.stagingPath, extraction.text)
       }
 
-      if (!hasText) {
+      if (!hasText && !interaktiv) {
         warnings.push(
           settings.enabled
             ? settings.useVision

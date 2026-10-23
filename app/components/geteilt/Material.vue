@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { istInteraktivDatei } from '#shared/utils/interaktiv'
 import { materialTypes, relationAnzeigeLabel } from '#shared/utils/labels'
 import type { GastMaterial } from '~~/server/services/share-view.service'
 
@@ -15,6 +16,15 @@ const { aufruf, laeuft } = useApi()
 const { ziel } = useGastNavigation()
 const basis = computed(() => `/api/geteilt/${props.token}/dateien`)
 const darfBearbeiten = computed(() => props.recht === 'bearbeiten')
+
+/** Erste interaktive Datei (SWF) – wird direkt auf der Seite abgespielt. */
+const interaktiveDatei = computed(() => {
+  for (const fassung of props.material.fassungen) {
+    const datei = fassung.dateien.find((d) => d.kind === 'datei' && istInteraktivDatei(d.fileName))
+    if (datei) return datei
+  }
+  return null
+})
 
 const vorschauId = ref<string | null>(null)
 const vorschauOffen = computed({
@@ -156,6 +166,13 @@ function dateiInfo(datei: Datei, fassung: Fassung) {
           />
         </li>
       </ul>
+    </UiCard>
+
+    <UiCard v-if="interaktiveDatei" titel="Interaktiver Inhalt" icon="hand-pointer">
+      <MaterialInteraktivPlayer
+        :src="`${basis}/${interaktiveDatei.id}/download?inline=1`"
+        :titel="interaktiveDatei.title || interaktiveDatei.fileName"
+      />
     </UiCard>
 
     <UiCard

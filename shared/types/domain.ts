@@ -46,6 +46,8 @@ export const MATERIAL_TYPES = [
   'moodle_kurs',
   /** Interaktiver H5P-Inhalt als .h5p-Paket (ZIP-basiert). */
   'h5p',
+  /** Interaktive Animation/Simulation (zunächst .swf, per Ruffle abgespielt). */
+  'interaktiv',
   'sonstiges',
 ] as const
 export type MaterialType = (typeof MATERIAL_TYPES)[number]

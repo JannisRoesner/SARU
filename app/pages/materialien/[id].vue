@@ -11,6 +11,7 @@ import {
 import { materialPfad, materialZurueckZiel } from '#shared/utils/material-pfad'
 import { istKiMusterloesung, kiAutorAnzeige } from '#shared/utils/ki'
 import { solutionEditorMode, type SolutionEditorMode } from '#shared/utils/solution-editor'
+import { istInteraktivDatei, istInteraktivMaterial } from '#shared/utils/interaktiv'
 import { istMoodleKursMaterial, istH5pMaterial, kursarchivErweiterung } from '#shared/utils/moodle'
 import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
 import type {
@@ -720,7 +721,13 @@ const istH5p = computed(() =>
   data.value ? istH5pMaterial(data.value.materialType) : false,
 )
 
-const istIconVorschau = computed(() => istMoodleKurs.value || istH5p.value)
+const istInteraktiv = computed(
+  () =>
+    (data.value ? istInteraktivMaterial(data.value.materialType) : false)
+    || istInteraktivDatei(hauptVorschau.value?.fileName),
+)
+
+const istIconVorschau = computed(() => istMoodleKurs.value || istH5p.value || istInteraktiv.value)
 
 const kursarchivFormat = computed(() =>
   kursarchivErweiterung(hauptVorschau.value?.fileName),
@@ -961,9 +968,21 @@ function loesungKorrigieren() {
       <div class="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
         <div class="min-w-0 space-y-5">
           <UiCard
+            v-if="hauptVorschau && istInteraktiv"
+            titel="Interaktiver Inhalt"
+            icon="hand-pointer"
+            :standard-offen="true"
+          >
+            <MaterialInteraktivPlayer
+              :src="`/api/assets/${hauptVorschau.id}/download?inline=1`"
+              :titel="hauptVorschau.title || hauptVorschau.fileName"
+            />
+          </UiCard>
+
+          <UiCard
             v-if="hauptVorschau"
-            :titel="istMoodleKurs ? 'Kursarchiv' : istH5p ? 'H5P-Paket' : 'Dokumentvorschau'"
-            :icon="istMoodleKurs ? 'graduation-cap' : istH5p ? 'puzzle-piece' : 'eye'"
+            :titel="istMoodleKurs ? 'Kursarchiv' : istH5p ? 'H5P-Paket' : istInteraktiv ? 'Datei' : 'Dokumentvorschau'"
+            :icon="istMoodleKurs ? 'graduation-cap' : istH5p ? 'puzzle-piece' : istInteraktiv ? 'file' : 'eye'"
             einklappbar
             :einklapp-id="istMoodleKurs ? 'material-moodle-backup' : istH5p ? 'material-h5p-paket' : 'material-vorschau'"
             :standard-offen="true"
