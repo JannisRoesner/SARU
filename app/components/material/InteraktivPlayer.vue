@@ -34,7 +34,8 @@ const vollbild = ref(false)
 
 const ERKLAERUNG_SCHLUESSEL = 'saru.interaktiv.erklaerungen'
 const erklaerungenAn = ref(true)
-if (import.meta.client) {
+// Erst nach dem Einhängen lesen, damit Server- und Client-Markup übereinstimmen.
+function erklaerungenWahlLesen() {
   try {
     erklaerungenAn.value = localStorage.getItem(ERKLAERUNG_SCHLUESSEL) !== 'aus'
   } catch {
@@ -156,7 +157,16 @@ function rahmenDokument(origin: string): string {
 /** Ruffle-Dateien werden einmal geladen und für alle Player der Sitzung wiederverwendet. */
 const ruffleCache = new Map<string, Promise<ArrayBuffer>>()
 function ruffleDatei(url: string): Promise<ArrayBuffer> {
-  if (!url.startsWith(`${window.location.origin}/ruffle/`)) return Promise.reject(new Error('Unzulässige Adresse'))
+  // Nur Dateien direkt in /ruffle/ – der iframe ist nicht vertrauenswürdig (Pfade wie `/ruffle/../api` ausschließen).
+  let ziel: URL
+  try {
+    ziel = new URL(url)
+  } catch {
+    return Promise.reject(new Error('Unzulässige Adresse'))
+  }
+  if (ziel.origin !== window.location.origin || !/^\/ruffle\/[\w.-]+$/.test(ziel.pathname) || ziel.pathname.includes('..')) {
+    return Promise.reject(new Error('Unzulässige Adresse'))
+  }
   let eintrag = ruffleCache.get(url)
   if (!eintrag) {
     eintrag = $fetch<ArrayBuffer>(url, { responseType: 'arrayBuffer' })
@@ -333,6 +343,7 @@ function beiVollbildwechsel() {
 }
 
 onMounted(() => {
+  erklaerungenWahlLesen()
   window.addEventListener('message', beiNachricht)
   dokument.value = rahmenDokument(window.location.origin)
   document.addEventListener('fullscreenchange', beiVollbildwechsel)
