@@ -43,15 +43,15 @@ if (import.meta.client) {
 }
 
 const hatHaltepunkte = computed(() => Boolean(meta.value?.stopFrames.length))
-const erklaerung = computed(() =>
-  erklaerungenAn.value && haltFrame.value !== null
-    ? erklaerungFuerFrame(meta.value, haltFrame.value)
-    : null,
-)
-const haltepunktNummer = computed(() => {
-  if (haltFrame.value === null || !meta.value) return null
-  const index = meta.value.stopFrames.indexOf(haltFrame.value)
-  return index >= 0 ? index + 1 : null
+/**
+ * Erklärtext ohne Haltepunkt: Bei Schleifen-Abschnitten (z. B. „darm“) folgt auf „Weiter“ kein
+ * swfStopped; der zweite Text mit gleichem Titel gehört dann zur Schleife.
+ */
+const schleifenIndex = ref<number | null>(null)
+const erklaerung = computed(() => {
+  if (!erklaerungenAn.value || !meta.value) return null
+  if (schleifenIndex.value !== null) return meta.value.erklaerungen[schleifenIndex.value] ?? null
+  return haltFrame.value !== null ? erklaerungFuerFrame(meta.value, haltFrame.value) : null
 })
 
 function sende(cmd: string, daten: Record<string, unknown> = {}, transfer: Transferable[] = []) {
@@ -115,7 +115,7 @@ function rahmenDokument(origin: string): string {
       player = window.RufflePlayer.newest().createPlayer();
       player.style.cssText = 'width:100%;height:100%;display:block';
       document.getElementById('b').appendChild(player);
-      player.addEventListener('loadedmovie', function () { an({ type: 'geladen' }); });
+      player.addEventListener('loadedmovie', function () { try { player.focus(); } catch (e) {} an({ type: 'geladen' }); });
       player.load({ data: new Uint8Array(daten.slice(0)) }).catch(function (e) { an({ type: 'fehler', text: String(e) }); });
     }
     addEventListener('message', function (e) {
@@ -191,6 +191,7 @@ const dokument = ref('')
 
 let datenPuffer: ArrayBuffer | null = null
 let erstesAnhalten = true
+let letzterHalt = { frame: -1, zeit: 0 }
 
 function beiNachricht(event: MessageEvent) {
   if (event.source !== rahmen.value?.contentWindow) return
@@ -216,6 +217,7 @@ function beiNachricht(event: MessageEvent) {
       break
     case 'geladen':
       laedt.value = false
+      rahmen.value?.focus()
       break
     case 'warn':
       console.warn('[Interaktiv]', msg.text)
@@ -226,6 +228,11 @@ function beiNachricht(event: MessageEvent) {
       break
     case 'stopped': {
       const frame = msg.frame ?? 1
+      // Manche SWFs (Präsentation) melden jeden Seitenwechsel doppelt.
+      const jetzt = Date.now()
+      if (frame === letzterHalt.frame && jetzt - letzterHalt.zeit < 600) break
+      letzterHalt = { frame, zeit: jetzt }
+      schleifenIndex.value = null
       haltFrame.value = frame
       pausiert.value = false
       laedt.value = false
@@ -274,6 +281,12 @@ async function datenLaden() {
 }
 
 function weiter() {
+  const m = meta.value
+  const index = m && haltFrame.value !== null ? m.stopFrames.indexOf(haltFrame.value) : -1
+  const aktuell = index >= 0 ? m!.erklaerungen[index] : null
+  const naechste = index >= 0 ? m!.erklaerungen[index + 1] : null
+  schleifenIndex.value
+    = aktuell && naechste && aktuell.title && aktuell.title === naechste.title ? index + 1 : null
   haltFrame.value = null
   pausiert.value = false
   sende('weiter')
@@ -285,6 +298,8 @@ function pauseUmschalten() {
 }
 
 function neustart() {
+  schleifenIndex.value = null
+  letzterHalt = { frame: -1, zeit: 0 }
   erstesAnhalten = true
   haltFrame.value = null
   pausiert.value = false
@@ -397,9 +412,6 @@ const buehneStil = computed(() =>
       class="rounded-lg border border-line bg-surface-hover px-4 py-3"
       aria-live="polite"
     >
-      <p v-if="haltepunktNummer && meta" class="text-xs font-medium text-ink-subtle">
-        Schritt {{ haltepunktNummer }} von {{ meta.stopFrames.length }}
-      </p>
       <p v-if="erklaerung.title" class="font-medium text-ink">{{ erklaerung.title }}</p>
       <p v-if="erklaerung.text" class="mt-1 whitespace-pre-line text-sm leading-relaxed text-ink-muted">
         {{ erklaerung.text }}
