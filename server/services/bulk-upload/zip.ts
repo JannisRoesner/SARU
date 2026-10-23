@@ -1,5 +1,5 @@
 import { unzipSync } from 'fflate'
-import { isAiMaterialFileName } from '#shared/utils/ai-material-formats'
+import { isBulkDocumentFileName } from '#shared/utils/ai-material-formats'
 import { invalidInput } from '../../utils/errors'
 import { extensionOf, formatBytes, sanitizeFileName } from '../storage.service'
 import { MAX_BULK_FILES, type BulkUploadInputFile } from './types'
@@ -81,7 +81,7 @@ export function expandBulkArchives(
           if (!path) return false
           // Unkomprimierte Einträge werden 1:1 aus dem Archiv kopiert.
           const bytes = entry.compression === 0 ? entry.size : entry.originalSize
-          if (!isAiMaterialFileName(path) || !bytes) {
+          if (!isBulkDocumentFileName(path) || !bytes) {
             skipped.push(path)
             return false
           }

@@ -1,5 +1,6 @@
 import type { MaterialType } from '../types/domain'
 import { materialTypes } from './labels'
+import { istInteraktivDatei, istInteraktivMaterial } from './interaktiv'
 
 export const KURSARCHIV_ERWEITERUNGEN = ['mbz', 'imscc'] as const
 export type KursarchivErweiterung = (typeof KURSARCHIV_ERWEITERUNGEN)[number]
@@ -40,7 +41,9 @@ export function materialZeigtIconVorschau(
     istMoodleKursMaterial(materialType) ||
     istMoodleBackupDatei(fileName) ||
     istH5pMaterial(materialType) ||
-    istH5pDatei(fileName)
+    istH5pDatei(fileName) ||
+    istInteraktivMaterial(materialType) ||
+    istInteraktivDatei(fileName)
   )
 }
 
@@ -80,6 +83,9 @@ export function materialVorschauIcon(
   }
   if (istH5pMaterial(materialType) || istH5pDatei(fileName)) {
     return materialTypes.icon('h5p') ?? 'puzzle-piece'
+  }
+  if (istInteraktivMaterial(materialType) || istInteraktivDatei(fileName)) {
+    return materialTypes.icon('interaktiv') ?? 'hand-pointer'
   }
   return 'file'
 }

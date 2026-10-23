@@ -38,6 +38,7 @@ export const materialTypeEnum = pgEnum('material_type', [
   'notiz',
   'moodle_kurs',
   'h5p',
+  'interaktiv',
   'sonstiges',
 ])
 

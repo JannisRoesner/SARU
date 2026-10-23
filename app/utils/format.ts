@@ -144,6 +144,7 @@ const DATEI_ICONS: Record<string, string> = {
   mbz: 'graduation-cap',
   imscc: 'graduation-cap',
   h5p: 'puzzle-piece',
+  swf: 'hand-pointer',
   txt: 'file-lines',
   md: 'file-lines',
 }

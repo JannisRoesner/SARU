@@ -1,3 +1,5 @@
+import { istInteraktivDatei } from './interaktiv'
+
 /** Dateiformate für „Material mit KI anlegen“ (Analyse + Metadaten-Vorschläge). */
 export const AI_MATERIAL_FILE_EXTENSIONS = [
   'pdf',
@@ -57,9 +59,14 @@ export function aiMaterialFormatsLabel(): string {
 
 /** `accept`-Attribut für den Stapel-Upload inklusive ZIP-Pakete. */
 export function bulkMaterialAcceptAttribute(): string {
-  return `${aiMaterialAcceptAttribute()},.zip,application/zip`
+  return `${aiMaterialAcceptAttribute()},.swf,application/x-shockwave-flash,.zip,application/zip`
+}
+
+/** Einzeldokumente im Stapel: KI-analysierbare Formate plus interaktive Inhalte (.swf). */
+export function isBulkDocumentFileName(fileName: string): boolean {
+  return isAiMaterialFileName(fileName) || istInteraktivDatei(fileName)
 }
 
 export function isBulkMaterialFileName(fileName: string): boolean {
-  return isAiMaterialFileName(fileName) || /\.zip$/i.test(fileName)
+  return isBulkDocumentFileName(fileName) || /\.zip$/i.test(fileName)
 }

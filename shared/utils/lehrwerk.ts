@@ -77,7 +77,7 @@ export const LEHRWERK_GRUPPEN: LehrwerkGruppe[] = [
     id: 'medien',
     label: 'Abbildungen & Medien',
     icon: 'image',
-    types: ['bild', 'video', 'praesentation', 'h5p'],
+    types: ['bild', 'video', 'praesentation', 'h5p', 'interaktiv'],
   },
   {
     id: 'kurse',

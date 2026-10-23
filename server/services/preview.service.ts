@@ -4,6 +4,7 @@ import { useDatabase } from '../database/client'
 import { materialAssets, materials, materialVariants } from '../database/schema'
 import type { SafeUser } from '../utils/auth'
 import { darfObjektBearbeiten } from '#shared/utils/rechte'
+import { istInteraktivDatei } from '#shared/utils/interaktiv'
 import {
   buildCollaboraIframeUrl,
   createWopiAccessToken,
@@ -17,7 +18,7 @@ import { canHaveThumbnail } from './thumbnail.service'
 import { getPdfPageCount } from './ai/rasterize'
 import { resolveStoragePath } from './storage.service'
 
-export type PreviewMode = 'pdf' | 'bild' | 'text' | 'collabora' | 'download' | 'link' | 'keine'
+export type PreviewMode = 'pdf' | 'bild' | 'interaktiv' | 'text' | 'collabora' | 'download' | 'link' | 'keine'
 
 export interface AssetPreviewInfo {
   mode: PreviewMode
@@ -154,6 +155,18 @@ export async function getAssetPreviewInfoFuerZugang(
       collaboraUrl: null,
       hinweis: null,
       pdfPageCount,
+    }
+  }
+
+  if (istInteraktivDatei(asset.fileName)) {
+    return {
+      ...base,
+      mode: 'interaktiv',
+      inlineUrl: `${downloadUrl}?inline=1`,
+      thumbnailUrl: null,
+      collaboraUrl: null,
+      hinweis: null,
+      pdfPageCount: null,
     }
   }
 

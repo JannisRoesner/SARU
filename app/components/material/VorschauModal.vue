@@ -758,6 +758,18 @@ onBeforeUnmount(() => {
             />
 
             <div
+              v-else-if="info.mode === 'interaktiv' && info.inlineUrl"
+              class="flex size-full max-w-6xl flex-col"
+            >
+              <MaterialInteraktivPlayer
+                :src="info.inlineUrl"
+                :titel="info.title"
+                fuellend
+                class="shadow-2xl"
+              />
+            </div>
+
+            <div
               v-else-if="info.mode === 'bild' && info.inlineUrl"
               class="flex max-h-full max-w-full items-center justify-center overflow-auto rounded-lg bg-surface p-2 shadow-2xl"
             >

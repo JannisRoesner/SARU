@@ -92,6 +92,13 @@
       "when": 1786800000000,
       "tag": "0012_suchindex_seitenbilder",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1786900000000,
+      "tag": "0013_interaktiv_material_type",
+      "breakpoints": true
     }
   ]
 }

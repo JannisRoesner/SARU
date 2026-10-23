@@ -39,6 +39,7 @@ const BLOCKED_TYPES = new Set([
   'lehrbuchseite',
   'moodle_kurs',
   'h5p',
+  'interaktiv',
   'video',
   'link',
   'bild',

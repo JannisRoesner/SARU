@@ -104,6 +104,12 @@ export const ALLOWED_TYPES: AllowedType[] = [
     mimeTypes: ['application/zip'],
     sniffable: false,
   },
+  {
+    label: 'Interaktiver Inhalt (Flash/SWF)',
+    extensions: ['swf'],
+    mimeTypes: ['application/x-shockwave-flash'],
+    sniffable: false,
+  },
 ]
 
 export function uploadRoot(): string {
@@ -192,6 +198,14 @@ export async function validateUpload(
 
   const declared = findAllowedType(extension)
   const sniffed = await fileTypeFromBuffer(buffer)
+
+  // SWF wird nicht von file-type erkannt: Signatur FWS (roh), CWS (zlib) oder ZWS (LZMA).
+  if (extension === 'swf' && !/^[FCZ]WS$/.test(buffer.subarray(0, 3).toString('latin1'))) {
+    throw appError(
+      'DATEITYP_NICHT_ERLAUBT',
+      `Der Inhalt von „${fileName}“ passt nicht zur Dateiendung „.swf“.`,
+    )
+  }
 
   if (declared?.sniffable) {
     if (!sniffed) {
@@ -336,6 +350,7 @@ export function isInlineSafe(mimeType: string | null | undefined): boolean {
   if (!mimeType) return false
   return (
     mimeType === 'application/pdf' ||
+    mimeType === 'application/x-shockwave-flash' ||
     (mimeType.startsWith('image/') && mimeType !== 'image/svg+xml') ||
     mimeType.startsWith('audio/') ||
     mimeType.startsWith('video/') ||
