@@ -59,12 +59,19 @@ export function aiMaterialFormatsLabel(): string {
 
 /** `accept`-Attribut für den Stapel-Upload inklusive ZIP-Pakete. */
 export function bulkMaterialAcceptAttribute(): string {
-  return `${aiMaterialAcceptAttribute()},.swf,application/x-shockwave-flash,.zip,application/zip`
+  return `${aiMaterialAcceptAttribute()},.swf,.png,.jpg,.jpeg,.webp,application/x-shockwave-flash,.zip,application/zip`
 }
 
-/** Einzeldokumente im Stapel: KI-analysierbare Formate plus interaktive Inhalte (.swf). */
+/** „cover.png“, „Cover.JPG“, „Cover - Titel.webp“ – Bild, das im Stapel als Lehrwerk-Cover dienen kann. */
+export function isLehrwerkCoverFileName(fileName: string): boolean {
+  const name = fileName.split(/[\\/]/).pop() ?? fileName
+  const match = /^(.+)\.(png|jpe?g|webp)$/i.exec(name)
+  return Boolean(match && /^cover(?:[\s._-].*)?$/i.test(match[1]!.trim()))
+}
+
+/** Einzeldokumente im Stapel: KI-analysierbare Formate, interaktive Inhalte (.swf) und Lehrwerk-Cover. */
 export function isBulkDocumentFileName(fileName: string): boolean {
-  return isAiMaterialFileName(fileName) || istInteraktivDatei(fileName)
+  return isAiMaterialFileName(fileName) || istInteraktivDatei(fileName) || isLehrwerkCoverFileName(fileName)
 }
 
 export function isBulkMaterialFileName(fileName: string): boolean {

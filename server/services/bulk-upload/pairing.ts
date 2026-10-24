@@ -1,6 +1,7 @@
 import type { MaterialType } from '#shared/types/domain'
 import { guessMaterialType } from '#shared/utils/material-type-guess'
 import type { BulkFileRole, BulkFolderRole, BulkLernzirkelRef } from '#shared/utils/bulk-upload'
+import { isLehrwerkCoverFileName } from '#shared/utils/ai-material-formats'
 import type { BulkClusterKind, BulkUploadDetectedCluster } from './types'
 
 const OFFICE_EXTENSIONS = new Set(['doc', 'docx', 'odt', 'ppt', 'pptx', 'odp', 'xls', 'xlsx', 'ods'])
@@ -557,16 +558,8 @@ export function filesAsSingletonClusters(
   }))
 }
 
-const COVER_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp'])
-const COVER_STEM = /^cover(?:[\s._-].*)?$/
-
-/** „cover.png“, „Cover.JPG“, „Cover - Linder.webp“ – Bild, das als Lehrwerk-Cover dienen kann. */
-export function isLehrwerkCoverFile(fileName: string): boolean {
-  const name = basename(fileName)
-  const dot = name.lastIndexOf('.')
-  if (dot < 1) return false
-  return COVER_EXTENSIONS.has(name.slice(dot + 1).toLowerCase()) && COVER_STEM.test(fold(name.slice(0, dot)).trim())
-}
+/** Bild namens „cover.*“ (siehe isLehrwerkCoverFileName). */
+export const isLehrwerkCoverFile = isLehrwerkCoverFileName
 
 /**
  * Wählt das Cover-Bild des Stapels: bei mehreren Treffern das am höchsten im Ordnerbaum liegende
