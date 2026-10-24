@@ -27,12 +27,67 @@ export interface InteraktivErklaerung {
   text: string
 }
 
+/** Wert, der per `swfCall(fn, arg)` an eine Funktion der SWF übergeben wird. */
+export type InteraktivArgument = string | number | boolean | null
+
+/**
+ * Zusatzknopf in der Steuerleiste (z. B. Director-Schalter „Manuell“ der CD-ROM). Ein Klick ruft
+ * `_root[fn](arg)` in der SWF auf. Mit `umschalten` wird der Knopf zum Umschalter: der zweite Klick
+ * ruft `fn(umschalten.arg)` auf und zeigt dabei `umschalten.label`.
+ */
+export interface InteraktivAktion {
+  label: string
+  fn: string
+  /** `undefined`: Aufruf ohne Argument. */
+  arg?: InteraktivArgument
+  umschalten: { label: string; arg?: InteraktivArgument } | null
+}
+
 export interface InteraktivMetadaten {
   title: string | null
   /** Frames, an denen die Animation auf „Weiter“ wartet. */
   stopFrames: number[]
   /** `erklaerungen[i]` gehört zu `stopFrames[i]`. */
   erklaerungen: (InteraktivErklaerung | null)[]
+  /** Zusatzknöpfe (optional, leer bei älteren SWFs). */
+  aktionen: InteraktivAktion[]
+  /** Zeitleisten-Schieber anzeigen (optional, nur wenn ausdrücklich gesetzt). */
+  schieber: boolean
+  /** Gesamtzahl der Frames für den Schieber; null = aus dem SWF-Kopf nehmen. */
+  totalFrames: number | null
+}
+
+/** Höchstzahl der Zusatzknöpfe – mehr passen nicht sinnvoll in die Steuerleiste. */
+const MAX_AKTIONEN = 8
+const FUNKTIONSNAME = /^[A-Za-z_$][\w$]*$/
+
+function argumentAus(wert: unknown): InteraktivArgument | undefined {
+  if (wert === null || typeof wert === 'string' || typeof wert === 'boolean') return wert
+  return typeof wert === 'number' && Number.isFinite(wert) ? wert : undefined
+}
+
+function textAus(wert: unknown): string | null {
+  return typeof wert === 'string' && wert.trim() ? wert.trim() : null
+}
+
+function aktionenAus(roh: unknown): InteraktivAktion[] {
+  if (!Array.isArray(roh)) return []
+  const aktionen: InteraktivAktion[] = []
+  for (const eintrag of roh) {
+    if (!eintrag || typeof eintrag !== 'object') continue
+    const e = eintrag as Record<string, unknown>
+    const label = textAus(e.label)
+    if (!label || typeof e.fn !== 'string' || !FUNKTIONSNAME.test(e.fn)) continue
+    const labelAus = textAus(e.labelAus)
+    aktionen.push({
+      label,
+      fn: e.fn,
+      arg: argumentAus(e.arg),
+      umschalten: labelAus ? { label: labelAus, arg: argumentAus(e.argAus) } : null,
+    })
+    if (aktionen.length >= MAX_AKTIONEN) break
+  }
+  return aktionen
 }
 
 /** Erklärtext zum Haltepunkt am angegebenen Frame (oder null). */
@@ -150,5 +205,10 @@ function metadatenAusText(roh: string): InteraktivMetadaten | null {
     title: typeof daten.title === 'string' && daten.title.trim() ? daten.title.trim() : null,
     stopFrames,
     erklaerungen,
+    aktionen: aktionenAus(daten.aktionen),
+    schieber: daten.schieber === true,
+    totalFrames: Number.isInteger(daten.totalFrames) && (daten.totalFrames as number) > 0
+      ? (daten.totalFrames as number)
+      : null,
   }
 }

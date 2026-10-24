@@ -3,6 +3,7 @@ import {
   erklaerungFuerFrame,
   parseSwfKopf,
   parseSwfMetadaten,
+  type InteraktivAktion,
   type InteraktivMetadaten,
 } from '#shared/utils/interaktiv'
 
@@ -31,6 +32,8 @@ const pausiert = ref(false)
 /** Aktueller Haltepunkt (Frame) – null, solange die Animation läuft. */
 const haltFrame = ref<number | null>(null)
 const vollbild = ref(false)
+/** Bildzahl laut SWF-Kopf – Rückfall für den Schieber ohne `totalFrames`. */
+const kopfBilder = ref(0)
 
 const ERKLAERUNG_SCHLUESSEL = 'saru.interaktiv.erklaerungen'
 const erklaerungenAn = ref(true)
@@ -54,6 +57,48 @@ const erklaerung = computed(() => {
   if (schleifenIndex.value !== null) return meta.value.erklaerungen[schleifenIndex.value] ?? null
   return haltFrame.value !== null ? erklaerungFuerFrame(meta.value, haltFrame.value) : null
 })
+
+/** Umschalter-Zustand je Zusatzknopf (Index wie `meta.aktionen`). */
+const umgeschaltet = ref<boolean[]>([])
+
+function aktionLabel(aktion: InteraktivAktion, index: number): string {
+  return aktion.umschalten && umgeschaltet.value[index] ? aktion.umschalten.label : aktion.label
+}
+
+function aktionAusfuehren(aktion: InteraktivAktion, index: number) {
+  const zweiter = Boolean(aktion.umschalten && umgeschaltet.value[index])
+  const arg = zweiter ? aktion.umschalten!.arg : aktion.arg
+  sende('aufruf', arg === undefined ? { fn: aktion.fn } : { fn: aktion.fn, arg })
+  if (aktion.umschalten) umgeschaltet.value[index] = !zweiter
+}
+
+/** Zeitleisten-Schieber: nur für SWFs, deren Metadaten ihn ausdrücklich anfordern. */
+const schieberMax = computed(() =>
+  meta.value?.schieber ? (meta.value.totalFrames ?? kopfBilder.value) : 0,
+)
+const schieberFrame = ref(1)
+const schiebtGerade = ref(false)
+let schieberTakt: ReturnType<typeof setInterval> | null = null
+
+function schieberTaktStellen() {
+  const aktiv = schieberMax.value > 1 && bereit.value && !laedt.value && !fehler.value
+  if (aktiv && !schieberTakt) {
+    schieberTakt = setInterval(() => {
+      if (!schiebtGerade.value) sende('frame')
+    }, 250)
+  } else if (!aktiv && schieberTakt) {
+    clearInterval(schieberTakt)
+    schieberTakt = null
+  }
+}
+watch([schieberMax, bereit, laedt, fehler], schieberTaktStellen)
+
+function schieberBewegt(event: Event) {
+  const frame = Number((event.target as HTMLInputElement).value)
+  if (!Number.isInteger(frame) || frame < 1) return
+  schieberFrame.value = frame
+  sende('springen', { frame })
+}
 
 function sende(cmd: string, daten: Record<string, unknown> = {}, transfer: Transferable[] = []) {
   rahmen.value?.contentWindow?.postMessage({ saru: 'cmd', cmd, ...daten }, '*', transfer)
@@ -98,11 +143,11 @@ function rahmenDokument(origin: string): string {
       });
     };
 
-    function ext(name, arg) {
+    function ext(name) {
       try {
         var r = player && player.ruffle && player.ruffle();
         if (!r) return;
-        if (arg === undefined) r.callExternalInterface(name); else r.callExternalInterface(name, arg);
+        return r.callExternalInterface.apply(r, Array.prototype.slice.call(arguments));
       } catch (e) { an({ type: 'warn', text: String(e) }); }
     }
     function warteAufRuffle(versuch) {
@@ -141,6 +186,11 @@ function rahmenDokument(origin: string): string {
       else if (m.cmd === 'fortsetzen') { if (player) player.play(); }
       else if (m.cmd === 'erklaerung') { ext('swfSetExplanationMode', !!m.an); }
       else if (m.cmd === 'springen') { ext('swfGoto', m.frame); }
+      else if (m.cmd === 'aufruf') { if ('arg' in m) ext('swfCall', m.fn, m.arg); else ext('swfCall', m.fn); }
+      else if (m.cmd === 'frame') {
+        var f = Number(ext('swfFrame'));
+        if (f > 0) an({ type: 'frame', frame: f });
+      }
     });
     an({ type: 'bereit' });
   `
@@ -259,6 +309,9 @@ function beiNachricht(event: MessageEvent) {
       }
       break
     }
+    case 'frame':
+      if (!schiebtGerade.value && msg.frame !== undefined && msg.frame >= 1) schieberFrame.value = msg.frame
+      break
   }
 }
 
@@ -267,6 +320,8 @@ function ladenInRahmen() {
   erstesAnhalten = true
   haltFrame.value = null
   pausiert.value = false
+  umgeschaltet.value = []
+  schieberFrame.value = 1
   const kopie = datenPuffer.slice(0)
   sende('laden', { daten: kopie }, [kopie])
 }
@@ -275,6 +330,7 @@ async function datenLaden() {
   laedt.value = true
   fehler.value = null
   meta.value = null
+  kopfBilder.value = 0
   datenPuffer = null
   try {
     const puffer = await $fetch<ArrayBuffer>(props.src, { responseType: 'arrayBuffer' })
@@ -282,7 +338,10 @@ async function datenLaden() {
     const bytes = new Uint8Array(puffer)
     meta.value = parseSwfMetadaten(bytes)
     const kopf = parseSwfKopf(bytes)
-    if (kopf) seitenverhaeltnis.value = `${kopf.breite} / ${kopf.hoehe}`
+    if (kopf) {
+      seitenverhaeltnis.value = `${kopf.breite} / ${kopf.hoehe}`
+      kopfBilder.value = kopf.bilder
+    }
     ladenInRahmen()
   } catch {
     fehler.value = 'Die Datei konnte nicht geladen werden.'
@@ -313,6 +372,8 @@ function neustart() {
   erstesAnhalten = true
   haltFrame.value = null
   pausiert.value = false
+  umgeschaltet.value = []
+  schieberFrame.value = 1
   sende('neustart')
 }
 
@@ -352,6 +413,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('message', beiNachricht)
   document.removeEventListener('fullscreenchange', beiVollbildwechsel)
+  if (schieberTakt) clearInterval(schieberTakt)
 })
 watch(() => props.src, () => void datenLaden())
 
@@ -410,6 +472,15 @@ const buehneStil = computed(() =>
       <UiButton groesse="lg" :icon="vollbild ? 'compress' : 'expand'" @click="vollbildUmschalten">
         {{ vollbild ? 'Vollbild beenden' : 'Vollbild' }}
       </UiButton>
+      <UiButton
+        v-for="(aktion, index) in meta?.aktionen ?? []"
+        :key="index"
+        groesse="lg"
+        :aria-pressed="aktion.umschalten ? Boolean(umgeschaltet[index]) : undefined"
+        @click="aktionAusfuehren(aktion, index)"
+      >
+        {{ aktionLabel(aktion, index) }}
+      </UiButton>
       <UiToggle
         v-if="hatHaltepunkte"
         v-model="erklaerungenAn"
@@ -417,6 +488,26 @@ const buehneStil = computed(() =>
         class="ml-auto"
       />
     </div>
+
+    <label v-if="schieberMax > 1" class="flex items-center gap-3 px-1 text-sm text-ink-muted">
+      <span class="shrink-0">Zeitleiste</span>
+      <input
+        type="range"
+        min="1"
+        :max="schieberMax"
+        step="1"
+        :value="schieberFrame"
+        :disabled="laedt || Boolean(fehler)"
+        class="min-w-0 flex-1 accent-[var(--color-primary)]"
+        aria-label="Zeitleiste der Animation"
+        @pointerdown="schiebtGerade = true"
+        @pointerup="schiebtGerade = false"
+        @pointercancel="schiebtGerade = false"
+        @change="schiebtGerade = false"
+        @input="schieberBewegt"
+      >
+      <span class="w-16 shrink-0 text-right tabular-nums">{{ schieberFrame }} / {{ schieberMax }}</span>
+    </label>
 
     <div
       v-if="erklaerung"
