@@ -326,8 +326,13 @@ export async function overwriteFile(
   }
 }
 
-export function readFileStream(storageKey: string) {
-  return createReadStream(resolveStoragePath(storageKey))
+/** `bereich`: Byte-Ausschnitt inklusive `end` (für Range-Anfragen). */
+export function readFileStream(storageKey: string, bereich?: { start: number; end: number }) {
+  return createReadStream(resolveStoragePath(storageKey), bereich)
+}
+
+export async function dateiGroesse(storageKey: string): Promise<number> {
+  return (await stat(resolveStoragePath(storageKey))).size
 }
 
 export function formatBytes(bytes: number): string {

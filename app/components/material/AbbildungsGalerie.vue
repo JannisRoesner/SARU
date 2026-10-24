@@ -25,8 +25,10 @@ const props = withDefaults(
     startId?: string | null
     /** Löschen einzelner Bilder (nur angemeldet). */
     loeschenErlaubt?: boolean
+    /** Bearbeiten-Schalter der Seite; ohne ihn bleibt die Galerie trotz Recht reine Ansicht. */
+    bearbeitungsmodus?: boolean
   }>(),
-  { hochladenUrl: null, kiUrl: null, startId: null, loeschenErlaubt: false },
+  { hochladenUrl: null, kiUrl: null, startId: null, loeschenErlaubt: false, bearbeitungsmodus: true },
 )
 
 const emit = defineEmits<{ geaendert: [] }>()
@@ -69,7 +71,7 @@ const router = useRouter()
 const { data, error, refresh, status } = await useFetch<Liste>(() => props.listeUrl, { key: `abbildungen:${props.listeUrl}` })
 
 const alle = computed(() => data.value?.abbildungen ?? [])
-const darfBearbeiten = computed(() => Boolean(data.value?.darfBearbeiten))
+const darfBearbeiten = computed(() => Boolean(data.value?.darfBearbeiten) && props.bearbeitungsmodus)
 
 const variantenVon = computed(() => {
   const map = new Map<string, Abbildung[]>()

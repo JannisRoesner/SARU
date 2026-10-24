@@ -993,6 +993,7 @@ function loesungKorrigieren() {
               :zip-url="`/api/materials/${data.id}/inhalt-zip`"
               :ki-url="`/api/materials/${data.id}/abbildungen/ki`"
               loeschen-erlaubt
+              :bearbeitungsmodus="bearbeiten"
               @geaendert="refresh()"
             />
           </UiCard>
