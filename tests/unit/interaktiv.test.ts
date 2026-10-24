@@ -44,6 +44,10 @@ const json = {
   ],
 }
 
+function metaAus(daten: unknown) {
+  return parseSwfMetadaten(baueSwf([tag(77, new TextEncoder().encode(JSON.stringify(daten)))]))
+}
+
 describe('interaktive Inhalte: Typ-Erkennung', () => {
   it('erkennt .swf an der Endung', () => {
     expect(istInteraktivDatei('bau.swf')).toBe(true)
@@ -109,6 +113,63 @@ describe('SWF-Metadaten', () => {
   it('bricht bei abgeschnittenen Dateien nicht ab', () => {
     const swf = baueSwf([tag(77, new TextEncoder().encode(JSON.stringify(json)))])
     expect(parseSwfMetadaten(swf.subarray(0, swf.length - 30))).toBeNull()
+  })
+
+  it('setzt die neuen Felder bei älteren SWFs auf neutrale Werte', () => {
+    const meta = parseSwfMetadaten(baueSwf([tag(77, new TextEncoder().encode(JSON.stringify(json)))]))
+    expect(meta).toMatchObject({ aktionen: [], schieber: false, totalFrames: null })
+  })
+
+  it('liest Zusatzknöpfe, Umschalter und den Zeitleisten-Schieber', () => {
+    const meta = metaAus({
+      saru: 1,
+      stopFrames: [],
+      aktionen: [
+        { label: 'Manuell', fn: 'setAutomode', arg: false, labelAus: 'Automatisch', argAus: true },
+        { label: ' Zurücksetzen ', fn: 'reset' },
+        { label: 'Schritt', fn: 'gehe', arg: 3, labelAus: 'Zurück' },
+      ],
+      schieber: true,
+      totalFrames: 240,
+    })
+    expect(meta?.aktionen).toEqual([
+      { label: 'Manuell', fn: 'setAutomode', arg: false, umschalten: { label: 'Automatisch', arg: true } },
+      { label: 'Zurücksetzen', fn: 'reset', arg: undefined, umschalten: null },
+      { label: 'Schritt', fn: 'gehe', arg: 3, umschalten: { label: 'Zurück', arg: undefined } },
+    ])
+    expect(meta?.schieber).toBe(true)
+    expect(meta?.totalFrames).toBe(240)
+  })
+
+  it('verwirft ungültige Zusatzknöpfe und Schieber-Angaben', () => {
+    const meta = metaAus({
+      saru: 1,
+      aktionen: [
+        null,
+        'Manuell',
+        { label: '', fn: 'a' },
+        { label: 'Ohne Funktion' },
+        { label: 'Code', fn: 'a(); b' },
+        { label: 'Pfad', fn: '_root.x' },
+        { label: 'Objekt', fn: 'f', arg: { x: 1 }, labelAus: '  ', argAus: true },
+        { label: 'Unendlich', fn: 'g', arg: Number.POSITIVE_INFINITY },
+      ],
+      schieber: 'ja',
+      totalFrames: 12.5,
+    })
+    expect(meta?.aktionen).toEqual([
+      { label: 'Objekt', fn: 'f', arg: undefined, umschalten: null },
+      // JSON macht aus Infinity null – das ist ein gültiges Argument.
+      { label: 'Unendlich', fn: 'g', arg: null, umschalten: null },
+    ])
+    expect(meta?.schieber).toBe(false)
+    expect(meta?.totalFrames).toBeNull()
+    expect(metaAus({ saru: 1, aktionen: 'x', totalFrames: 0 })).toMatchObject({ aktionen: [], totalFrames: null })
+  })
+
+  it('begrenzt die Zahl der Zusatzknöpfe', () => {
+    const aktionen = Array.from({ length: 12 }, (_, i) => ({ label: `K${i}`, fn: `f${i}` }))
+    expect(metaAus({ saru: 1, aktionen })?.aktionen).toHaveLength(8)
   })
 
   it('liest die Bühnengröße aus dem Header', () => {
