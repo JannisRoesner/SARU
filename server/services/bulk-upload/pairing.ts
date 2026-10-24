@@ -556,3 +556,29 @@ export function filesAsSingletonClusters(
     warnings: file.warnings ?? [],
   }))
 }
+
+const COVER_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp'])
+const COVER_STEM = /^cover(?:[\s._-].*)?$/
+
+/** „cover.png“, „Cover.JPG“, „Cover - Linder.webp“ – Bild, das als Lehrwerk-Cover dienen kann. */
+export function isLehrwerkCoverFile(fileName: string): boolean {
+  const name = basename(fileName)
+  const dot = name.lastIndexOf('.')
+  if (dot < 1) return false
+  return COVER_EXTENSIONS.has(name.slice(dot + 1).toLowerCase()) && COVER_STEM.test(fold(name.slice(0, dot)).trim())
+}
+
+/**
+ * Wählt das Cover-Bild des Stapels: bei mehreren Treffern das am höchsten im Ordnerbaum liegende
+ * (Wurzel des Lehrwerks), bei Gleichstand der alphabetisch erste Pfad.
+ */
+export function findLehrwerkCover(files: PairingInputFile[]): PairingInputFile | null {
+  const candidates = files
+    .filter((file) => isLehrwerkCoverFile(file.fileName))
+    .map((file) => {
+      const path = posixPath(file.relativePath || file.fileName)
+      return { file, path, depth: path.split('/').filter(Boolean).length }
+    })
+    .sort((a, b) => a.depth - b.depth || a.path.localeCompare(b.path))
+  return candidates[0]?.file ?? null
+}

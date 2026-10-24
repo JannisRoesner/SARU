@@ -54,7 +54,13 @@ import {
 } from '#shared/utils/bulk-upload'
 import { suggestFileMetadata, titleFromFileName } from './suggest-metadata'
 import { AI_CREATE_ADAPTER_ID } from '../ai/material-create'
-import { clusterBulkFiles, detectFolderRole, fassungLabel, filesAsSingletonClusters } from './pairing'
+import {
+  clusterBulkFiles,
+  detectFolderRole,
+  fassungLabel,
+  filesAsSingletonClusters,
+  findLehrwerkCover,
+} from './pairing'
 import { expandBulkArchives } from './zip'
 import {
   abortAnalysis,
@@ -1026,6 +1032,47 @@ async function runBulkCommit(
     }
   }
 
+  // Cover-Fallback: Hat das Lehrwerk keine Buchdatei (z. B. CD-ROM), dient ein `cover.*` im Stapel als
+  // Cover. Es wird dann Hauptdatei des Lehrwerks und nicht zusätzlich als Bild-Material angelegt.
+  let coverRef: string | null = null
+  if (lehrwerkId) {
+    const coverFile = findLehrwerkCover(
+      files.map((file) => ({
+        sourceRef: file.sourceRef,
+        fileName: file.fileName,
+        relativePath: file.relativePath,
+        extension: extensionOf(file.fileName),
+      })),
+    )
+    const cover = coverFile ? filesByRef.get(coverFile.sourceRef) : undefined
+    if (cover && prior.latest.get('lehrwerk-cover')?.action === 'verknuepft') {
+      coverRef = cover.sourceRef
+    } else if (cover) {
+      try {
+        const detail = await getMaterialDetail(lehrwerkId)
+        const hatBuchdatei = (detail?.variants ?? []).some((variant) =>
+          variant.assets.some((asset) => asset.role === 'haupt'),
+        )
+        if (detail && !hatBuchdatei) {
+          if (cover.stagingMissing || !cover.stagingPath || !(await fileExists(cover.stagingPath))) {
+            throw invalidInput(`Das Cover „${cover.fileName}“ liegt nicht mehr vor.`)
+          }
+          await attachStagedAsset(await defaultVariantId(lehrwerkId), cover, 'haupt')
+          stats.dateien = (stats.dateien ?? 0) + 1
+          coverRef = cover.sourceRef
+          await track('lehrwerk-cover', lehrwerkId, 'verknuepft', `Cover: ${cover.fileName}`)
+        }
+      } catch (error) {
+        // Ohne Cover bleibt das Bild ein normales Material; der Rest des Stapels läuft weiter.
+        await addLog(
+          runId,
+          'warnung',
+          `Cover „${cover.fileName}“ nicht übernommen: ${oeffentlicheFehlermeldung(error, 'Das Cover konnte nicht gespeichert werden.')}`,
+        )
+      }
+    }
+  }
+
   // Stationenarbeit: Aus den erkannten Blättern wird ein Über-Material, das statt der einzelnen
   // Blätter am Lehrwerk hängt. Die Blätter gehören dann nur dem Lernzirkel an.
   // Beim Nachholen hängen weitere Stationen am schon angelegten Lernzirkel.
@@ -1079,6 +1126,12 @@ async function runBulkCommit(
   for (const cluster of clusters) {
     if (prior.createdClusters.has(cluster.clusterId)) continue
     const decision = decisionForCluster(cluster, mapping)
+    if (coverRef && cluster.fileRefs.length === 1 && cluster.fileRefs[0] === coverRef) {
+      if (prior.latest.get(cluster.clusterId)?.action !== 'uebersprungen') {
+        await track(cluster.clusterId, null, 'uebersprungen', 'Als Lehrwerk-Cover verwendet')
+      }
+      continue
+    }
     if (decision?.include === false) {
       if (prior.latest.get(cluster.clusterId)?.action === 'uebersprungen') continue
       await track(
