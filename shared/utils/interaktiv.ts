@@ -133,15 +133,18 @@ function metadatenAusText(roh: string): InteraktivMetadaten | null {
   const daten = json as Record<string, unknown>
   if (daten.saru !== 1) return null
 
-  const stopFrames = Array.isArray(daten.stopFrames)
-    ? daten.stopFrames.filter((f): f is number => Number.isInteger(f) && (f as number) >= 1)
-    : []
-  const erklaerungen = stopFrames.map((_, i) => {
+  // Zuordnung über den ursprünglichen Index, bevor ungültige Frames entfallen.
+  const frames = Array.isArray(daten.stopFrames) ? daten.stopFrames : []
+  const stopFrames: number[] = []
+  const erklaerungen: (InteraktivErklaerung | null)[] = []
+  frames.forEach((frame, i) => {
+    if (!Number.isInteger(frame) || (frame as number) < 1) return
+    stopFrames.push(frame as number)
     const e = Array.isArray(daten.explanations) ? daten.explanations[i] : null
-    if (!e || typeof e !== 'object') return null
+    if (!e || typeof e !== 'object') return void erklaerungen.push(null)
     const { title, text } = e as Record<string, unknown>
-    if (typeof title !== 'string' && typeof text !== 'string') return null
-    return { title: typeof title === 'string' ? title : '', text: typeof text === 'string' ? text : '' }
+    if (typeof title !== 'string' && typeof text !== 'string') return void erklaerungen.push(null)
+    erklaerungen.push({ title: typeof title === 'string' ? title : '', text: typeof text === 'string' ? text : '' })
   })
   return {
     title: typeof daten.title === 'string' && daten.title.trim() ? daten.title.trim() : null,

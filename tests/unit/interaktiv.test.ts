@@ -92,6 +92,20 @@ describe('SWF-Metadaten', () => {
     expect(parseSwfMetadaten(new Uint8Array([1, 2, 3]))).toBeNull()
   })
 
+  it('ordnet Erklärtexte auch bei ungültigen Frames dem richtigen Haltepunkt zu', () => {
+    const text = new TextEncoder().encode(
+      JSON.stringify({
+        saru: 1,
+        stopFrames: [0, 10, 45],
+        explanations: [{ title: 'ungültig', text: '' }, { title: 'A', text: '' }, { title: 'B', text: '' }],
+      }),
+    )
+    const meta = parseSwfMetadaten(baueSwf([tag(77, text)]))
+    expect(meta?.stopFrames).toEqual([10, 45])
+    expect(erklaerungFuerFrame(meta, 10)?.title).toBe('A')
+    expect(erklaerungFuerFrame(meta, 45)?.title).toBe('B')
+  })
+
   it('bricht bei abgeschnittenen Dateien nicht ab', () => {
     const swf = baueSwf([tag(77, new TextEncoder().encode(JSON.stringify(json)))])
     expect(parseSwfMetadaten(swf.subarray(0, swf.length - 30))).toBeNull()
