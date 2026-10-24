@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM node:22-bookworm AS build
+FROM node:22.23.4-bookworm AS build
 
 WORKDIR /app
 
@@ -29,6 +29,7 @@ RUN apt-get update \
     libreoffice-impress-nogui \
   && curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
   && apt-get install -y --no-install-recommends nodejs \
+  && node -e 'const [a,b,c]=process.versions.node.split(".").map(Number);if(a<22||(a===22&&(b<23||(b===23&&c<4))))process.exit(1)' \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
