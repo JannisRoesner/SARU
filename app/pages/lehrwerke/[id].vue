@@ -62,6 +62,7 @@ const vorschauAssetId = ref<string | null>(null)
 const vorschauTitel = ref<string | null>(null)
 const ziehe = ref(false)
 const dateiInput = ref<HTMLInputElement | null>(null)
+const coverInput = ref<HTMLInputElement | null>(null)
 const ersetzenInput = ref<HTMLInputElement | null>(null)
 
 const gefilterterInhalt = computed(() => {
@@ -131,7 +132,7 @@ function assetHerunterladen(assetId: string) {
   window.open(`/api/assets/${assetId}/download`, '_blank')
 }
 
-async function buchHochladen(files: FileList | null) {
+async function buchHochladen(files: FileList | null, meldung = 'Buchdatei hochgeladen.') {
   const file = files?.[0]
   if (!file || !standardVariante.value || hauptVorschau.value) return
   const body = new FormData()
@@ -140,9 +141,10 @@ async function buchHochladen(files: FileList | null) {
   const ergebnis = await aufruf(`/api/variants/${standardVariante.value.id}/uploads`, {
     method: 'POST',
     body,
-    erfolgsmeldung: 'Buchdatei hochgeladen.',
+    erfolgsmeldung: meldung,
   })
   if (dateiInput.value) dateiInput.value.value = ''
+  if (coverInput.value) coverInput.value.value = ''
   if (ergebnis) await refresh()
 }
 
@@ -405,6 +407,21 @@ async function zuordnungLoesen(relationId: string) {
             <UiIcon name="cloud-arrow-up" class="mb-2 text-xl text-primary" />
             <span class="text-sm font-medium text-ink">Buchdatei hochladen</span>
           </label>
+          <div v-if="darfBearbeiten && bearbeiten && !hauptVorschau" class="mt-3 text-center">
+            <input
+              ref="coverInput"
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              class="sr-only"
+              @change="buchHochladen(($event.target as HTMLInputElement).files, 'Cover hochgeladen.')"
+            >
+            <UiButton variante="sekundaer" icon="image" @click="coverInput?.click()">
+              Cover hochladen
+            </UiButton>
+            <p class="mt-1 text-xs text-ink-muted">
+              Für Lehrwerke ohne Buch, z. B. CD-ROMs: ein Bild dient als Cover.
+            </p>
+          </div>
         </UiCard>
 
         <div class="min-w-0 space-y-5">
