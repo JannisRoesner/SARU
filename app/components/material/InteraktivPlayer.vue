@@ -476,7 +476,6 @@ const buehneStil = computed(() =>
         v-for="(aktion, index) in meta?.aktionen ?? []"
         :key="index"
         groesse="lg"
-        :aria-pressed="aktion.umschalten ? Boolean(umgeschaltet[index]) : undefined"
         @click="aktionAusfuehren(aktion, index)"
       >
         {{ aktionLabel(aktion, index) }}
