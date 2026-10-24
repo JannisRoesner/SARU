@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM node:22.23.4-bookworm AS build
+FROM node:24.22.1-bookworm AS build
 
 WORKDIR /app
 
@@ -13,7 +13,7 @@ RUN npm run build \
 
 FROM pgvector/pgvector:pg17
 
-ARG NODE_MAJOR=22
+ARG NODE_MAJOR=24
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -29,7 +29,7 @@ RUN apt-get update \
     libreoffice-impress-nogui \
   && curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
   && apt-get install -y --no-install-recommends nodejs \
-  && node -e 'const [a,b,c]=process.versions.node.split(".").map(Number);if(a<22||(a===22&&(b<23||(b===23&&c<4))))process.exit(1)' \
+  && node -e 'const [a,b,c]=process.versions.node.split(".").map(Number);if(a<24||(a===24&&(b<22||(b===22&&c<1))))process.exit(1)' \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
