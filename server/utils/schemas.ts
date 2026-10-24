@@ -238,7 +238,7 @@ export const seriesListSchema = paginationSchema.extend({
 
 export const searchSchema = z.object({
   q: z.string().max(300).default(''),
-  entityTypes: csvArray(z.enum(['material', 'unterrichtsstunde', 'reihe'])),
+  entityTypes: csvArray(z.enum(['material', 'unterrichtsstunde', 'reihe', 'abbildung'])),
   limit: z.coerce.number().int().min(1).max(50).default(20),
 })
 
@@ -379,6 +379,25 @@ export const bulkUploadMappingSchema = z.object({
       }),
     )
     .optional(),
+  abbildungenKi: z.boolean().optional(),
+})
+
+// ---------------------------------------------------------- Abbildungssammlungen
+
+/** Felder fehlen = unverändert, `null` oder leer = löschen (Trimmen im Dienst). */
+const optionalerText = (max: number) => z.string().max(max, `Höchstens ${max} Zeichen erlaubt.`).nullable().optional()
+
+export const abbildungPatchSchema = z.object({
+  titel: z.string().max(300).optional(),
+  beschreibung: optionalerText(4000),
+  werk: optionalerText(200),
+  seite: optionalerText(40),
+  abbildung: optionalerText(40),
+  kapitel: optionalerText(200),
+  schlagwoerter: z.array(z.string().min(1).max(120)).max(20).optional(),
+  beschriftet: z.boolean().nullable().optional(),
+  varianteVon: uuidSchema.nullable().optional(),
+  original: optionalerText(500),
 })
 
 export const aiMaterialCreateCommitSchema = z.object({

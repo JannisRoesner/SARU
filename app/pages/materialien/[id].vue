@@ -12,6 +12,7 @@ import { materialPfad, materialZurueckZiel } from '#shared/utils/material-pfad'
 import { istKiMusterloesung, kiAutorAnzeige } from '#shared/utils/ki'
 import { solutionEditorMode, type SolutionEditorMode } from '#shared/utils/solution-editor'
 import { istInteraktivDatei, istInteraktivMaterial } from '#shared/utils/interaktiv'
+import { istAbbildungssammlungMaterial, istVideoDatei } from '#shared/utils/abbildungen'
 import { istMoodleKursMaterial, istH5pMaterial, kursarchivErweiterung } from '#shared/utils/moodle'
 import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
 import type {
@@ -328,6 +329,7 @@ const darfDifferenzieren = computed(() =>
   Boolean(
     darfBearbeiten.value
     && data.value
+    && !istSammlung.value
     && !kiLoesungAktiv.value
     && !istMoodleKurs.value
     && !istH5p.value
@@ -729,6 +731,14 @@ const istInteraktiv = computed(
 
 const istIconVorschau = computed(() => istMoodleKurs.value || istH5p.value || istInteraktiv.value)
 
+/** Abbildungssammlung: Galerie statt Dokumentvorschau und Dateiliste. */
+const istSammlung = computed(() => istAbbildungssammlungMaterial(data.value?.materialType))
+
+/** Kurzes Video (mp4/m4v/webm) direkt auf der Seite abspielen. */
+const istVideo = computed(() =>
+  Boolean(hauptVorschau.value && (istVideoDatei(hauptVorschau.value.fileName) || hauptVorschau.value.mimeType?.startsWith('video/'))),
+)
+
 const kursarchivFormat = computed(() =>
   kursarchivErweiterung(hauptVorschau.value?.fileName),
 )
@@ -852,7 +862,7 @@ function loesungKorrigieren() {
             Teilen
           </UiButton>
           <UiButton
-            v-if="darfBearbeiten && !kiLoesungAktiv && !istMoodleKurs && !istLehrwerk"
+            v-if="darfBearbeiten && !kiLoesungAktiv && !istMoodleKurs && !istLehrwerk && !istSammlung && !istVideo"
             variante="sekundaer"
             icon="wand-magic-sparkles"
             title="Musterlösung erstellen"
@@ -968,6 +978,41 @@ function loesungKorrigieren() {
       <div class="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
         <div class="min-w-0 space-y-5">
           <UiCard
+            v-if="istSammlung && data"
+            titel="Abbildungen"
+            icon="images"
+            einklappbar
+            einklapp-id="material-abbildungen"
+            :standard-offen="true"
+          >
+            <MaterialAbbildungsGalerie
+              :liste-url="`/api/materials/${data.id}/abbildungen`"
+              datei-basis="/api/assets"
+              abbildung-basis="/api/abbildungen"
+              :hochladen-url="`/api/materials/${data.id}/abbildungen`"
+              :zip-url="`/api/materials/${data.id}/inhalt-zip`"
+              :ki-url="`/api/materials/${data.id}/abbildungen/ki`"
+              loeschen-erlaubt
+              :bearbeitungsmodus="bearbeiten"
+              @geaendert="refresh()"
+            />
+          </UiCard>
+
+          <UiCard
+            v-if="hauptVorschau && istVideo"
+            titel="Video"
+            icon="film"
+            :standard-offen="true"
+          >
+            <video
+              :src="`/api/assets/${hauptVorschau.id}/download?inline=1`"
+              controls
+              preload="metadata"
+              class="max-h-[70vh] w-full rounded-lg bg-black"
+            />
+          </UiCard>
+
+          <UiCard
             v-if="hauptVorschau && istInteraktiv"
             titel="Interaktiver Inhalt"
             icon="hand-pointer"
@@ -980,7 +1025,7 @@ function loesungKorrigieren() {
           </UiCard>
 
           <UiCard
-            v-if="hauptVorschau"
+            v-if="hauptVorschau && !istSammlung"
             :titel="istMoodleKurs ? 'Kursarchiv' : istH5p ? 'H5P-Paket' : istInteraktiv ? 'Datei' : 'Dokumentvorschau'"
             :icon="istMoodleKurs ? 'graduation-cap' : istH5p ? 'puzzle-piece' : istInteraktiv ? 'file' : 'eye'"
             einklappbar
@@ -1208,6 +1253,7 @@ function loesungKorrigieren() {
           </UiCard>
 
           <UiCard
+            v-if="!istSammlung"
             :titel="istMoodleKurs ? 'Kursversionen' : 'Varianten & Anhänge'"
             :icon="istMoodleKurs ? 'graduation-cap' : 'code-branch'"
             einklappbar

@@ -40,7 +40,7 @@ export interface SearchOutcome {
 
 const EMPTY_OUTCOME: SearchOutcome = {
   hits: [],
-  idsByType: { material: [], unterrichtsstunde: [], reihe: [] },
+  idsByType: { material: [], unterrichtsstunde: [], reihe: [], abbildung: [] },
   vectorSearchUsed: false,
   totalCandidates: 0,
 }
@@ -123,7 +123,7 @@ export async function search(
   const limit = Math.min(500, Math.max(1, options.limit ?? 200))
   const types = options.entityTypes?.length
     ? options.entityTypes
-    : (['material', 'unterrichtsstunde', 'reihe'] as IndexEntityType[])
+    : (['material', 'unterrichtsstunde', 'reihe', 'abbildung'] as IndexEntityType[])
 
   const settings = await getAiSettings()
   const queryEmbedding = options.skipVector ? null : await embedQuery(settings, trimmed)
@@ -275,6 +275,7 @@ export async function search(
     material: [],
     unterrichtsstunde: [],
     reihe: [],
+    abbildung: [],
   }
   for (const hit of hits) idsByType[hit.entityType].push(hit.entityId)
 

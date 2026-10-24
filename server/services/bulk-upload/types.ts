@@ -1,4 +1,5 @@
 import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
+import type { AbbildungssammlungPlan } from '#shared/utils/abbildungen'
 import type { MaterialType } from '#shared/types/domain'
 import type {
   BulkFileRole,
@@ -26,7 +27,25 @@ export const BULK_EXTRACT_CONCURRENCY = 4
 /** Parallele Metadaten-Vorschläge. */
 export const BULK_AI_CONCURRENCY = 3
 
-export type BulkClusterKind = 'paar' | 'varianten' | 'einzeln' | 'unklar'
+/** `abbildungssammlung`: alle Bilder eines Abbildungsordners werden zu einem Material. */
+export type BulkClusterKind = 'paar' | 'varianten' | 'einzeln' | 'unklar' | 'abbildungssammlung'
+
+/** Höchstzahl übersprungener Dateien, die mit Namen in der Vorschau erscheinen. */
+export const MAX_UEBERSPRUNGEN_LISTE = 500
+
+export interface BulkUebersprungeneDatei {
+  pfad: string
+  grund: string
+}
+
+/** Bündelung eines Abbildungsordners samt Angaben aus `abbildungen.json`. */
+export interface BulkAbbildungssammlung {
+  /** Ordnerpfad im Paket, z. B. „Biologie 1/Abbildungen/Cytologie“. */
+  ordner: string
+  plan: AbbildungssammlungPlan
+  /** Fehler beim Lesen von `abbildungen.json` (die Datei wurde dann nicht verwendet). */
+  manifestFehler: string[]
+}
 
 export const BULK_FILE_ROLES = ['schueler', 'loesung', 'einzeln', 'abbildung', 'anhaengsel', 'fassung'] as const
 
@@ -56,6 +75,8 @@ export interface BulkUploadDetectedFile {
    * nicht wiederherstellbar). Das Bündel lässt sich dann nicht mehr anlegen.
    */
   stagingMissing?: boolean
+  /** `abbildungen.json` bzw. `videos.json` – wird gelesen, aber nicht als Datei übernommen. */
+  manifest?: boolean
   /** Sidecar mit dem einmalig extrahierten Volltext (Textebene oder Vision). */
   extractedTextKey?: string | null
   extractionMethod?: 'text_layer' | 'vision' | 'none'
@@ -70,7 +91,7 @@ export interface BulkUploadDetectedFile {
 
 export interface BulkProposedLink {
   targetClusterId: string
-  relationType: 'musterloesung' | 'gehoert_zu' | 'zusatzmaterial'
+  relationType: 'musterloesung' | 'gehoert_zu' | 'zusatzmaterial' | 'bezug'
   reason: string
   confidence: 'hoch' | 'mittel'
 }
@@ -86,6 +107,10 @@ export interface BulkUploadDetectedCluster {
   proposedLinks: BulkProposedLink[]
   /** Gehört zu einem erkannten Lernzirkel (Stationenarbeit) – wird dort statt direkt am Lehrwerk einsortiert. */
   lernzirkel?: BulkLernzirkelRef
+  /** Titel/Beschreibung stammen aus videos.json – kein KI-Textvorschlag nötig. */
+  angabenAusPaket?: boolean
+  /** Nur bei `kind: 'abbildungssammlung'`. */
+  abbildungen?: BulkAbbildungssammlung
   warnings: string[]
 }
 
@@ -98,6 +123,8 @@ export interface BulkUploadDetected {
   analysisPending?: boolean
   archiveNames?: string[]
   skippedCount?: number
+  /** Übersprungene Dateien mit Grund (höchstens MAX_UEBERSPRUNGEN_LISTE). */
+  skippedFiles?: BulkUebersprungeneDatei[]
 }
 
 export interface BulkUploadRecordDecision {
@@ -131,6 +158,8 @@ export interface BulkUploadMapping {
   records?: Record<string, BulkUploadRecordDecision>
   /** Entscheidungen je erkanntem Lernzirkel (Schlüssel: `BulkLernzirkelRef.id`). */
   lernzirkel?: Record<string, BulkLernzirkelDecision>
+  /** Nach dem Anlegen fehlende Bildangaben in Abbildungssammlungen per Vision-KI ergänzen. */
+  abbildungenKi?: boolean
 }
 
 export interface BulkUploadInputFile {
@@ -145,6 +174,7 @@ export interface BulkUploadStats {
   verknuepft?: number
   fassungen?: number
   lernzirkel?: number
+  abbildungen?: number
   uebersprungen?: number
   fehlgeschlagen?: number
 }

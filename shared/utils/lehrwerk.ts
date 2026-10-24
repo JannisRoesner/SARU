@@ -74,10 +74,16 @@ export const LEHRWERK_GRUPPEN: LehrwerkGruppe[] = [
     types: ['gefaehrdungsbeurteilung', 'unterrichtsentwurf'],
   },
   {
+    id: 'abbildungen',
+    label: 'Abbildungen',
+    icon: 'images',
+    types: ['abbildungssammlung', 'bild'],
+  },
+  {
     id: 'medien',
-    label: 'Abbildungen & Medien',
-    icon: 'image',
-    types: ['bild', 'video', 'praesentation', 'h5p', 'interaktiv'],
+    label: 'Medien',
+    icon: 'photo-film',
+    types: ['video', 'praesentation', 'h5p', 'interaktiv'],
   },
   {
     id: 'kurse',

@@ -3,27 +3,37 @@ import { searchEntityTypes } from '#shared/utils/labels'
 import type { MaterialSummary } from '~~/server/repositories/material.repository'
 import type { LessonSummary } from '~~/server/repositories/lesson.repository'
 import type { SeriesSummary } from '~~/server/repositories/series.repository'
+import type { AbbildungSuchtreffer } from '~~/server/services/abbildungen/abbildung.service'
 
 useHead({ title: 'Suchergebnisse' })
 
 interface Treffer {
-  entityType: 'material' | 'unterrichtsstunde' | 'reihe'
+  entityType: 'material' | 'unterrichtsstunde' | 'reihe' | 'abbildung'
   entityId: string
   title: string
   snippet: string | null
   sourceLabel: string | null
   matchedIn: string[]
   score?: number
-  datensatz: MaterialSummary | LessonSummary | SeriesSummary
+  datensatz: MaterialSummary | LessonSummary | SeriesSummary | AbbildungSuchtreffer
 }
 
 interface SuchErgebnis {
   query: string
   treffer: Treffer[]
+  /** Einzelbilder aus Abbildungssammlungen – getrennt, damit sie die Liste nicht fluten. */
+  abbildungen: Treffer[]
   anzahl: number
   vektorsucheAktiv: boolean
-  proTyp: { material: number; unterrichtsstunde: number; reihe: number }
+  proTyp: { material: number; unterrichtsstunde: number; reihe: number; abbildung: number }
 }
+
+/** Bildtreffer aus beiden Quellen (Nebensuche oder Typfilter „Abbildung“). */
+const bildTreffer = computed(() => [
+  ...(data.value?.abbildungen ?? []),
+  ...(data.value?.treffer ?? []).filter((t) => t.entityType === 'abbildung'),
+])
+const listenTreffer = computed(() => (data.value?.treffer ?? []).filter((t) => t.entityType !== 'abbildung'))
 
 interface GespeicherteSuche {
   id: string
@@ -93,6 +103,7 @@ function typAnzahl(typ: string): number | undefined {
   if (typ === 'material') return zaehler.material
   if (typ === 'unterrichtsstunde') return zaehler.unterrichtsstunde
   if (typ === 'reihe') return zaehler.reihe
+  if (typ === 'abbildung') return zaehler.abbildung
   return undefined
 }
 
@@ -254,14 +265,45 @@ const { favoritSetzen } = useMaterialAktionen(() => refresh())
 
       <UiSkelett v-if="status === 'pending'" art="liste" :zeilen="5" />
       <UiLeerzustand
-        v-else-if="!(data?.treffer.length)"
+        v-else-if="!(data?.treffer.length) && !bildTreffer.length"
         icon="magnifying-glass"
         titel="Keine Treffer"
         text="Probiere andere Begriffe oder entferne Filter."
       />
 
-      <div v-else class="space-y-2">
-        <template v-for="treffer in data?.treffer" :key="`${treffer.entityType}-${treffer.entityId}`">
+      <section v-if="status !== 'pending' && bildTreffer.length" class="mb-6">
+        <h2 class="mb-2 flex items-center gap-1.5 text-sm font-semibold text-ink">
+          <UiIcon name="images" fest class="text-primary" />
+          Abbildungen
+          <span class="font-normal text-ink-subtle">{{ formatZahl(bildTreffer.length) }}</span>
+        </h2>
+        <ul class="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+          <li v-for="treffer in bildTreffer" :key="treffer.entityId">
+            <NuxtLink
+              :to="`/materialien/${(treffer.datensatz as AbbildungSuchtreffer).materialId}?abbildung=${treffer.entityId}`"
+              class="group flex h-full flex-col overflow-hidden rounded-xl border border-line bg-surface hover:border-primary/40 hover:shadow-md"
+            >
+              <span class="flex aspect-[4/3] items-center justify-center overflow-hidden bg-surface-sunken">
+                <img
+                  :src="`/api/assets/${(treffer.datensatz as AbbildungSuchtreffer).assetId}/thumbnail`"
+                  :alt="treffer.title"
+                  loading="lazy"
+                  class="max-h-full max-w-full object-contain"
+                >
+              </span>
+              <span class="min-w-0 px-2 py-1.5">
+                <span class="line-clamp-2 text-xs font-medium text-ink">{{ treffer.title }}</span>
+                <span class="block truncate text-[11px] text-ink-subtle">
+                  {{ (treffer.datensatz as AbbildungSuchtreffer).materialTitle }}
+                </span>
+              </span>
+            </NuxtLink>
+          </li>
+        </ul>
+      </section>
+
+      <div v-if="status !== 'pending' && listenTreffer.length" class="space-y-2">
+        <template v-for="treffer in listenTreffer" :key="`${treffer.entityType}-${treffer.entityId}`">
           <MaterialKarte
             v-if="treffer.entityType === 'material'"
             :material="treffer.datensatz as MaterialSummary"

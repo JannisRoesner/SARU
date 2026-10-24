@@ -32,6 +32,11 @@ import {
 } from './ai/suggest-material-metadata'
 import { getAiSettings } from './settings.service'
 import { queueReindex, removeFromIndex } from './search/indexer'
+import {
+  abbildungenAusIndexEntfernen,
+  abbildungenNeuIndizieren,
+  abbildungIdsDesMaterials,
+} from './abbildungen/abbildung-index'
 import { resolveCompetencyIds, resolveSubjectIds, resolveTagIds } from './taxonomy.service'
 import {
   type GradeLevel,
@@ -236,6 +241,8 @@ export async function updateMaterial(
 
   await applyTaxonomy(db, id, input)
   queueReindex('material', id)
+  // Titel, Fach und Jahrgang der Sammlung stehen in den Suchabschnitten ihrer Bilder.
+  await abbildungenNeuIndizieren(id, db)
 }
 
 export async function setArchived(
@@ -288,6 +295,7 @@ export async function deleteMaterial(id: string, db: Database = useDatabase()): 
     .innerJoin(materialVariants, eq(materialVariants.id, materialAssets.variantId))
     .where(eq(materialVariants.materialId, id))
 
+  const abbildungIds = await abbildungIdsDesMaterials(id, db)
   const removed = await db.delete(materials).where(eq(materials.id, id)).returning({ id: materials.id })
   if (!removed[0]) throw notFound('Das Material')
 
@@ -297,6 +305,7 @@ export async function deleteMaterial(id: string, db: Database = useDatabase()): 
   }
 
   await removeFromIndex('material', id)
+  await abbildungenAusIndexEntfernen(abbildungIds, db)
   log.info('Material gelöscht', { materialId: id })
 }
 
@@ -334,6 +343,8 @@ export async function duplicateMaterial(
     .returning({ id: materials.id })
 
   const newId = created!.id
+  /** Alte → neue Anhang-ID, damit Bildangaben einer Abbildungssammlung mitkommen. */
+  const assetZuordnung = new Map<string, string>()
 
   await applyTaxonomy(db, newId, {
     subjectIds: source.subjects.map((s) => s.id),
@@ -370,7 +381,7 @@ export async function duplicateMaterial(
       const row = original[0]
       if (!row) continue
 
-      await db.insert(materialAssets).values({
+      const [kopie] = await db.insert(materialAssets).values({
         variantId: newVariant!.id,
         kind: row.kind,
         role: row.role,
@@ -385,8 +396,14 @@ export async function duplicateMaterial(
         extractedText: row.extractedText,
         extractionStatus: row.extractionStatus,
         sortOrder: row.sortOrder,
-      })
+      }).returning({ id: materialAssets.id })
+      if (kopie) assetZuordnung.set(row.id, kopie.id)
     }
+  }
+
+  if (source.materialType === 'abbildungssammlung') {
+    const { abbildungenKopieren } = await import('./abbildungen/abbildung.service')
+    await abbildungenKopieren(id, newId, assetZuordnung, db)
   }
 
   queueReindex('material', newId)

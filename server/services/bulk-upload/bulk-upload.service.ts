@@ -1,8 +1,21 @@
 import { readFile } from 'node:fs/promises'
 import { and, asc, desc, eq, inArray, max, ne, sql } from 'drizzle-orm'
 import { oeffentlicheFehlermeldung } from '#shared/utils/public-error'
-import { isBulkDocumentFileName } from '#shared/utils/ai-material-formats'
+import { bulkUeberspringGrund, isBulkDocumentFileName } from '#shared/utils/ai-material-formats'
 import { istInteraktivDatei } from '#shared/utils/interaktiv'
+import {
+  ABBILDUNGEN_MANIFEST_MAX_BYTES,
+  istAbbildungsBildDatei,
+  istVideoDatei,
+  parseAbbildungenManifest,
+  type ManifestErgebnis,
+} from '#shared/utils/abbildungen'
+import {
+  istMedienManifest,
+  MEDIEN_MANIFEST_MAX_BYTES,
+  parseMedienManifest,
+  type MedienManifestErgebnis,
+} from '#shared/utils/medien'
 import type { MaterialType } from '#shared/types/domain'
 import { useDatabase } from '../../database/client'
 import {
@@ -55,12 +68,18 @@ import {
 import { suggestFileMetadata, titleFromFileName } from './suggest-metadata'
 import { AI_CREATE_ADAPTER_ID } from '../ai/material-create'
 import {
+  abbildungsOrdnerSchluessel,
   clusterBulkFiles,
   detectFolderRole,
   fassungLabel,
   filesAsSingletonClusters,
   findLehrwerkCover,
+  istSammlungsBild,
+  istSammlungsManifest,
 } from './pairing'
+import { sammlungAnlegen } from './abbildungen'
+import { abbildungenNachAssetsLoeschen } from '../abbildungen/abbildung.service'
+import { startAbbildungenKi } from '../abbildungen/ki.service'
 import { expandBulkArchives } from './zip'
 import {
   abortAnalysis,
@@ -87,6 +106,8 @@ import {
   type BulkUploadDetectedFile,
   type BulkUploadInputFile,
   type BulkUploadMapping,
+  MAX_UEBERSPRUNGEN_LISTE,
+  type BulkUebersprungeneDatei,
   type BulkUploadRecordDecision,
   type BulkUploadStats,
 } from './types'
@@ -175,6 +196,8 @@ export async function startBulkPdfUpload(
   files: BulkUploadInputFile[],
   userId: string | null,
   mappingInput: BulkUploadMapping = {},
+  /** Dateien, die schon der Browser aussortiert hat (nur für die Liste „übersprungen“). */
+  clientSkipped: BulkUebersprungeneDatei[] = [],
 ): Promise<{ runId: string; fileCount: number; status: 'laeuft'; aiEnabled: boolean }> {
   if (!files.length) throw invalidInput('Bitte mindestens eine Datei auswählen.')
 
@@ -185,21 +208,36 @@ export async function startBulkPdfUpload(
   }
   const totalIncoming = expanded.totalBytes
 
-  const prepared: BulkUploadInputFile[] = []
-  const rejected: string[] = []
+  const prepared: (BulkUploadInputFile & { manifest?: boolean })[] = []
+  const rejected: BulkUebersprungeneDatei[] = []
   for (const file of expanded.files) {
     const { fileName, relativePath } = splitUploadPath(file)
-    if (!isBulkDocumentFileName(fileName)) {
-      rejected.push(fileName)
+    // Der Pfad zählt: Bilder und abbildungen.json nur in Abbildungsordnern.
+    if (!isBulkDocumentFileName(relativePath)) {
+      rejected.push({ pfad: relativePath, grund: bulkUeberspringGrund(relativePath) })
+      continue
+    }
+    if (istSammlungsManifest({ fileName, relativePath }) || istMedienManifest(fileName)) {
+      // JSON ist kein erlaubter Dateityp für Materialien; es wird nur gelesen, nie gespeichert.
+      const grenze = istMedienManifest(fileName) ? MEDIEN_MANIFEST_MAX_BYTES : ABBILDUNGEN_MANIFEST_MAX_BYTES
+      if (file.buffer.length > grenze) {
+        rejected.push({ pfad: relativePath, grund: `${fileName} ist größer als ${formatBytes(grenze)}.` })
+        continue
+      }
+      prepared.push({ buffer: file.buffer, fileName, relativePath, manifest: true })
       continue
     }
     try {
       await validateUpload(file.buffer, fileName)
       prepared.push({ buffer: file.buffer, fileName, relativePath })
-    } catch {
-      rejected.push(fileName)
+    } catch (error) {
+      rejected.push({
+        pfad: relativePath,
+        grund: oeffentlicheFehlermeldung(error, 'Die Datei ist ungültig.'),
+      })
     }
   }
+  const skippedFiles = [...clientSkipped, ...expanded.skipped, ...rejected]
   if (!prepared.length) {
     throw invalidInput('Im Paket wurden keine gültigen Dokumente gefunden.')
   }
@@ -218,7 +256,10 @@ export async function startBulkPdfUpload(
         sourceRef: `file:${index}:${checksum.slice(0, 12)}`,
         fileName: file.fileName,
         relativePath: file.relativePath ?? file.fileName,
-        folderRole: detectFolderRole(file.relativePath, file.fileName),
+        folderRole: istSammlungsBild(file) || file.manifest
+          ? 'abbildungen'
+          : detectFolderRole(file.relativePath, file.fileName),
+        ...(file.manifest ? { manifest: true } : {}),
         sizeBytes: file.buffer.length,
         checksum,
         stagingPath,
@@ -257,7 +298,8 @@ export async function startBulkPdfUpload(
           aiErrors: 0,
           analysisPending: true,
           archiveNames: expanded.archiveNames,
-          skippedCount: expanded.skipped.length + rejected.length,
+          skippedCount: skippedFiles.length,
+          skippedFiles: skippedFiles.slice(0, MAX_UEBERSPRUNGEN_LISTE),
         } satisfies BulkUploadDetected as never,
         mapping: mapping as never,
         stagingPath: stubFiles[0]?.stagingPath ?? null,
@@ -273,11 +315,11 @@ export async function startBulkPdfUpload(
     if (expanded.archiveNames.length) {
       await addLog(runId, 'info', `ZIP entpackt: ${expanded.archiveNames.join(', ')}.`)
     }
-    if (expanded.skipped.length || rejected.length) {
+    if (skippedFiles.length) {
       await addLog(
         runId,
         'warnung',
-        `${expanded.skipped.length + rejected.length} Einträge übersprungen (kein unterstütztes oder ungültiges Dokument).`,
+        `${skippedFiles.length} Einträge übersprungen (kein unterstütztes oder ungültiges Dokument). Die Liste steht in der Vorschau.`,
       )
     }
 
@@ -430,18 +472,57 @@ async function analyseBulkRun(
   const duplicates = await findAttachmentDuplicates(files.map((file) => file.checksum))
 
   try {
+    // abbildungen.json lesen: Die Angaben fließen in die Bündel ein, die Datei selbst wird kein Material.
+    const manifeste = new Map<string, ManifestErgebnis>()
+    const medienManifeste = new Map<string, MedienManifestErgebnis>()
+    for (const file of files.filter((eintrag) => eintrag.manifest && istMedienManifest(eintrag.fileName))) {
+      let ergebnis: MedienManifestErgebnis
+      try {
+        ergebnis = parseMedienManifest((await readFile(resolveStoragePath(file.stagingPath))).toString('utf8'))
+      } catch {
+        ergebnis = { eintraege: [], fehler: ['videos.json konnte nicht gelesen werden.'], warnungen: [] }
+      }
+      medienManifeste.set(abbildungsOrdnerSchluessel(file.relativePath, file.fileName), ergebnis)
+      await addLog(
+        runId,
+        ergebnis.fehler.length || ergebnis.warnungen.length ? 'warnung' : 'info',
+        ergebnis.fehler.length
+          ? `${file.relativePath} nicht verwendet: ${ergebnis.fehler.join(' ')}`
+          : [`${file.relativePath}: ${ergebnis.eintraege.length} Einträge gelesen.`, ...ergebnis.warnungen].join(' '),
+      )
+      await deleteFile(file.stagingPath)
+    }
+    for (const file of files.filter((eintrag) => eintrag.manifest && !istMedienManifest(eintrag.fileName))) {
+      let ergebnis: ManifestErgebnis
+      try {
+        ergebnis = parseAbbildungenManifest((await readFile(resolveStoragePath(file.stagingPath))).toString('utf8'))
+      } catch {
+        ergebnis = { manifest: null, fehler: ['abbildungen.json konnte nicht gelesen werden.'], warnungen: [] }
+      }
+      manifeste.set(abbildungsOrdnerSchluessel(file.relativePath, file.fileName), ergebnis)
+      await addLog(
+        runId,
+        ergebnis.fehler.length ? 'warnung' : 'info',
+        ergebnis.manifest
+          ? `${file.relativePath}: ${ergebnis.manifest.bilder.length} Bildeinträge gelesen.`
+          : `${file.relativePath} nicht verwendet: ${ergebnis.fehler.join(' ')}`,
+      )
+      await deleteFile(file.stagingPath)
+    }
+    const dokumente = files.filter((file) => !file.manifest)
+
     await addLog(runId, 'info', 'Texte werden gelesen …')
     // Bei Abbruch liefern die Bahnen `null` statt zu werfen, damit mapLimit erst endet,
     // wenn keine Extraktion mehr nebenher läuft und Dateien schreibt.
     type Extracted = BulkUploadDetectedFile | null
-    const extracted = await mapLimit(files, BULK_EXTRACT_CONCURRENCY, async (file): Promise<Extracted> => {
+    const extracted = await mapLimit(dokumente, BULK_EXTRACT_CONCURRENCY, async (file): Promise<Extracted> => {
       if (await isCancelled()) return null
-      const buffer = await readFile(resolveStoragePath(file.stagingPath))
-      // Interaktive Inhalte (SWF) haben keinen auslesbaren Text.
-      const interaktiv = istInteraktivDatei(file.fileName)
-      const extraction = interaktiv
+      // Interaktive Inhalte (SWF), Bilder und Videos haben keinen auslesbaren Text.
+      const ohneText =
+        istInteraktivDatei(file.fileName) || istAbbildungsBildDatei(file.fileName) || istVideoDatei(file.fileName)
+      const extraction = ohneText
         ? { text: '', method: 'none' as const, pageCount: null }
-        : await ensureExtractedText(buffer, file.fileName, settings)
+        : await ensureExtractedText(await readFile(resolveStoragePath(file.stagingPath)), file.fileName, settings)
       const hasText = Boolean(extraction.text.trim())
       const warnings: string[] = []
 
@@ -450,7 +531,7 @@ async function analyseBulkRun(
         extractedTextKey = await storeExtractedTextSidecar(file.stagingPath, extraction.text)
       }
 
-      if (!hasText && !interaktiv) {
+      if (!hasText && !ohneText) {
         warnings.push(
           settings.enabled
             ? settings.useVision
@@ -461,12 +542,14 @@ async function analyseBulkRun(
       } else if (extraction.method === 'vision') {
         warnings.push('Text per Vision/OCR aus Scan ermittelt.')
       }
-      if (!titleFromFileName(file.fileName)) {
+      const sammlungsBild = istSammlungsBild(file)
+      if (!sammlungsBild && !titleFromFileName(file.fileName)) {
         warnings.push('Leerer Titel nach Bereinigung des Dateinamens.')
       }
 
       const duplicate = duplicates.get(file.checksum)
-      if (duplicate) {
+      // Bei Sammlungsbildern fasst das Bündel die Dubletten zusammen (siehe unten).
+      if (duplicate && !sammlungsBild) {
         warnings.push(`Mögliche Dublette: „${duplicate.title}“.`)
       }
 
@@ -493,6 +576,7 @@ async function analyseBulkRun(
     const filesByRef = new Map<string, BulkUploadDetectedFile>(
       detectedFiles.map((file) => [file.sourceRef, file]),
     )
+    const zuordnungsHinweise: string[] = []
     const clusters = clusterBulkFiles(
       detectedFiles.map((file) => ({
         sourceRef: file.sourceRef,
@@ -501,7 +585,14 @@ async function analyseBulkRun(
         extension: extensionOf(file.fileName),
       })),
       mapping.defaultMaterialType ?? 'arbeitsblatt',
+      { manifeste, medienManifeste, warnungen: zuordnungsHinweise },
     )
+    for (const hinweis of zuordnungsHinweise) await addLog(runId, 'warnung', hinweis)
+    for (const schluessel of manifeste.keys()) {
+      if (!clusters.some((cluster) => cluster.clusterId === `abbildungen:${schluessel}`)) {
+        await addLog(runId, 'warnung', `abbildungen.json ohne Bilder im selben Ordner (${schluessel || 'Wurzel'}) – ignoriert.`)
+      }
+    }
 
     let aiErrors = 0
     for (const cluster of clusters) {
@@ -511,11 +602,22 @@ async function analyseBulkRun(
       for (const file of clusterFiles) {
         cluster.warnings.push(...file.warnings)
       }
+      if (cluster.kind === 'abbildungssammlung') {
+        const dubletten = clusterFiles.filter((file) => file.duplicate).length
+        if (dubletten) {
+          cluster.warnings.push(
+            `${dubletten} Bild${dubletten === 1 ? ' liegt' : 'er liegen'} schon als Datei in SARU. Bilder, die bereits in derselben Sammlung sind, werden übersprungen.`,
+          )
+        }
+      }
     }
 
-    if (settings.enabled) {
-      await addLog(runId, 'info', `KI-Vorschläge für ${clusters.length} Bündel werden erzeugt …`)
-      await mapLimit(clusters, BULK_AI_CONCURRENCY, async (cluster) => {
+    // Abbildungssammlungen brauchen keinen Text-Vorschlag: Titel und Beschreibung kommen aus
+    // abbildungen.json bzw. dem Ordner, die Bilder ergänzt die Vision-KI später gezielt.
+    const kiClusters = clusters.filter((cluster) => cluster.kind !== 'abbildungssammlung' && !cluster.angabenAusPaket)
+    if (settings.enabled && kiClusters.length) {
+      await addLog(runId, 'info', `KI-Vorschläge für ${kiClusters.length} Bündel werden erzeugt …`)
+      await mapLimit(kiClusters, BULK_AI_CONCURRENCY, async (cluster) => {
         if (await isCancelled()) return
         if (!(await clusterKiVorschlag(cluster, filesByRef, mapping, subjectLabel, settings))) aiErrors += 1
       })
@@ -536,7 +638,8 @@ async function analyseBulkRun(
         file.suggestions = cluster.suggestions
       }
 
-      const duplicate = clusterDuplicate(cluster, filesByRef)
+      // Eine Sammlung wird nie als Ganzes übersprungen, nur doppelte Bilder darin.
+      const duplicate = cluster.kind === 'abbildungssammlung' ? null : clusterDuplicate(cluster, filesByRef)
       const skipDuplicate = Boolean(duplicate) && mapping.linkDuplicates !== false
       mapping.records[cluster.clusterId] = {
         include: !skipDuplicate,
@@ -567,6 +670,7 @@ async function analyseBulkRun(
           analysisPending: false,
           archiveNames: detected.archiveNames,
           skippedCount: detected.skippedCount,
+          skippedFiles: detected.skippedFiles,
         } satisfies BulkUploadDetected as never,
         mapping: mapping as never,
         errorMessage: null,
@@ -584,15 +688,15 @@ async function analyseBulkRun(
       'info',
       `${detectedFiles.length} Datei${detectedFiles.length === 1 ? '' : 'en'} in ${clusters.length} Bündel analysiert.`,
     )
-    if (settings.enabled) {
+    if (settings.enabled && kiClusters.length) {
       await addLog(
         runId,
         aiErrors ? 'warnung' : 'info',
         aiErrors
-          ? `KI-Vorschläge für ${aiErrors} von ${clusters.length} Bündeln unvollständig. Fehlende Felder nutzen Dateiname und Ordner.`
+          ? `KI-Vorschläge für ${aiErrors} von ${kiClusters.length} Bündeln unvollständig. Fehlende Felder nutzen Dateiname und Ordner.`
           : settings.useVision
-            ? `Textextraktion (inkl. Vision/OCR bei Scans) und KI-Metadaten für ${clusters.length} Bündel erzeugt.`
-            : `KI-Metadaten für ${clusters.length} Bündel erzeugt. Vision/OCR ist in den Einstellungen aus.`,
+            ? `Textextraktion (inkl. Vision/OCR bei Scans) und KI-Metadaten für ${kiClusters.length} Bündel erzeugt.`
+            : `KI-Metadaten für ${kiClusters.length} Bündel erzeugt. Vision/OCR ist in den Einstellungen aus.`,
       )
     } else {
       await addLog(runId, 'info', 'KI deaktiviert – Titel aus Dateinamen abgeleitet.')
@@ -694,10 +798,10 @@ async function attachStagedAsset(
   variantId: string,
   file: BulkUploadDetectedFile,
   role: 'haupt' | 'anhang',
-): Promise<void> {
+): Promise<string> {
   const buffer = await readFile(resolveStoragePath(file.stagingPath))
   const seededText = (await readExtractedTextSidecar(file.extractedTextKey)) ?? null
-  await addFileAsset(
+  const assetId = await addFileAsset(
     variantId,
     { buffer, fileName: file.fileName },
     {
@@ -715,6 +819,7 @@ async function attachStagedAsset(
   )
   await deleteFile(file.stagingPath)
   if (file.extractedTextKey) await deleteFile(file.extractedTextKey)
+  return assetId
 }
 
 function decisionForCluster(
@@ -728,6 +833,21 @@ type RunItem = typeof importRunItems.$inferSelect
 
 /** Markiert Einträge, deren Materialien ein Rückgängigmachen schon entfernt hat. */
 const UNDONE_PAYLOAD_KEY = 'rueckgaengig'
+/**
+ * Bündel, dessen Bilder an eine schon bestehende Abbildungssammlung angehängt wurden. Das
+ * Rückgängigmachen entfernt dann nur diese Bilder (`assetIds`), nicht die Sammlung.
+ */
+const ANGEHAENGT_PAYLOAD_KEY = 'angehaengt'
+
+interface AngehaengtPayload {
+  [ANGEHAENGT_PAYLOAD_KEY]: true
+  assetIds: string[]
+}
+
+function angehaengtPayload(item: RunItem): AngehaengtPayload | null {
+  const payload = item.payload as Partial<AngehaengtPayload> | null
+  return payload?.[ANGEHAENGT_PAYLOAD_KEY] ? { [ANGEHAENGT_PAYLOAD_KEY]: true, assetIds: payload.assetIds ?? [] } : null
+}
 
 /** Einträge des aktuellen Durchgangs (ohne die eines früheren Rückgängigmachens), aufsteigend. */
 async function activeRunItems(runId: string): Promise<RunItem[]> {
@@ -748,6 +868,8 @@ interface BulkRunProgress {
   latest: Map<string, RunItem>
   lernzirkelIds: Map<string, string>
   createdMaterialIds: Set<string>
+  /** An bestehende Sammlungen angehängte Bilder je Sammlung. */
+  angehaengt: Map<string, string[]>
 }
 
 function summarizeRunItems(items: RunItem[]): BulkRunProgress {
@@ -757,10 +879,18 @@ function summarizeRunItems(items: RunItem[]): BulkRunProgress {
     latest: new Map(),
     lernzirkelIds: new Map(),
     createdMaterialIds: new Set(),
+    angehaengt: new Map(),
   }
   for (const item of items) {
     progress.latest.set(item.sourceRef, item)
     if (item.action !== 'erstellt' || item.entityType !== 'material' || !item.entityId) continue
+    const angehaengt = angehaengtPayload(item)
+    if (angehaengt) {
+      progress.createdClusters.add(item.sourceRef)
+      progress.primaryByCluster.set(item.sourceRef, item.entityId)
+      progress.angehaengt.set(item.entityId, [...(progress.angehaengt.get(item.entityId) ?? []), ...angehaengt.assetIds])
+      continue
+    }
     progress.createdMaterialIds.add(item.entityId)
     if (item.sourceRef === 'lehrwerk') continue
     if (item.sourceRef.startsWith('lernzirkel:')) {
@@ -903,6 +1033,7 @@ async function runBulkCommit(
     action: 'erstellt' | 'verknuepft' | 'uebersprungen' | 'fehlgeschlagen',
     message?: string,
     duplicateOfId?: string | null,
+    payload?: Record<string, unknown>,
   ) => {
     await db.insert(importRunItems).values({
       runId,
@@ -913,8 +1044,11 @@ async function runBulkCommit(
       duplicateOfId: duplicateOfId ?? null,
       message: message ?? null,
       sequence: sequence++,
+      ...(payload ? { payload } : {}),
     })
   }
+  /** Sammlungen, deren fehlende Bildangaben nach dem Anlegen die KI ergänzen soll. */
+  const kiSammlungen = new Set<string>()
 
   const createOne = async (input: {
     title: string
@@ -1152,6 +1286,63 @@ async function runBulkCommit(
       continue
     }
 
+    if (cluster.kind === 'abbildungssammlung') {
+      try {
+        let sammlungSubjectIds: string[] = subjectId ? [subjectId] : []
+        if (!subjectId && cluster.suggestions.subjectNames?.length) {
+          sammlungSubjectIds = await resolveSubjectIds([], cluster.suggestions.subjectNames)
+        }
+        const ergebnis = await sammlungAnlegen({
+          cluster,
+          decision,
+          filesByRef,
+          lehrwerkId,
+          subjectIds: sammlungSubjectIds,
+          gradeLevels,
+          schoolForm: mapping.schoolForm ?? null,
+          userId,
+        })
+        primaryByCluster.set(cluster.clusterId, ergebnis.materialId)
+        createdNow.add(cluster.clusterId)
+        stats.dateien = (stats.dateien ?? 0) + ergebnis.assetIds.length
+        stats.abbildungen = (stats.abbildungen ?? 0) + ergebnis.assetIds.length
+        if (ergebnis.neu) {
+          materialIds.push(ergebnis.materialId)
+          stats.materialien = (stats.materialien ?? 0) + 1
+          if (lehrwerkId) stats.verknuepft = (stats.verknuepft ?? 0) + 1
+          await track(cluster.clusterId, ergebnis.materialId, 'erstellt', `Abbildungssammlung mit ${ergebnis.assetIds.length} Bildern`)
+        } else {
+          await track(
+            cluster.clusterId,
+            ergebnis.materialId,
+            'erstellt',
+            `${ergebnis.assetIds.length} Bilder an bestehende Sammlung „${title}“ angehängt`,
+            null,
+            { [ANGEHAENGT_PAYLOAD_KEY]: true, assetIds: ergebnis.assetIds } satisfies AngehaengtPayload,
+          )
+          await addLog(runId, 'info', `„${title}“ bestand schon im Lehrwerk – ${ergebnis.assetIds.length} Bilder ergänzt.`)
+        }
+        if (ergebnis.uebersprungen.length) {
+          const beispiele = ergebnis.uebersprungen
+            .slice(0, 5)
+            .map((u) => `${u.dateiName} (${u.grund})`)
+            .join('; ')
+          await addLog(
+            runId,
+            'warnung',
+            `„${title}“: ${ergebnis.uebersprungen.length} Bilder nicht übernommen – ${beispiele}${ergebnis.uebersprungen.length > 5 ? ' …' : ''}`,
+          )
+        }
+        if (mapping.abbildungenKi) kiSammlungen.add(ergebnis.materialId)
+      } catch (error) {
+        const message = oeffentlicheFehlermeldung(error, 'Die Abbildungssammlung konnte nicht angelegt werden.')
+        errors.push({ sourceRef: cluster.clusterId, message })
+        await track(cluster.clusterId, null, 'fehlgeschlagen', message)
+        await addLog(runId, 'fehler', `„${cluster.stem}“: ${message}`)
+      }
+      continue
+    }
+
     const roles: Record<string, BulkFileRole> = {
       ...cluster.suggestedRoles,
       ...(decision?.fileRoles ?? {}),
@@ -1344,6 +1535,7 @@ async function runBulkCommit(
     verknuepft: summe('verknuepft'),
     ...(summe('fassungen') ? { fassungen: summe('fassungen') } : {}),
     ...(summe('lernzirkel') ? { lernzirkel: summe('lernzirkel') } : {}),
+    ...(summe('abbildungen') ? { abbildungen: summe('abbildungen') } : {}),
     uebersprungen,
     fehlgeschlagen,
   }
@@ -1376,6 +1568,21 @@ async function runBulkCommit(
   )
 
   await waitForIndex()
+  if (kiSammlungen.size) {
+    // Läuft im Hintergrund und lässt sich in der Sammlung verfolgen und abbrechen.
+    for (const sammlungId of kiSammlungen) {
+      try {
+        await startAbbildungenKi(sammlungId)
+      } catch (error) {
+        await addLog(
+          runId,
+          'warnung',
+          `KI-Ergänzung der Bildangaben nicht gestartet: ${oeffentlicheFehlermeldung(error, 'KI nicht verfügbar.')}`,
+        )
+        break
+      }
+    }
+  }
   log.info('Stapel-Upload committed', { runId, status, stats: total, retry: isRetry })
   return { runId, status, stats: total, errors, materialIds }
 }
@@ -1487,12 +1694,21 @@ export async function undoBulkUpload(runId: string): Promise<BulkUndoResult> {
   // Erst kopieren, dann löschen: deleteMaterial entfernt die gespeicherten Dateien.
   const { files, restored, missing } = await restoreFilesToStaging(detected.files ?? [], [
     ...progress.createdMaterialIds,
+    ...progress.angehaengt.keys(),
   ])
 
   const removed: BulkUploadStats = { materialien: 0 }
+  // Angehängte Bilder aus bestehenden Sammlungen entfernen – die Sammlungen selbst bleiben.
+  for (const [sammlungId, assetIds] of progress.angehaengt) {
+    if (progress.createdMaterialIds.has(sammlungId)) continue
+    const entfernt = await abbildungenNachAssetsLoeschen(assetIds)
+    removed.abbildungen = (removed.abbildungen ?? 0) + entfernt
+  }
   const seen = new Set<string>()
   for (const item of [...items].reverse()) {
     if (item.action !== 'erstellt' || !item.entityId || item.entityType !== 'material') continue
+    // Eine bestehende Sammlung, an die nur Bilder angehängt wurden, bleibt stehen.
+    if (angehaengtPayload(item)) continue
     if (seen.has(item.entityId)) continue
     seen.add(item.entityId)
     try {
@@ -1578,6 +1794,9 @@ export interface BulkRunOverview {
   sourceSizeBytes: number | null
   files: BulkUploadDetectedFile[]
   clusters: BulkUploadDetectedCluster[]
+  /** Nicht übernommene Dateien mit Grund (gekürzt) und ihre Gesamtzahl. */
+  skippedFiles: BulkUebersprungeneDatei[]
+  skippedCount: number
   mapping: BulkUploadMapping | null
   stats: BulkUploadStats | null
   errorMessage: string | null
@@ -1628,7 +1847,10 @@ export async function getBulkRunOverview(runId: string): Promise<BulkRunOverview
     : []
 
   const kiNachholen = kiNachholenFortschritt(runId)
-  const kiOhneVorschlag = clusters.filter((cluster) => !cluster.suggestions.aiUsed).length
+  // Abbildungssammlungen bekommen ihre Angaben aus dem Paket bzw. später je Bild von der Vision-KI.
+  const kiOhneVorschlag = clusters.filter(
+    (cluster) => !cluster.suggestions.aiUsed && cluster.kind !== 'abbildungssammlung' && !cluster.angabenAusPaket,
+  ).length
 
   return {
     runId: run.id,
@@ -1638,6 +1860,8 @@ export async function getBulkRunOverview(runId: string): Promise<BulkRunOverview
     sourceSizeBytes: run.sourceSizeBytes,
     files,
     clusters,
+    skippedFiles: detected.skippedFiles ?? [],
+    skippedCount: detected.skippedCount ?? 0,
     mapping: (run.mapping as unknown as BulkUploadMapping | null) ?? null,
     stats: (run.stats as unknown as BulkUploadStats | null) ?? null,
     errorMessage: run.errorMessage,
@@ -1697,7 +1921,7 @@ export async function startKiNachholen(runId: string): Promise<{ gesamt: number 
 
   const detected = (run.detected ?? {}) as unknown as BulkUploadDetected
   const offen = resolveClusters(detected)
-    .filter((cluster) => !cluster.suggestions.aiUsed)
+    .filter((cluster) => !cluster.suggestions.aiUsed && cluster.kind !== 'abbildungssammlung' && !cluster.angabenAusPaket)
     .map((cluster) => cluster.clusterId)
   if (!offen.length) return { gesamt: 0 }
 
@@ -1767,7 +1991,9 @@ async function kiNachholenAusfuehren(
   }
   aktuellesMapping.records = records
 
-  const aiErrors = clusters.filter((cluster) => !cluster.suggestions.aiUsed).length
+  const aiErrors = clusters.filter(
+    (cluster) => !cluster.suggestions.aiUsed && cluster.kind !== 'abbildungssammlung' && !cluster.angabenAusPaket,
+  ).length
   await useDatabase()
     .update(importRuns)
     .set({

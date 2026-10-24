@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { istInteraktivDatei } from '#shared/utils/interaktiv'
+import { istVideoDatei } from '#shared/utils/abbildungen'
 import { materialTypes, relationAnzeigeLabel } from '#shared/utils/labels'
 import type { GastMaterial } from '~~/server/services/share-view.service'
 
@@ -21,6 +22,17 @@ const darfBearbeiten = computed(() => props.recht === 'bearbeiten')
 const interaktiveDatei = computed(() => {
   for (const fassung of props.material.fassungen) {
     const datei = fassung.dateien.find((d) => d.kind === 'datei' && istInteraktivDatei(d.fileName))
+    if (datei) return datei
+  }
+  return null
+})
+
+const istSammlung = computed(() => props.material.materialType === 'abbildungssammlung')
+
+/** Erstes Video – wird direkt auf der Seite abgespielt. */
+const videoDatei = computed(() => {
+  for (const fassung of props.material.fassungen) {
+    const datei = fassung.dateien.find((d) => d.kind === 'datei' && istVideoDatei(d.fileName))
     if (datei) return datei
   }
   return null
@@ -168,6 +180,31 @@ function dateiInfo(datei: Datei, fassung: Fassung) {
       </ul>
     </UiCard>
 
+    <UiCard
+      v-if="istSammlung"
+      titel="Abbildungen"
+      :untertitel="material.abbildungAnzahl ? `${material.abbildungAnzahl} Bilder` : undefined"
+      icon="images"
+    >
+      <MaterialAbbildungsGalerie
+        :liste-url="`/api/geteilt/${token}/materialien/${material.id}/abbildungen`"
+        :datei-basis="basis"
+        :abbildung-basis="`/api/geteilt/${token}/abbildungen`"
+        :hochladen-url="darfBearbeiten ? `/api/geteilt/${token}/materialien/${material.id}/abbildungen` : null"
+        :zip-url="`/api/geteilt/${token}/materialien/${material.id}/inhalt-zip`"
+        @geaendert="emit('geaendert')"
+      />
+    </UiCard>
+
+    <UiCard v-if="videoDatei" titel="Video" icon="film">
+      <video
+        :src="`${basis}/${videoDatei.id}/download?inline=1`"
+        controls
+        preload="metadata"
+        class="max-h-[70vh] w-full rounded-lg bg-black"
+      />
+    </UiCard>
+
     <UiCard v-if="interaktiveDatei" titel="Interaktiver Inhalt" icon="hand-pointer">
       <MaterialInteraktivPlayer
         :src="`${basis}/${interaktiveDatei.id}/download?inline=1`"
@@ -176,7 +213,7 @@ function dateiInfo(datei: Datei, fassung: Fassung) {
     </UiCard>
 
     <UiCard
-      v-for="fassung in material.fassungen.filter((f) => f.dateien.length || darfBearbeiten)"
+      v-for="fassung in material.fassungen.filter((f) => !istSammlung && (f.dateien.length || darfBearbeiten))"
       :key="fassung.id"
       :titel="material.fassungen.length > 1 ? fassung.label : istLehrwerk ? 'Schulbuch' : 'Dateien'"
       :untertitel="istLehrwerk ? 'Buchdatei' : undefined"
@@ -230,7 +267,7 @@ function dateiInfo(datei: Datei, fassung: Fassung) {
       </ul>
     </UiCard>
 
-    <div v-if="darfBearbeiten">
+    <div v-if="darfBearbeiten && !istSammlung">
       <input ref="dateiInput" type="file" multiple class="sr-only" @change="hochladen(($event.target as HTMLInputElement).files)">
       <UiButton variante="sekundaer" icon="cloud-arrow-up" :laedt="laeuft" @click="dateiInput?.click()">
         Datei hinzufügen

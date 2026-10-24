@@ -36,9 +36,22 @@ interface DetectedFile {
   warnings: string[]
 }
 
+interface AbbildungPlanEintrag {
+  ref: string
+  dateiName: string
+  metadaten: { titel: string | null; seite: string | null; abbildung: string | null; kapitel: string | null }
+  varianteVonRef: string | null
+  herkunft: 'paket' | 'dateiname'
+}
+
 interface DetectedCluster {
   clusterId: string
-  kind: 'paar' | 'varianten' | 'einzeln' | 'unklar'
+  kind: 'paar' | 'varianten' | 'einzeln' | 'unklar' | 'abbildungssammlung'
+  abbildungen?: {
+    ordner: string
+    manifestFehler: string[]
+    plan: { manifestGefunden: boolean; ohneAngaben: number; varianten: number; eintraege: AbbildungPlanEintrag[] }
+  }
   folderRole: BulkFolderRole
   stem: string
   fileRefs: string[]
@@ -71,7 +84,10 @@ interface RunOverview {
   sourceSizeBytes: number | null
   files: DetectedFile[]
   clusters: DetectedCluster[]
+  skippedFiles?: { pfad: string; grund: string }[]
+  skippedCount?: number
   mapping: {
+    abbildungenKi?: boolean
     subjectId?: string | null
     subjectName?: string
     gradeLevels?: GradeLevel[]
@@ -135,6 +151,7 @@ const mapping = reactive({
   createLehrwerk: false,
   lehrwerkTitle: '',
   lehrwerkId: null as string | null,
+  abbildungenKi: false,
   lernzirkel: {} as Record<string, { enabled: boolean; title: string }>,
   records: {} as Record<
     string,
@@ -185,6 +202,7 @@ watch(
     mapping.createLehrwerk = m.createLehrwerk ?? false
     mapping.lehrwerkTitle = m.lehrwerkTitle ?? ''
     mapping.lehrwerkId = m.lehrwerkId ?? null
+    mapping.abbildungenKi = m.abbildungenKi ?? false
 
     const records: typeof mapping.records = {}
     for (const cluster of wert.clusters ?? []) {
@@ -261,9 +279,19 @@ const schritt = computed(() => {
   return 2
 })
 
+const sammlungen = computed(() => (data.value?.clusters ?? []).filter((c) => c.kind === 'abbildungssammlung'))
+const bilderOhneAngaben = computed(() =>
+  sammlungen.value.reduce((summe, c) => summe + (c.abbildungen?.plan.ohneAngaben ?? 0), 0),
+)
+
+/** Vorschau der Bilder einer Sammlung – lange Listen nur auf Wunsch ganz. */
+const MAX_BILDER_VORSCHAU = 30
+const alleBilderOffen = ref(new Set<string>())
+
 function clusterMaterialzahl(clusterId: string): number {
   const record = mapping.records[clusterId]
   if (!record?.include) return 0
+  if (clusterId.startsWith('abbildungen:')) return 1
   const roles = Object.values(record.fileRoles)
   const hatPrimaer = roles.some(
     (role) => role === 'schueler' || role === 'einzeln' || role === 'abbildung',
@@ -684,8 +712,35 @@ function hatLoesung(clusterId: string): boolean {
                 v-model:titel="mapping.lehrwerkTitle"
               />
             </div>
+            <UiToggle
+              v-if="sammlungen.length && data.aiEnabled"
+              v-model="mapping.abbildungenKi"
+              class="mt-4"
+              label="Fehlende Bildangaben nach dem Anlegen per KI ergänzen"
+              :hinweis="`${bilderOhneAngaben} Bilder ohne Titel/Beschreibung aus dem Paket. Läuft im Hintergrund (Vision-Modell, verkleinerte Bilder) und lässt sich in der Sammlung abbrechen oder später starten.`"
+            />
             <p class="mt-3 text-xs text-ink-subtle">
               Änderungen werden automatisch gespeichert.
+            </p>
+          </UiCard>
+
+          <UiCard
+            v-if="!analyseLaeuft && data.skippedCount"
+            titel="Übersprungene Dateien"
+            :untertitel="`${data.skippedCount} Dateien werden nicht übernommen`"
+            icon="forward"
+            einklappbar
+            einklapp-id="stapel-uebersprungen"
+            :standard-offen="false"
+          >
+            <ul class="max-h-80 space-y-1 overflow-y-auto text-xs">
+              <li v-for="(eintrag, i) in data.skippedFiles ?? []" :key="i" class="flex flex-wrap gap-x-2">
+                <span class="min-w-0 truncate font-medium text-ink">{{ eintrag.pfad }}</span>
+                <span class="text-ink-subtle">{{ eintrag.grund }}</span>
+              </li>
+            </ul>
+            <p v-if="(data.skippedFiles?.length ?? 0) < data.skippedCount" class="mt-2 text-xs text-ink-subtle">
+              … und {{ data.skippedCount - (data.skippedFiles?.length ?? 0) }} weitere.
             </p>
           </UiCard>
 
@@ -777,13 +832,15 @@ function hatLoesung(clusterId: string): boolean {
                         <div>
                           <p class="text-xs text-ink-subtle">
                             {{
-                              cluster.kind === 'paar'
-                                ? 'Paar'
-                                : cluster.kind === 'varianten'
-                                  ? 'Fassungen'
-                                  : cluster.kind === 'unklar'
-                                    ? 'Bitte prüfen'
-                                    : 'Einzeldatei'
+                              cluster.kind === 'abbildungssammlung'
+                                ? 'Abbildungssammlung'
+                                : cluster.kind === 'paar'
+                                  ? 'Paar'
+                                  : cluster.kind === 'varianten'
+                                    ? 'Fassungen'
+                                    : cluster.kind === 'unklar'
+                                      ? 'Bitte prüfen'
+                                      : 'Einzeldatei'
                             }}
                             · {{ cluster.fileRefs.length }} Datei{{ cluster.fileRefs.length === 1 ? '' : 'en' }}
                             <template v-if="cluster.suggestions.aiUsed"> · KI</template>
@@ -805,7 +862,41 @@ function hatLoesung(clusterId: string): boolean {
                               {{ data.clusterOutcomes[cluster.clusterId]!.message }}
                             </span>
                           </p>
-                          <ul class="mt-1 space-y-0.5">
+                          <div v-if="cluster.abbildungen" class="mt-1 space-y-1 text-xs text-ink-muted">
+                            <p>
+                              Ordner „{{ cluster.abbildungen.ordner }}“ ·
+                              {{ cluster.abbildungen.plan.varianten }} Varianten ·
+                              {{ cluster.abbildungen.plan.manifestGefunden ? 'mit abbildungen.json' : 'ohne abbildungen.json' }}
+                              <template v-if="cluster.abbildungen.plan.ohneAngaben">
+                                · {{ cluster.abbildungen.plan.ohneAngaben }} ohne Angaben
+                              </template>
+                            </p>
+                            <ul class="max-h-64 space-y-0.5 overflow-y-auto">
+                              <li
+                                v-for="bild in alleBilderOffen.has(cluster.clusterId)
+                                  ? cluster.abbildungen.plan.eintraege
+                                  : cluster.abbildungen.plan.eintraege.slice(0, MAX_BILDER_VORSCHAU)"
+                                :key="bild.ref"
+                                class="truncate"
+                                :class="bild.varianteVonRef && 'pl-4'"
+                              >
+                                <UiIcon :name="bild.varianteVonRef ? 'clone' : 'image'" class="mr-1" />
+                                <span class="text-ink">{{ bild.metadaten.titel || bild.dateiName }}</span>
+                                <template v-if="bild.metadaten.seite"> · S. {{ bild.metadaten.seite }}</template>
+                                <template v-if="bild.metadaten.abbildung"> · Abb. {{ bild.metadaten.abbildung }}</template>
+                                <span class="text-ink-subtle"> · {{ bild.dateiName }}</span>
+                              </li>
+                            </ul>
+                            <button
+                              v-if="cluster.abbildungen.plan.eintraege.length > MAX_BILDER_VORSCHAU && !alleBilderOffen.has(cluster.clusterId)"
+                              type="button"
+                              class="text-primary hover:underline"
+                              @click="alleBilderOffen.add(cluster.clusterId)"
+                            >
+                              Alle {{ cluster.abbildungen.plan.eintraege.length }} Bilder zeigen
+                            </button>
+                          </div>
+                          <ul v-else class="mt-1 space-y-0.5">
                             <li
                               v-for="ref in cluster.fileRefs"
                               :key="ref"
@@ -838,7 +929,27 @@ function hatLoesung(clusterId: string): boolean {
                           </ul>
                         </div>
 
-                        <template v-if="bearbeitbar(cluster.clusterId) && mapping.records[cluster.clusterId]">
+                        <template v-if="cluster.kind === 'abbildungssammlung' && bearbeitbar(cluster.clusterId) && mapping.records[cluster.clusterId]">
+                          <div class="grid gap-3 sm:grid-cols-2">
+                            <UiField label="Titel der Sammlung" class="sm:col-span-2">
+                              <UiInput v-model="mapping.records[cluster.clusterId]!.title" />
+                            </UiField>
+                            <UiField label="Kurzbeschreibung" class="sm:col-span-2">
+                              <UiInput v-model="mapping.records[cluster.clusterId]!.description" />
+                            </UiField>
+                            <UiField label="Schlagwörter" class="sm:col-span-2">
+                              <UiTagInput
+                                v-model="mapping.records[cluster.clusterId]!.tagNames"
+                                :vorschlaege="schlagwortNamen"
+                              />
+                            </UiField>
+                          </div>
+                          <p class="text-xs text-ink-subtle">
+                            Gibt es im gewählten Lehrwerk schon eine Sammlung mit diesem Titel, werden die Bilder dort ergänzt
+                            (bereits vorhandene Bilder werden übersprungen).
+                          </p>
+                        </template>
+                        <template v-else-if="bearbeitbar(cluster.clusterId) && mapping.records[cluster.clusterId]">
                           <div class="grid gap-3 sm:grid-cols-2">
                             <UiField label="Titel" class="sm:col-span-2">
                               <UiInput v-model="mapping.records[cluster.clusterId]!.title" />

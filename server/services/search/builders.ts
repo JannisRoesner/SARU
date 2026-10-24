@@ -153,11 +153,101 @@ export async function buildMaterialDocuments(
     }
   }
 
+  if (row.materialType === 'abbildungssammlung') {
+    // Die Bilder sind eigene Suchtreffer. Für die Sammlung selbst reichen Kapitel und
+    // Schlagwörter ihrer Bilder, damit sie in der Materialliste zu diesen Themen auftaucht.
+    const themen = await sammlungsThemen(materialId)
+    if (themen) documents[0]!.content = joinMeta([documents[0]!.content, themen])
+    return documents
+  }
+
   if (imageEmbeddingsActive(await getAiSettings())) {
     documents.push(...(await seitenbildDokumente(row, metaText)))
   }
 
   return documents
+}
+
+async function sammlungsThemen(materialId: string): Promise<string> {
+  const [zeile] = await queryRows<{ kapitel: string[] | null; schlagwoerter: string[] | null; anzahl: number }>(
+    useDatabase(),
+    sql`select array_agg(distinct kapitel) filter (where kapitel is not null) as kapitel,
+        (select array_agg(distinct w) from material_abbildungen b2, unnest(b2.schlagwoerter) w
+          where b2.material_id = ${materialId}::uuid) as schlagwoerter,
+        count(*)::int as anzahl
+      from material_abbildungen where material_id = ${materialId}::uuid`,
+  )
+  if (!zeile?.anzahl) return ''
+  return joinMeta([
+    `${zeile.anzahl} Abbildungen`,
+    zeile.kapitel?.length ? `Kapitel: ${zeile.kapitel.join(', ')}` : null,
+    zeile.schlagwoerter?.length ? zeile.schlagwoerter.join(', ') : null,
+  ]).slice(0, 6000)
+}
+
+interface AbbildungIndexRow {
+  titel: string
+  beschreibung: string | null
+  werk: string | null
+  seite: string | null
+  abbildung: string | null
+  kapitel: string | null
+  schlagwoerter: string[]
+  beschriftet: boolean | null
+  varianteVon: string | null
+  original: string | null
+  fileName: string | null
+  sammlung: string
+  subjects: string[]
+  gradeLevels: GradeLevel[]
+}
+
+/**
+ * Ein Abschnitt je Bild einer Abbildungssammlung: Titel, Fundstelle, Kapitel und Schlagwörter
+ * für die Volltextsuche, die Beschreibung als Inhalt. Der Vektor entsteht wie bei allen
+ * Textabschnitten aus diesen Angaben. Varianten (z. B. unbeschriftet) werden nicht eigens
+ * gefunden – der Treffer führt zum Hauptbild, dort lässt sich umschalten.
+ */
+export async function buildAbbildungDocuments(abbildungId: string): Promise<IndexDocument[] | null> {
+  const rows = await queryRows<AbbildungIndexRow>(useDatabase(),
+    sql`select b.titel, b.beschreibung, b.werk, b.seite, b.abbildung, b.kapitel, b.schlagwoerter,
+        b.beschriftet, b.variante_von as "varianteVon", b.original, a.file_name as "fileName",
+        m.title as sammlung,
+        coalesce((select array_agg(s.name order by s.name) from material_subjects ms
+          join subjects s on s.id = ms.subject_id where ms.material_id = m.id), '{}') as "subjects",
+        coalesce((select array_agg(mgl.grade_level order by mgl.grade_level)
+          from material_grade_levels mgl where mgl.material_id = m.id), '{}') as "gradeLevels"
+      from material_abbildungen b
+      join material_assets a on a.id = b.asset_id
+      join materials m on m.id = b.material_id
+      where b.id = ${abbildungId}::uuid`,
+  )
+  const row = rows[0]
+  if (!row || row.varianteVon) return null
+
+  const gradeLevels = normalizeGradeLevels(row.gradeLevels as unknown[])
+  const titel = row.titel.trim() || (row.fileName ?? 'Abbildung').replace(/\.[^.]+$/, '')
+  const metaText = joinMeta([
+    'Abbildung',
+    `Sammlung: ${row.sammlung}`,
+    row.subjects.join(', '),
+    gradeLevels.length ? `Jahrgangsstufe ${formatJahrgaenge(gradeLevels)}` : null,
+    row.kapitel ? `Kapitel: ${row.kapitel}` : null,
+    row.werk,
+    row.seite ? `Seite ${row.seite}` : null,
+    row.abbildung ? `Abb. ${row.abbildung}` : null,
+    row.schlagwoerter.join(', '),
+    row.beschriftet === false ? 'unbeschriftet' : null,
+  ])
+  return [
+    {
+      chunkIndex: 0,
+      title: titel,
+      metaText,
+      content: joinMeta([row.beschreibung, row.fileName]),
+      sourceLabel: row.sammlung,
+    },
+  ]
 }
 
 /**

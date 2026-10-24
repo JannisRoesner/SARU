@@ -26,6 +26,7 @@ const ROOT_TABLES = [
   'series_competencies',
   'series_tags',
   'series',
+  'material_abbildungen',
   'material_assets',
   'material_variants',
   'material_relations',

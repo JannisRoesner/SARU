@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import type { H3Event } from 'h3'
 import { darfObjektTeilen, hatRecht } from '#shared/utils/rechte'
 import { useDatabase } from '../database/client'
@@ -289,6 +289,22 @@ async function berechneUmfang(link: ShareLink): Promise<FreigabeUmfang> {
         ),
       )
     for (const r of anhaengend) materialIds.add(r.id)
+
+    // „Bezieht sich auf“ (Film ↔ Arbeitsblatt) gilt in beide Richtungen.
+    const ids = [...materialIds]
+    const bezuege = await db
+      .select({ von: materialRelations.fromMaterialId, nach: materialRelations.toMaterialId })
+      .from(materialRelations)
+      .where(
+        and(
+          eq(materialRelations.relationType, 'bezug'),
+          or(inArray(materialRelations.fromMaterialId, ids), inArray(materialRelations.toMaterialId, ids)),
+        ),
+      )
+    for (const r of bezuege) {
+      materialIds.add(r.von)
+      materialIds.add(r.nach)
+    }
   }
 
   return { link, wurzel, materialIds, lessonIds, seriesId }

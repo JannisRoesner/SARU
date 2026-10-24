@@ -1,5 +1,6 @@
 import type { MaterialType } from '../types/domain'
 import { istInteraktivDatei } from './interaktiv'
+import { istVideoDatei } from './abbildungen'
 
 function fold(value: string): string {
   return value
@@ -28,6 +29,7 @@ export function guessMaterialType(
   const name = fold(raw)
   const base = name.split('/').pop() ?? name
   if (istInteraktivDatei(base)) return 'interaktiv'
+  if (istVideoDatei(base)) return 'video'
   const folder = name.includes('/') ? name.slice(0, name.lastIndexOf('/')) : ''
 
   if (

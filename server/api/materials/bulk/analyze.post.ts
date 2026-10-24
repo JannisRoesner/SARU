@@ -3,7 +3,11 @@ import {
   processBulkPdfUpload,
   startBulkPdfUpload,
 } from '../../../services/bulk-upload/bulk-upload.service'
-import type { BulkUploadMapping } from '../../../services/bulk-upload/types'
+import {
+  MAX_UEBERSPRUNGEN_LISTE,
+  type BulkUebersprungeneDatei,
+  type BulkUploadMapping,
+} from '../../../services/bulk-upload/types'
 import { recordAudit } from '../../../services/audit.service'
 import { requireRecht } from '../../../utils/permissions'
 import { invalidInput } from '../../../utils/errors'
@@ -51,7 +55,27 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  const result = await startBulkPdfUpload(files, user.id, mapping)
+  // Vom Browser schon aussortierte Dateien (z. B. Einzelbilder außerhalb von Abbildungsordnern).
+  const skippedRaw = parts.find((p) => p.name === 'skipped' && !p.filename)?.data.toString()
+  let clientSkipped: BulkUebersprungeneDatei[] = []
+  if (skippedRaw) {
+    try {
+      const parsed = JSON.parse(skippedRaw) as unknown
+      if (Array.isArray(parsed)) {
+        clientSkipped = parsed
+          .slice(0, MAX_UEBERSPRUNGEN_LISTE)
+          .map((eintrag) => ({
+            pfad: String((eintrag as { pfad?: unknown })?.pfad ?? '').slice(0, 500),
+            grund: String((eintrag as { grund?: unknown })?.grund ?? '').slice(0, 300),
+          }))
+          .filter((eintrag) => eintrag.pfad)
+      }
+    } catch {
+      clientSkipped = []
+    }
+  }
+
+  const result = await startBulkPdfUpload(files, user.id, mapping, clientSkipped)
   void processBulkPdfUpload(result.runId).catch((error) => {
     log.warn('Hintergrund-Analyse des Stapels fehlgeschlagen', { runId: result.runId, error })
   })

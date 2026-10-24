@@ -5,7 +5,8 @@ import { useDatabase } from '../database/client'
 import { materialAssets } from '../database/schema'
 import { appError, notFound } from '../utils/errors'
 import { rasterizePdf } from './ai/rasterize'
-import { fileExists, isInlineSafe, readFileStream, resolveStoragePath } from './storage.service'
+import { parseByteRange } from '../utils/byte-range'
+import { dateiGroesse, fileExists, isInlineSafe, readFileStream, resolveStoragePath } from './storage.service'
 import { canHaveThumbnail, ensureThumbnail, thumbnailStorageKey } from './thumbnail.service'
 
 /**
@@ -35,7 +36,6 @@ export async function sendeDatei(event: H3Event, assetId: string, inline: boolea
     'content-disposition',
     `${showInline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(fileName)}`,
   )
-  if (asset.sizeBytes) setResponseHeader(event, 'content-length', asset.sizeBytes)
   setResponseHeader(event, 'cache-control', 'private, max-age=300')
   setResponseHeader(event, 'x-content-type-options', 'nosniff')
   // Bei Inline-Anzeige kein `sandbox`: sonst blockiert der Browser die PDF-/Bildvorschau im iframe.
@@ -45,6 +45,22 @@ export async function sendeDatei(event: H3Event, assetId: string, inline: boolea
     setResponseHeader(event, 'content-security-policy', "default-src 'none'; object-src 'self'; frame-ancestors 'self'")
   }
 
+  // Range-Anfragen erlauben Spulen in Videos und Fortsetzen von Downloads.
+  const groesse = await dateiGroesse(asset.storageKey)
+  setResponseHeader(event, 'accept-ranges', 'bytes')
+  const bereich = parseByteRange(getRequestHeader(event, 'range'), groesse)
+  if (bereich === 'ungueltig') {
+    setResponseStatus(event, 416)
+    setResponseHeader(event, 'content-range', `bytes */${groesse}`)
+    return ''
+  }
+  if (bereich) {
+    setResponseStatus(event, 206)
+    setResponseHeader(event, 'content-range', `bytes ${bereich.start}-${bereich.end}/${groesse}`)
+    setResponseHeader(event, 'content-length', bereich.end - bereich.start + 1)
+    return sendStream(event, readFileStream(asset.storageKey, bereich))
+  }
+  setResponseHeader(event, 'content-length', groesse)
   return sendStream(event, readFileStream(asset.storageKey))
 }
 

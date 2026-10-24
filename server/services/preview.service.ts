@@ -18,7 +18,7 @@ import { canHaveThumbnail } from './thumbnail.service'
 import { getPdfPageCount } from './ai/rasterize'
 import { resolveStoragePath } from './storage.service'
 
-export type PreviewMode = 'pdf' | 'bild' | 'interaktiv' | 'text' | 'collabora' | 'download' | 'link' | 'keine'
+export type PreviewMode = 'pdf' | 'bild' | 'video' | 'interaktiv' | 'text' | 'collabora' | 'download' | 'link' | 'keine'
 
 export interface AssetPreviewInfo {
   mode: PreviewMode
@@ -176,6 +176,18 @@ export async function getAssetPreviewInfoFuerZugang(
       mode: 'bild',
       inlineUrl: `${downloadUrl}?inline=1`,
       thumbnailUrl: thumb,
+      collaboraUrl: null,
+      hinweis: null,
+      pdfPageCount: null,
+    }
+  }
+
+  if (mime.startsWith('video/')) {
+    return {
+      ...base,
+      mode: 'video',
+      inlineUrl: `${downloadUrl}?inline=1`,
+      thumbnailUrl: null,
       collaboraUrl: null,
       hinweis: null,
       pdfPageCount: null,

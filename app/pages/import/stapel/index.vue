@@ -2,6 +2,7 @@
 import { materialTypes, importStatuses } from '#shared/utils/labels'
 import {
   bulkMaterialAcceptAttribute,
+  bulkUeberspringGrund,
   isBulkMaterialFileName,
 } from '#shared/utils/ai-material-formats'
 import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
@@ -36,6 +37,8 @@ const { data: laeufe, refresh } = await useFetch<BulkLauf[]>('/api/materials/bul
 })
 
 const dateien = ref<StapelDatei[]>([])
+/** Hier aussortierte Dateien – der Server führt sie in der Vorschau als „übersprungen“. */
+const uebersprungen = ref<{ pfad: string; grund: string }[]>([])
 const ziehe = ref(false)
 const dateiInput = ref<HTMLInputElement | null>(null)
 const ordnerInput = ref<HTMLInputElement | null>(null)
@@ -62,8 +65,13 @@ function dateienHinzufuegen(files: FileList | null | undefined) {
   if (!files?.length) return
   const bestehende = new Set(dateien.value.map((d) => `${d.relativePath}:${d.file.size}:${d.file.lastModified}`))
   for (const file of Array.from(files)) {
-    if (!isBulkMaterialFileName(file.name) && !isBulkMaterialFileName(relativPfad(file))) continue
     const relativePath = relativPfad(file)
+    if (!isBulkMaterialFileName(file.name) && !isBulkMaterialFileName(relativePath)) {
+      if (!/(^|\/)(\.ds_store|thumbs\.db|desktop\.ini)$/i.test(relativePath)) {
+        uebersprungen.value.push({ pfad: relativePath, grund: bulkUeberspringGrund(relativePath) })
+      }
+      continue
+    }
     const schluessel = `${relativePath}:${file.size}:${file.lastModified}`
     if (!bestehende.has(schluessel)) {
       dateien.value.push({ file, relativePath })
@@ -86,6 +94,7 @@ async function analysieren() {
   const body = new FormData()
   for (const eintrag of dateien.value) body.append('files', eintrag.file, eintrag.relativePath)
   body.append('relativePaths', JSON.stringify(dateien.value.map((d) => d.relativePath)))
+  if (uebersprungen.value.length) body.append('skipped', JSON.stringify(uebersprungen.value.slice(0, 500)))
   body.append(
     'mapping',
     JSON.stringify({
@@ -138,6 +147,7 @@ async function analysieren() {
         <p class="mt-1 text-sm text-ink-muted">
           Arbeitsblätter und Lösungen mit gleichem Namen werden automatisch gepaart.
           Gefährdungsbeurteilungen und Versuche bleiben eigene Materialien.
+          Bilder in Ordnern namens „Abbildungen“ werden je Ordner zu einer Abbildungssammlung; Videos werden eigene Materialien.
         </p>
         <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
           <label class="inline-flex cursor-pointer">
@@ -169,6 +179,10 @@ async function analysieren() {
         </div>
       </div>
 
+      <p v-if="uebersprungen.length" class="mt-4 rounded-lg bg-warning-soft px-3 py-2 text-xs text-warning">
+        {{ uebersprungen.length }} Dateien werden nicht hochgeladen (z. B. Einzelbilder außerhalb von Abbildungsordnern).
+        Die Liste mit Gründen steht nach dem Start in der Vorschau.
+      </p>
       <ul v-if="dateien.length" class="mt-4 space-y-1.5">
         <li
           v-for="(eintrag, index) in dateien"
