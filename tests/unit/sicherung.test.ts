@@ -176,6 +176,34 @@ describe('Ordnerstruktur der Sicherung', () => {
     expect(pfade.get('x3')).toBe('Materialien/Bio/Blatt/Variante – Förderfassung/blatt.pdf')
     expect(pfade.get('x4')).toBe('Materialien/Bio/Blatt/Datei')
   })
+
+  it('hält Pfade auch bei tiefer Verschachtelung und langen Titeln kurz genug für Windows', () => {
+    const lang = (wort: string) => `${wort} ${'mit sehr langem Titel '.repeat(6)}`
+    const materialien = [
+      { id: 'lw', title: lang('Lehrwerk'), materialType: 'lehrwerk' },
+      ...Array.from({ length: 6 }, (_, i) => ({ id: `m${i}`, title: lang(`Material ${i}`), materialType: 'arbeitsblatt' })),
+    ]
+    const relationen = Array.from({ length: 6 }, (_, i) => ({
+      fromMaterialId: `m${i}`,
+      toMaterialId: i === 0 ? 'lw' : `m${i - 1}`,
+      relationType: 'gehoert_zu',
+    }))
+    const ordner = materialOrdner(materialien, relationen, new Map())
+    expect(ordner.get('m0')!.startsWith(`${ordner.get('lw')}/`)).toBe(true)
+
+    const varianten = materialien.flatMap((m) => [
+      { id: `${m.id}-a`, materialId: m.id, label: 'Standard', isDefault: true, sortOrder: 0 },
+      { id: `${m.id}-b`, materialId: m.id, label: lang('Variante'), isDefault: false, sortOrder: 1 },
+    ])
+    const assets = varianten.map((v) => ({ id: v.id, variantId: v.id, fileName: `${lang('Datei')}.pdf` }))
+    const pfade = dateiPfade(ordner, varianten, assets)
+
+    expect(pfade.size).toBe(assets.length)
+    for (const pfad of pfade.values()) {
+      expect(pfad.length).toBeLessThanOrEqual(200)
+      expect(pfad.endsWith('.pdf')).toBe(true)
+    }
+  })
 })
 
 describe('Auswahl beim Einspielen', () => {
