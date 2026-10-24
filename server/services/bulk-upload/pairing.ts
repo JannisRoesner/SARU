@@ -1,6 +1,7 @@
 import type { MaterialType } from '#shared/types/domain'
 import { guessMaterialType } from '#shared/utils/material-type-guess'
 import type { BulkFileRole, BulkFolderRole, BulkLernzirkelRef } from '#shared/utils/bulk-upload'
+import { isLehrwerkCoverFileName } from '#shared/utils/ai-material-formats'
 import type { BulkClusterKind, BulkUploadDetectedCluster } from './types'
 
 const OFFICE_EXTENSIONS = new Set(['doc', 'docx', 'odt', 'ppt', 'pptx', 'odp', 'xls', 'xlsx', 'ods'])
@@ -555,4 +556,22 @@ export function filesAsSingletonClusters(
     proposedLinks: [],
     warnings: file.warnings ?? [],
   }))
+}
+
+/** Bild namens „cover.*“ (siehe isLehrwerkCoverFileName). */
+export const isLehrwerkCoverFile = isLehrwerkCoverFileName
+
+/**
+ * Wählt das Cover-Bild des Stapels: bei mehreren Treffern das am höchsten im Ordnerbaum liegende
+ * (Wurzel des Lehrwerks), bei Gleichstand der alphabetisch erste Pfad.
+ */
+export function findLehrwerkCover(files: PairingInputFile[]): PairingInputFile | null {
+  const candidates = files
+    .filter((file) => isLehrwerkCoverFile(file.fileName))
+    .map((file) => {
+      const path = posixPath(file.relativePath || file.fileName)
+      return { file, path, depth: path.split('/').filter(Boolean).length }
+    })
+    .sort((a, b) => a.depth - b.depth || a.path.localeCompare(b.path))
+  return candidates[0]?.file ?? null
 }
