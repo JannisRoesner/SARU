@@ -11,7 +11,29 @@ import { freierName, pfadSegment } from '#shared/utils/sicherung'
  *
  * Die Pfade dienen nur der Orientierung beim Durchsehen des Archivs – der
  * Import liest die Zuordnung ausschließlich aus `saru-export.json`.
+ *
+ * Der Windows-Explorer verweigert Archive mit Einträgen ab etwa 257 Zeichen
+ * ganz („ZIP-komprimierter Ordner ist ungültig“), und beim Entpacken kommt der
+ * Zielordner noch vor MAX_PATH (260) hinzu. Deshalb bleibt jeder Pfad unter
+ * PFAD_MAX: Namen werden je nach Tiefe gekürzt, zu tief Verschachteltes
+ * rückt eine Ebene nach oben.
  */
+
+const PFAD_MAX = 200
+/** Grenze für Materialordner – der Rest bleibt Varianten und Dateinamen. */
+const ORDNER_MAX = 120
+/** Grenze für Variantenordner. */
+const VARIANTEN_MAX = 160
+/** Kürzester Name, der noch lesbar ist. */
+const SEGMENT_MIN = 20
+/** Platz für „ (2)“ … „ (99)“ aus freierName. */
+const ZUSATZ = 5
+/** Längere „Endungen“ sind eher Satzteile nach einem Punkt. */
+const ENDUNG_MAX = 10
+
+function budget(basis: string, grenze: number, maxLaenge: number): number {
+  return Math.max(SEGMENT_MIN, Math.min(maxLaenge, grenze - basis.length - 1 - ZUSATZ))
+}
 
 export interface PfadMaterial {
   id: string
@@ -82,9 +104,13 @@ export function materialOrdner(
     inArbeit.add(id)
     const elternId = eltern.get(id)
     // Zyklen (A gehört zu B, B zu A) brechen wir an der Wurzel ab.
-    const basis = elternId && !inArbeit.has(elternId) ? aufloesen(elternId) : wurzel(material)
+    let basis = elternId && !inArbeit.has(elternId) ? aufloesen(elternId) : wurzel(material)
     inArbeit.delete(id)
-    const pfad = `${basis}/${freierName(pfadSegment(material.title), belegung(basis))}`
+    while (basis.length + 1 + SEGMENT_MIN + ZUSATZ > ORDNER_MAX && basis.includes('/')) {
+      basis = basis.slice(0, basis.lastIndexOf('/'))
+    }
+    const name = pfadSegment(material.title, undefined, budget(basis, ORDNER_MAX, 80))
+    const pfad = `${basis}/${freierName(name, belegung(basis))}`
     ordner.set(id, pfad)
     return pfad
   }
@@ -132,17 +158,19 @@ export function dateiPfade(
       variante.id,
       istErste
         ? basis
-        : `${basis}/${freierName(`Variante – ${pfadSegment(variante.label, 'Ohne Namen', 60)}`, belegung(basis))}`,
+        : `${basis}/${freierName(`Variante – ${pfadSegment(variante.label, 'Ohne Namen', budget(basis, VARIANTEN_MAX - 11, 60))}`, belegung(basis))}`,
     )
   }
 
   for (const asset of assets) {
     const basis = variantenOrdner.get(asset.variantId)
     if (!basis) continue
-    const roh = pfadSegment(asset.fileName, 'Datei', 140)
+    // Erst die Endung abtrennen, dann kürzen – sonst geht sie bei langen Namen verloren.
+    const roh = pfadSegment(asset.fileName, 'Datei', 255)
     const punkt = roh.lastIndexOf('.')
-    const stamm = punkt > 0 ? roh.slice(0, punkt) : roh
-    const endung = punkt > 0 ? roh.slice(punkt).toLowerCase() : ''
+    const mitEndung = punkt > 0 && roh.length - punkt <= ENDUNG_MAX
+    const endung = mitEndung ? roh.slice(punkt).toLowerCase() : ''
+    const stamm = pfadSegment(mitEndung ? roh.slice(0, punkt) : roh, 'Datei', budget(basis, PFAD_MAX - endung.length, 140))
     ergebnis.set(asset.id, `${basis}/${freierName(stamm, belegung(basis), endung)}`)
   }
   return ergebnis
