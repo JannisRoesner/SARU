@@ -39,6 +39,7 @@ export const materialTypeEnum = pgEnum('material_type', [
   'moodle_kurs',
   'h5p',
   'interaktiv',
+  'abbildungssammlung',
   'sonstiges',
 ])
 
@@ -79,6 +80,7 @@ export const materialRelationTypeEnum = pgEnum('material_relation_type', [
   'gehoert_zu',
   'nachfolger',
   'quelle',
+  'bezug',
 ])
 
 export const lessonStatusEnum = pgEnum('lesson_status', [
@@ -119,6 +121,7 @@ export const searchEntityTypeEnum = pgEnum('search_entity_type', [
   'material',
   'unterrichtsstunde',
   'reihe',
+  'abbildung',
 ])
 
 export const importStatusEnum = pgEnum('import_status', [

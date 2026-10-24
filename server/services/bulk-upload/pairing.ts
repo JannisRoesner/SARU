@@ -2,6 +2,18 @@ import type { MaterialType } from '#shared/types/domain'
 import { guessMaterialType } from '#shared/utils/material-type-guess'
 import type { BulkFileRole, BulkFolderRole, BulkLernzirkelRef } from '#shared/utils/bulk-upload'
 import { isLehrwerkCoverFileName } from '#shared/utils/ai-material-formats'
+import {
+  istAbbildungenManifest,
+  istAbbildungsBildDatei,
+  istInAbbildungsOrdner,
+  ordnerPfadVon,
+  planeAbbildungssammlung,
+  sammlungsTitelAusOrdner,
+  type ManifestErgebnis,
+} from '#shared/utils/abbildungen'
+import { istInteraktivDatei } from '#shared/utils/interaktiv'
+import { istVideoDatei, dateiSchluessel } from '#shared/utils/abbildungen'
+import { findeBezug, istMedienManifest, type MedienManifestErgebnis } from '#shared/utils/medien'
 import type { BulkClusterKind, BulkUploadDetectedCluster } from './types'
 
 const OFFICE_EXTENSIONS = new Set(['doc', 'docx', 'odt', 'ppt', 'pptx', 'odp', 'xls', 'xlsx', 'ods'])
@@ -253,7 +265,7 @@ function materialTypeForCluster(
 ): MaterialType {
   const fromNames = fileNames.map((name) => guessMaterialType(name, fallback))
   const specific = fromNames.find((type) =>
-    ['gefaehrdungsbeurteilung', 'klausur', 'bild', 'musterloesung', 'praesentation'].includes(
+    ['gefaehrdungsbeurteilung', 'klausur', 'bild', 'musterloesung', 'praesentation', 'video', 'interaktiv'].includes(
       type,
     ),
   )
@@ -402,10 +414,157 @@ function proposeSolutionLinks(
   }
 }
 
-export function clusterBulkFiles(
+/** Bild, das zu einer Abbildungssammlung gehört: Bildformat in einem Abbildungsordner, kein Cover. */
+export function istSammlungsBild(file: Pick<PairingInputFile, 'fileName' | 'relativePath'>): boolean {
+  const path = posixPath(file.relativePath || file.fileName)
+  return istAbbildungsBildDatei(file.fileName) && istInAbbildungsOrdner(path) && !isLehrwerkCoverFile(file.fileName)
+}
+
+/** `abbildungen.json` in einem Abbildungsordner. */
+export function istSammlungsManifest(file: Pick<PairingInputFile, 'fileName' | 'relativePath'>): boolean {
+  return istAbbildungenManifest(file.fileName) && istInAbbildungsOrdner(posixPath(file.relativePath || file.fileName))
+}
+
+/** Schlüssel eines Abbildungsordners (gefaltet), passend zu `ClusterOptionen.manifeste`. */
+export function abbildungsOrdnerSchluessel(relativePath: string | null | undefined, fileName: string): string {
+  return fold(ordnerPfadVon(posixPath(relativePath || fileName)))
+}
+
+export interface ClusterOptionen {
+  /** Gelesene `abbildungen.json` je Abbildungsordner (Schlüssel: `abbildungsOrdnerSchluessel`). */
+  manifeste?: ReadonlyMap<string, ManifestErgebnis>
+  /** Gelesene `videos.json` je Ordner (Schlüssel: `abbildungsOrdnerSchluessel`). */
+  medienManifeste?: ReadonlyMap<string, MedienManifestErgebnis>
+  /** Hier landen Hinweise, die zu keinem Bündel gehören (z. B. Eintrag ohne Datei). */
+  warnungen?: string[]
+}
+
+/** `videos.json` in einem beliebigen Ordner. */
+export function istMedienManifestDatei(file: Pick<PairingInputFile, 'fileName'>): boolean {
+  return istMedienManifest(file.fileName)
+}
+
+function istMedienDatei(fileName: string): boolean {
+  return istVideoDatei(fileName) || istInteraktivDatei(fileName)
+}
+
+/**
+ * Übernimmt Titel und Beschreibung aus `videos.json` und schlägt je `bezug` eine Verknüpfung
+ * „Bezieht sich auf“ vom Film zum Material der genannten Datei vor (an beiden Materialien sichtbar).
+ */
+function medienAngabenAnwenden(
+  clusters: BulkUploadDetectedCluster[],
   files: PairingInputFile[],
+  medienManifeste: ReadonlyMap<string, MedienManifestErgebnis>,
+  warnungen: string[],
+): void {
+  if (!medienManifeste.size) return
+  const clusterVonRef = new Map<string, BulkUploadDetectedCluster>()
+  for (const cluster of clusters) for (const ref of cluster.fileRefs) clusterVonRef.set(ref, cluster)
+  const mitPfad = files.map((file) => ({ file, pfad: posixPath(file.relativePath || file.fileName) }))
+
+  for (const [ordner, ergebnis] of medienManifeste) {
+    const imOrdner = mitPfad.filter(({ file }) => abbildungsOrdnerSchluessel(file.relativePath, file.fileName) === ordner)
+    for (const eintrag of ergebnis.eintraege) {
+      const datei = imOrdner.find(({ file }) => dateiSchluessel(file.fileName) === dateiSchluessel(eintrag.datei))
+      const cluster = datei ? clusterVonRef.get(datei.file.sourceRef) : undefined
+      if (!datei || !cluster) {
+        warnungen.push(`videos.json nennt „${eintrag.datei}“, die Datei fehlt im Ordner.`)
+        continue
+      }
+      if (!istMedienDatei(datei.file.fileName)) {
+        cluster.warnings.push(`videos.json: „${eintrag.datei}“ ist kein Video bzw. interaktiver Inhalt – nur die Verknüpfungen werden übernommen.`)
+      } else {
+        if (eintrag.titel) cluster.suggestions.title = eintrag.titel
+        if (eintrag.beschreibung) cluster.suggestions.description = eintrag.beschreibung
+        if (eintrag.titel || eintrag.beschreibung) cluster.angabenAusPaket = true
+      }
+      for (const bezug of eintrag.bezug) {
+        const { treffer, mehrdeutig } = findeBezug(bezug, mitPfad)
+        const ziel = treffer ? clusterVonRef.get(treffer.file.sourceRef) : undefined
+        if (!treffer || !ziel) {
+          cluster.warnings.push(`videos.json: Bezug „${bezug}“ wurde im Paket nicht gefunden – keine Verknüpfung.`)
+          continue
+        }
+        if (mehrdeutig) {
+          cluster.warnings.push(`videos.json: Bezug „${bezug}“ passt auf mehrere Dateien – verknüpft wird „${treffer.pfad}“.`)
+        }
+        if (ziel === cluster || cluster.proposedLinks.some((link) => link.targetClusterId === ziel.clusterId)) continue
+        cluster.proposedLinks.push({
+          targetClusterId: ziel.clusterId,
+          relationType: 'bezug',
+          reason: `Bezieht sich auf „${ziel.suggestions.title}“ (videos.json)`,
+          confidence: 'hoch',
+        })
+      }
+    }
+  }
+}
+
+/** Ein Bündel je Abbildungsordner: alle Bilder des Ordners werden ein Material „Abbildungssammlung“. */
+function abbildungsCluster(files: PairingInputFile[], manifeste: ReadonlyMap<string, ManifestErgebnis>): BulkUploadDetectedCluster[] {
+  const ordner = new Map<string, { pfad: string; dateien: PairingInputFile[] }>()
+  for (const file of files) {
+    const schluessel = abbildungsOrdnerSchluessel(file.relativePath, file.fileName)
+    const eintrag = ordner.get(schluessel)
+    if (eintrag) eintrag.dateien.push(file)
+    else ordner.set(schluessel, { pfad: ordnerPfadVon(posixPath(file.relativePath || file.fileName)), dateien: [file] })
+  }
+
+  const clusters: BulkUploadDetectedCluster[] = []
+  for (const [schluessel, { pfad, dateien }] of ordner) {
+    const gelesen = manifeste.get(schluessel)
+    const plan = planeAbbildungssammlung(
+      dateien.map((file) => ({ ref: file.sourceRef, dateiName: file.fileName })),
+      gelesen?.manifest ?? null,
+    )
+    const manifestFehler = gelesen?.fehler ?? []
+    const warnings = [...manifestFehler, ...(gelesen?.warnungen ?? []), ...plan.warnungen]
+    if (plan.ohneAngaben) {
+      warnings.push(
+        `${plan.ohneAngaben} Bild${plan.ohneAngaben === 1 ? '' : 'er'} ohne Titel/Beschreibung aus dem Paket – Angaben aus dem Dateinamen, später per KI ergänzbar.`,
+      )
+    }
+    // Planreihenfolge (abbildungen.json, dann Dateiname) bestimmt auch die Dateireihenfolge des Bündels.
+    const fileRefs = plan.eintraege.map((eintrag) => eintrag.ref)
+    const stem = pfad.split('/').filter(Boolean).pop() ?? 'Abbildungen'
+    clusters.push({
+      clusterId: `abbildungen:${schluessel}`,
+      kind: 'abbildungssammlung',
+      folderRole: 'abbildungen',
+      stem,
+      fileRefs,
+      suggestedRoles: Object.fromEntries(fileRefs.map((ref) => [ref, 'abbildung' as const])),
+      suggestions: {
+        title: plan.titel ?? sammlungsTitelAusOrdner(pfad),
+        materialType: 'abbildungssammlung',
+        subjectNames: [],
+        tagNames: [],
+        description: plan.beschreibung ?? '',
+        learningObjectives: [],
+        contentSummary: '',
+        schoolForm: null,
+        aiUsed: false,
+      },
+      proposedLinks: [],
+      abbildungen: { ordner: pfad, plan, manifestFehler },
+      warnings,
+    })
+  }
+  return clusters
+}
+
+export function clusterBulkFiles(
+  allFiles: PairingInputFile[],
   fallbackType: MaterialType = 'arbeitsblatt',
+  optionen: ClusterOptionen = {},
 ): BulkUploadDetectedCluster[] {
+  // Bilder in Abbildungsordnern bilden eigene Sammlungen; abbildungen.json ist kein Material.
+  const sammlungsBilder = allFiles.filter((file) => istSammlungsBild(file))
+  const files = allFiles.filter(
+    (file) => !istSammlungsBild(file) && !istSammlungsManifest(file) && !istMedienManifestDatei(file),
+  )
+
   const groups = new Map<string, PairingInputFile[]>()
   for (const file of files) {
     const path = posixPath(file.relativePath || file.fileName)
@@ -516,6 +675,19 @@ export function clusterBulkFiles(
     if (!cluster.lernzirkel) continue
     if (BUCH_TYPEN.has(cluster.suggestions.materialType) || LERNZIRKEL_ZUBEHOER.test(fold(cluster.stem))) {
       cluster.suggestions.materialType = 'zusatzmaterial'
+    }
+  }
+  clusters.push(...abbildungsCluster(sammlungsBilder, optionen.manifeste ?? new Map()))
+  medienAngabenAnwenden(clusters, files, optionen.medienManifeste ?? new Map(), optionen.warnungen ?? [])
+  // Filme gehören nie in eine Abbildungssammlung, auch wenn sie im Abbildungsordner liegen.
+  const pfadVon = new Map(files.map((file) => [file.sourceRef, posixPath(file.relativePath || file.fileName)]))
+  for (const cluster of clusters) {
+    if (cluster.kind === 'abbildungssammlung') continue
+    const pfad = pfadVon.get(cluster.fileRefs[0] ?? '') ?? ''
+    if (cluster.fileRefs.length === 1 && istMedienDatei(pfad) && istInAbbildungsOrdner(pfad)) {
+      cluster.warnings.push(
+        'Video bzw. interaktiver Inhalt im Abbildungsordner – wird ein eigenes Material, nicht Teil der Abbildungssammlung.',
+      )
     }
   }
   return clusters

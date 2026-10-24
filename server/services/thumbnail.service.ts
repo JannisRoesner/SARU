@@ -102,6 +102,30 @@ export function canHaveThumbnail(mimeType: string | null, fileName: string | nul
   return isThumbnailCandidate(mimeType, fileName)
 }
 
+/**
+ * Höchstens so viele Miniaturen entstehen gleichzeitig im Hintergrund. Beim Anlegen einer
+ * Abbildungssammlung kommen hunderte Bilder in kurzer Folge – ohne Grenze würden alle
+ * gleichzeitig dekodiert und den Speicher füllen.
+ */
+const MAX_PARALLELE_MINIATUREN = 2
+const miniaturWarteschlange: string[] = []
+let laufendeMiniaturen = 0
+
+function naechsteMiniatur(): void {
+  while (laufendeMiniaturen < MAX_PARALLELE_MINIATUREN && miniaturWarteschlange.length) {
+    const assetId = miniaturWarteschlange.shift()!
+    laufendeMiniaturen += 1
+    void ensureThumbnail(assetId)
+      .catch((error) => {
+        log.warn('Hintergrund-Miniatur fehlgeschlagen', { assetId, error })
+      })
+      .finally(() => {
+        laufendeMiniaturen -= 1
+        naechsteMiniatur()
+      })
+  }
+}
+
 /** Erzeugt eine Miniatur im Hintergrund (Upload, WOPI-Speichern). */
 export function queueThumbnailGeneration(
   assetId: string,
@@ -109,9 +133,8 @@ export function queueThumbnailGeneration(
   fileName: string | null,
 ): void {
   if (!canHaveThumbnail(mimeType, fileName)) return
-  void ensureThumbnail(assetId).catch((error) => {
-    log.warn('Hintergrund-Miniatur fehlgeschlagen', { assetId, error })
-  })
+  miniaturWarteschlange.push(assetId)
+  naechsteMiniatur()
 }
 
 async function fitPng(pngBuffer: Buffer): Promise<Buffer | null> {

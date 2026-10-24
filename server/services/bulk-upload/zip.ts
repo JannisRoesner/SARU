@@ -1,15 +1,15 @@
 import { unzipSync } from 'fflate'
-import { isBulkDocumentFileName } from '#shared/utils/ai-material-formats'
+import { bulkUeberspringGrund, isBulkDocumentFileName } from '#shared/utils/ai-material-formats'
 import { invalidInput } from '../../utils/errors'
 import { extensionOf, formatBytes, sanitizeFileName } from '../storage.service'
-import { MAX_BULK_FILES, type BulkUploadInputFile } from './types'
+import { MAX_BULK_FILES, type BulkUebersprungeneDatei, type BulkUploadInputFile } from './types'
 
 const SKIP_ENTRY = /(^|\/)(\.ds_store|thumbs\.db|__macosx)(\/|$)/i
 
 export interface ExpandedBulkFiles {
   files: BulkUploadInputFile[]
   archiveNames: string[]
-  skipped: string[]
+  skipped: BulkUebersprungeneDatei[]
   /** Summe der (entpackten) Dokumentgrößen. */
   totalBytes: number
 }
@@ -52,7 +52,7 @@ export function expandBulkArchives(
 ): ExpandedBulkFiles {
   const out: BulkUploadInputFile[] = []
   const archiveNames: string[] = []
-  const skipped: string[] = []
+  const skipped: BulkUebersprungeneDatei[] = []
   let totalBytes = 0
   let fileCount = 0
 
@@ -81,8 +81,12 @@ export function expandBulkArchives(
           if (!path) return false
           // Unkomprimierte Einträge werden 1:1 aus dem Archiv kopiert.
           const bytes = entry.compression === 0 ? entry.size : entry.originalSize
-          if (!isBulkDocumentFileName(path) || !bytes) {
-            skipped.push(path)
+          if (!bytes) {
+            skipped.push({ pfad: path, grund: 'Leere Datei.' })
+            return false
+          }
+          if (!isBulkDocumentFileName(path)) {
+            skipped.push({ pfad: path, grund: /\.zip$/i.test(path) ? 'ZIP im ZIP wird nicht entpackt.' : bulkUeberspringGrund(path) })
             return false
           }
           count(bytes)

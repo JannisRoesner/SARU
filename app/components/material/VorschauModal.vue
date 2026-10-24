@@ -781,6 +781,13 @@ onBeforeUnmount(() => {
             </div>
 
             <div
+              v-else-if="info.mode === 'video' && info.inlineUrl"
+              class="flex max-h-full max-w-full items-center justify-center"
+            >
+              <video :src="info.inlineUrl" controls preload="metadata" class="max-h-[85vh] max-w-full rounded-lg bg-black shadow-2xl" />
+            </div>
+
+            <div
               v-else-if="info.mode === 'collabora' && info.collaboraUrl"
               class="flex size-full max-h-full flex-col gap-2"
             >

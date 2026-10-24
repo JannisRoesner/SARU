@@ -48,6 +48,8 @@ export const MATERIAL_TYPES = [
   'h5p',
   /** Interaktive Animation/Simulation (zunächst .swf, per Ruffle abgespielt). */
   'interaktiv',
+  /** Viele Einzelbilder (Grafiken, Fotos) als ein Material, z. B. je Schulbuch-Kapitel. */
+  'abbildungssammlung',
   'sonstiges',
 ] as const
 export type MaterialType = (typeof MATERIAL_TYPES)[number]
@@ -99,6 +101,8 @@ export const MATERIAL_RELATION_TYPES = [
   'gehoert_zu',
   'nachfolger',
   'quelle',
+  /** Symmetrisch: Film/Animation ↔ Arbeitsblatt – an beiden Materialien gleich beschriftet. */
+  'bezug',
 ] as const
 export type MaterialRelationType = (typeof MATERIAL_RELATION_TYPES)[number]
 
@@ -134,7 +138,8 @@ export const MATERIAL_USAGES = [
 ] as const
 export type MaterialUsage = (typeof MATERIAL_USAGES)[number]
 
-export const SEARCH_ENTITY_TYPES = ['material', 'unterrichtsstunde', 'reihe'] as const
+/** `abbildung`: Einzelbild einer Abbildungssammlung – eigener Suchtreffer, kein eigenes Material. */
+export const SEARCH_ENTITY_TYPES = ['material', 'unterrichtsstunde', 'reihe', 'abbildung'] as const
 export type SearchEntityType = (typeof SEARCH_ENTITY_TYPES)[number]
 
 export const AI_PROVIDERS = ['openai', 'ollama', 'openrouter', 'openai_kompatibel'] as const

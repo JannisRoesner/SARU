@@ -14,7 +14,7 @@ import { aiVerbindung, getAiSettings, gleicheVerbindung, type AiSettings } from 
 
 const log = createLogger('search:index')
 
-export type IndexEntityType = 'material' | 'unterrichtsstunde' | 'reihe'
+export type IndexEntityType = 'material' | 'unterrichtsstunde' | 'reihe' | 'abbildung'
 
 export interface IndexDocument {
   chunkIndex: number
@@ -245,16 +245,17 @@ export async function reindexEntity(
   entityType: IndexEntityType,
   entityId: string,
 ): Promise<void> {
-  const { buildMaterialDocuments, buildLessonDocuments, buildSeriesDocuments } = await import(
-    './builders'
-  )
+  const { buildAbbildungDocuments, buildMaterialDocuments, buildLessonDocuments, buildSeriesDocuments } =
+    await import('./builders')
 
   const documents =
     entityType === 'material'
       ? await buildMaterialDocuments(entityId)
       : entityType === 'unterrichtsstunde'
         ? await buildLessonDocuments(entityId)
-        : await buildSeriesDocuments(entityId)
+        : entityType === 'abbildung'
+          ? await buildAbbildungDocuments(entityId)
+          : await buildSeriesDocuments(entityId)
 
   if (!documents) {
     await removeFromIndex(entityType, entityId)
@@ -570,12 +571,13 @@ export async function ueberlangeAbschnitteNeuAufbauen(db: Database = useDatabase
   return betroffen.length
 }
 
-export async function reindexAll(): Promise<{ materialien: number; stunden: number; reihen: number }> {
+export async function reindexAll(): Promise<{ materialien: number; stunden: number; reihen: number; abbildungen: number }> {
   const db = useDatabase()
-  const [materialIds, lessonIds, seriesIds] = await Promise.all([
+  const [materialIds, lessonIds, seriesIds, abbildungIds] = await Promise.all([
     db.execute<{ id: string }>(sql`select id from materials`),
     db.execute<{ id: string }>(sql`select id from lessons`),
     db.execute<{ id: string }>(sql`select id from series`),
+    db.execute<{ id: string }>(sql`select id from material_abbildungen`),
   ])
 
   for (const { id } of materialIds as unknown as { id: string }[]) {
@@ -587,11 +589,18 @@ export async function reindexAll(): Promise<{ materialien: number; stunden: numb
   for (const { id } of seriesIds as unknown as { id: string }[]) {
     await reindexEntity('reihe', id)
   }
+  for (const { id } of abbildungIds as unknown as { id: string }[]) {
+    await reindexEntity('abbildung', id)
+  }
+  // Abschnitte gelöschter Bilder (z. B. nach Löschen eines Anhangs) aufräumen.
+  await db.execute(sql`delete from search_documents d where d.entity_type = 'abbildung'
+    and not exists (select 1 from material_abbildungen a where a.id = d.entity_id)`)
 
   return {
     materialien: (materialIds as unknown as unknown[]).length,
     stunden: (lessonIds as unknown as unknown[]).length,
     reihen: (seriesIds as unknown as unknown[]).length,
+    abbildungen: (abbildungIds as unknown as unknown[]).length,
   }
 }
 

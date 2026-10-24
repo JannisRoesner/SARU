@@ -13,6 +13,8 @@ Stellen sind:
 | --- | --- |
 | Entpacken, Formate, Limits | `server/services/bulk-upload/zip.ts`, `shared/utils/ai-material-formats.ts` |
 | Bündelung, Rollen, Ordnerrollen, Lernzirkel, Fassungen | `server/services/bulk-upload/pairing.ts` |
+| Abbildungssammlungen, `abbildungen.json`, Varianten | `shared/utils/abbildungen.ts`, `server/services/bulk-upload/abbildungen.ts` |
+| Videos, `videos.json`, Bezüge | `shared/utils/medien.ts`, `pairing.ts` (`medienAngabenAnwenden`) |
 | Materialart aus Dateiname/Pfad | `shared/utils/material-type-guess.ts` |
 | Anlegen, Verknüpfen, Lehrwerk | `server/services/bulk-upload/bulk-upload.service.ts` |
 | Gruppen in der Lehrwerk-Ansicht | `shared/utils/lehrwerk.ts` |
@@ -44,18 +46,28 @@ Dateien im selben Cluster landen – und die falschen nicht.
 
 | Regel | Wert / Verhalten |
 | --- | --- |
-| Erlaubte Dateiformate | `pdf`, `doc`, `docx`, `ppt`, `pptx`, `xls`, `xlsx`, `odt`, `odp`, `ods`, `txt`, `md`, `csv` |
+| Erlaubte Dateiformate | `pdf`, `doc`, `docx`, `ppt`, `pptx`, `xls`, `xlsx`, `odt`, `odp`, `ods`, `txt`, `md`, `csv`, `swf` (interaktiver Inhalt), Videos `mp4`, `m4v`, `webm` (Abschnitt 14) |
+| Bilder | `png`, `jpg`/`jpeg`, `webp`, `gif` **nur in Abbildungsordnern** (Abschnitt 13) sowie `cover.*` als Lehrwerk-Cover. `tif`/`tiff`/`bmp` werden abgelehnt – vorher in PNG/JPEG wandeln. |
+| Beschreibungsdateien | `abbildungen.json` (nur im Abbildungsordner), `videos.json` (beliebiger Ordner) – werden gelesen, nicht gespeichert |
 | Container | `.zip` (nur auf oberster Ebene – **ZIPs im ZIP werden übersprungen**) |
-| Wird stillschweigend übersprungen | alle anderen Formate, **insbesondere Bilder (`png`, `jpg` …), Videos, `.h5p`, `.mbz`, Links (`.url`)**, leere Dateien, `__MACOSX/`, `.DS_Store`, `Thumbs.db`, Pfade mit `..` |
-| Max. Dateien pro Stapel | 10.000 (nach dem Entpacken, nur unterstützte Dokumente gezählt) |
-| Max. Paketgröße | `NUXT_MAX_IMPORT_BYTES` (Standard 512 MiB, Summe aller entpackten Dokumente; bei ZIPs schon vor dem Entpacken aus dem ZIP-Verzeichnis geprüft) |
-| Max. Einzeldatei | `NUXT_MAX_UPLOAD_BYTES` (Standard 256 MiB) |
+| Wird übersprungen | alle anderen Formate, Einzelbilder außerhalb von Abbildungsordnern, `.h5p`, `.mbz`, Links (`.url`), leere Dateien, `__MACOSX/`, `.DS_Store`, `Thumbs.db`, Pfade mit `..`. **Die Vorschau listet übersprungene Dateien mit Grund** (Karte „Übersprungene Dateien“, bis 500 Einträge). |
+| Max. Dateien pro Stapel | 10.000 (nach dem Entpacken, nur unterstützte Dateien gezählt) |
+| Max. Paketgröße | `NUXT_MAX_IMPORT_BYTES` (Standard 512 MiB, Summe aller entpackten Dateien **einschließlich Bilder und Videos**; bei ZIPs schon vor dem Entpacken aus dem ZIP-Verzeichnis geprüft) |
+| Max. Einzeldatei | `NUXT_MAX_UPLOAD_BYTES` (Standard 256 MiB, gilt auch für jedes Bild und Video) |
+
+> **Warum Bilder in die Paketgrenze zählen:** Der Stapel-Upload hält die ganze Anfrage im Speicher.
+> Die Grenze schützt den Server – ein Bild belegt dort genauso viel wie ein PDF. Große Bild-CDs daher
+> auf **mehrere Stapel** verteilen (z. B. ein Stapel je Kapitel) und jeweils dasselbe Lehrwerk wählen.
+> Ein Abbildungsordner mit gleichem Sammlungstitel ergänzt dabei die bestehende Sammlung (Abschnitt 13.5).
 | Dateinamen | Steuerzeichen und `< > : " \| ? *` werden entfernt, Länge auf 180 Zeichen gekürzt |
 
 Konsequenzen für den Paketbau:
 
-- **Abbildungen als PDF** ablegen (z. B. eine PDF je Abbildungsseite). Einzelbilder kommen nicht an.
-- **Weblinks, Videos, H5P und Moodle-Kurse** gehören nicht in den Stapel – sie werden danach am
+- **Einzelbilder in einen Abbildungsordner** legen (`<Lehrwerk>/Abbildungen/<Sammlung>/`). Jeder
+  solche Ordner wird **eine** Abbildungssammlung (Abschnitt 13). PDFs im Abbildungsordner bleiben wie
+  bisher einzelne `bild`-Materialien.
+- **Kurze Videos** (`mp4`/`m4v`/`webm`) werden je Datei ein Material `video` (Abschnitt 14).
+- **Weblinks, H5P und Moodle-Kurse** gehören nicht in den Stapel – sie werden danach am
   Material bzw. über die eigenen Importwege angelegt.
 - Keine verschachtelten ZIPs; alles in **ein** Archiv mit echter Ordnerstruktur packen.
 
@@ -201,7 +213,7 @@ Jede Datei bekommt eine Ordnerrolle. Geprüft wird der **gesamte Pfad inklusive 
 | --- | --- | --- | --- |
 | 1 | `kopiervorlagen` | `kopiervorlage` | `arbeitsblatt` |
 | 2 | `klausuren` | `klausur` oder `_ka_` | `klausur` |
-| 3 | `abbildungen` | `abbildung`, `abbsb`, `abbsvb` | `bild` |
+| 3 | `abbildungen` | `abbildung`, `abbsb`, `abbsvb` | `bild` (Dokumente); Bilder → `abbildungssammlung` (Abschnitt 13) |
 | 4 | `gefaehrdungsbeurteilung` | `_gfb_`, `gefaehrdung`, `gefahrdung` (also auch „Gefährdung…“) | `gefaehrdungsbeurteilung` |
 | 5 | `versuche` | Ordner-/Wortsegment `versuch` bzw. `versuche`, oder Dateiname beginnt mit `versuch_` | `zusatzmaterial` |
 | 6 | `lernzirkel` | Ordnername nach Abschnitt 7 | `arbeitsblatt` |
@@ -227,7 +239,7 @@ Folgen:
 Für jedes Cluster wird `guessMaterialType` auf den vollständigen Pfad jeder Datei angewendet
 (bei benannten Lösungspaaren nur auf die Aufgabendatei). Danach:
 
-1. Liefert eine Datei `gefaehrdungsbeurteilung`, `klausur`, `bild` oder `praesentation`, gewinnt diese Art.
+1. Liefert eine Datei `gefaehrdungsbeurteilung`, `klausur`, `bild`, `praesentation`, `video` oder `interaktiv`, gewinnt diese Art.
 2. Sonst: Liefert eine Datei `arbeitsblatt` und ist die Ordnerrolle nicht `klausuren` → `arbeitsblatt`.
 3. Sonst entscheidet die Ordnerrolle (Tabelle in Abschnitt 4).
 4. Bei Ordnerrolle `sonstiges`: die Art aus dem Dateinamen der ersten Datei, sonst die
@@ -237,6 +249,7 @@ Für jedes Cluster wird `guessMaterialType` auf den vollständigen Pfad jeder Da
 
 | Reihenfolge | Treffer | Materialart |
 | --- | --- | --- |
+| 0 | Endung `swf` → `interaktiv`; Endung `mp4`/`m4v`/`webm` → `video` | |
 | 1 | Pfad enthält `serviceband`, `lehrerband`, `lehrerhandbuch`, `lehrerhandreichung`, `handreichung`, `begleitband`, `kommentarband` | `serviceband` |
 | 2 | Pfad enthält `loesungsheft`, `loesungsbuch`, `loesungen zum` / `loesungen_zum` / `loesungen-zum` (**mit `oe`!**) | `loesungsbuch` |
 | 3 | Name enthält `losung`, `loesung`, `-lsg`, `_lsg` | `musterloesung` |
@@ -268,7 +281,7 @@ Für jedes Cluster wird `guessMaterialType` auf den vollständigen Pfad jeder Da
 - **`test` im Dateinamen** (auch „Testat“, „Kontest“) → `lernkontrolle`; **`brief`** → `sonstiges`;
   **`vorlage`** → `arbeitsblatt`; **`folien`** → `praesentation`.
 - Arten, die **nie** automatisch vergeben werden: `lehrbuchseite`, `aufgabe`, `differenzierung`,
-  `unterrichtsentwurf`, `notiz`, `loesung`, `video`, `link`, `h5p`, `moodle_kurs`. Für
+  `unterrichtsentwurf`, `notiz`, `loesung`, `link`, `h5p`, `moodle_kurs`. Für
   Lehrbuchseiten einen **eigenen Stapel** mit Standard-Materialart „Lehrbuchseite“ fahren (greift
   bei Ordnerrolle `sonstiges` und neutralen Dateinamen) oder die Art in der Vorschau setzen.
 
@@ -281,6 +294,8 @@ Für jedes Cluster wird `guessMaterialType` auf den vollständigen Pfad jeder Da
 | `klausur` | `Klausuren/Klausur 01 Zellbiologie.docx` (+ `… - Lösung.docx`) |
 | `lernkontrolle` | `Tests/K1 Lernkontrolle Zelle.pdf` |
 | `bild` | `Abbildungen/K1 Abbildung Zellorganellen.pdf` |
+| `abbildungssammlung` | `Abbildungen/Cytologie/S012 Abb 1b - Pflanzenzelle.jpg` (+ weitere Bilder, optional `abbildungen.json`) |
+| `video` | `Videos/Film - Ablauf der Mitose.mp4` (optional `videos.json`) |
 | `gefaehrdungsbeurteilung` | `Gefährdungsbeurteilungen/Katalase Wasserstoffperoxid.pdf` |
 | `zusatzmaterial` (Versuch) | `Versuche/Katalase Wasserstoffperoxid.pdf` |
 | `praesentation` | `Präsentationen/K1 Zellorganellen.pptx` |
@@ -349,7 +364,8 @@ Die Lehrwerk-Seite sortiert die zugeordneten Materialien nach Art (und teils Tit
 | Kopiervorlagen & Aufgaben | `arbeitsblatt`, `aufgabe`, `differenzierung` | |
 | Leistungsnachweise | `klausur`, `lernkontrolle` | |
 | Sicherheit | `gefaehrdungsbeurteilung`, `unterrichtsentwurf` | |
-| Abbildungen & Medien | `bild`, `video`, `praesentation`, `h5p` | |
+| Abbildungen | `abbildungssammlung`, `bild` | |
+| Medien | `video`, `praesentation`, `h5p`, `interaktiv` | |
 | Digitale Kurse | `moodle_kurs` | |
 | Weiteres | alles Übrige | |
 
@@ -427,6 +443,7 @@ Der Stapel erzeugt nur diese Verknüpfungen:
 | Versuch → GFB | `gehoert_zu` | Versuch → Gefährdungsbeurteilung | Themenabgleich (unten) |
 | Fassungsmaterial → Lösung | `musterloesung` | Fassungsmaterial → Lösungsbündel | `<Titel> - Lösung - Fassung …` im selben Ordner (Abschnitt 3.3) |
 | Fassungen | – (Varianten) | – | `varianten`-Cluster |
+| Video ↔ Arbeitsblatt | `bezug` („Bezieht sich auf“, an beiden Materialien sichtbar) | Video → Material der Bezugsdatei | `bezug` in `videos.json` (Abschnitt 14) |
 
 Die übrigen Beziehungstypen (`zusatzmaterial`, `differenzierung`, `nachfolger`, `quelle`, `loesung`)
 und Weblinks legt der Stapel **nicht** an; sie werden nach dem Import manuell gesetzt.
@@ -605,6 +622,8 @@ Warum es funktioniert:
 
 ## 12. Checkliste für Agenten
 
+(Ergänzend für Bilder und Videos siehe Abschnitte 13.7 und 14.4.)
+
 Vor dem Packen prüfen:
 
 - [ ] Nur erlaubte Formate (Abschnitt 2); Bilder in PDF umgewandelt; keine ZIPs im ZIP.
@@ -630,3 +649,177 @@ Vor dem Packen prüfen:
 
 Nach der Analyse prüfen: keine Cluster der Art `unklar`, keine Warnungen außer erwarteten
 („Text per Vision/OCR“), Lernzirkel und Versuch↔GFB-Verknüpfungen wie geplant.
+
+---
+
+## 13. Abbildungssammlungen
+
+Eine **Abbildungssammlung** (Materialart `abbildungssammlung`) ist *ein* Material mit vielen
+Einzelbildern – z. B. alle Grafiken eines Schulbuch-Kapitels von einer Verlags-CD. In Materiallisten
+erscheint sie einmal; in der Suche ist jedes Bild einzeln auffindbar (Volltext über Titel,
+Beschreibung, Schlagwörter, Kapitel, Seite, Abbildung sowie Vektorsuche über dieselben Angaben).
+Die Sammlung zeigt eine Galerie mit Großansicht, Umschalter beschriftet/unbeschriftet, Einzel- und
+ZIP-Download und bearbeitbaren Angaben je Bild – auch über Freigabe-Links.
+
+### 13.1 Ordnerstruktur
+
+```
+<Lehrwerk>/Abbildungen/<Sammlungsname>/
+    S012 Abb 1b - Pflanzenzelle im Lichtmikroskop.jpg
+    S012 Abb 1b - Pflanzenzelle im Lichtmikroskop - unbeschriftet.png
+    abbildungen.json          (optional)
+```
+
+- Ein Bild gehört zu einer Sammlung, wenn **ein Ordner** in seinem Pfad `abbildung`, `abbsb` oder
+  `abbsvb` enthält (der Dateiname zählt hier nicht). Eine Sammlung entsteht **je Ordner** (voller
+  Pfad); Unterordner sind eigene Sammlungen.
+- Bildformate: `png`, `jpg`/`jpeg`, `webp`, `gif`. **`tif`/`tiff`/`bmp` werden abgelehnt** (Browser
+  und Miniaturerzeugung können sie nicht lesen) – vorher wandeln, Herkunft in `original` vermerken.
+- `cover.*` bleibt immer Lehrwerk-Cover, auch im Abbildungsordner.
+- Videos und `.swf` in einem Abbildungsordner werden **eigene** Materialien (Hinweis in der Vorschau),
+  nie Teil der Sammlung.
+- Titel der Sammlung: `titel` aus `abbildungen.json`, sonst der Ordnername mit Präfix
+  („Cytologie“ → „Abbildungen Cytologie“; ein Ordner nur „Abbildungen“ → „Abbildungen <Elternordner>“).
+
+### 13.2 `abbildungen.json` (Version 1)
+
+```json
+{
+  "version": 1,
+  "titel": "Linder Biologie 1 – Abbildungen Kapitel Cytologie",
+  "beschreibung": "Grafiken und Fotos aus Schülerband, Arbeitsbuch und Materialheft",
+  "quelle": "Linder Biologie Teil 1, Grafik-CD (Schroedel)",
+  "bilder": [
+    {
+      "datei": "S012 Abb 1b - Pflanzenzelle im Lichtmikroskop.jpg",
+      "titel": "Pflanzenzelle im Lichtmikroskop",
+      "beschreibung": "Zellwand, Vakuole, Chloroplasten und Zellkern; beschriftet",
+      "werk": "Schülerband", "seite": 12, "abbildung": "1b", "kapitel": "Cytologie",
+      "schlagwoerter": ["Zelle", "Pflanzenzelle", "Lichtmikroskop"],
+      "beschriftet": true, "variante_von": null,
+      "original": "SCHULB/CYTOLOG/HOCH/012_1B.TIF"
+    },
+    {
+      "datei": "S012 Abb 1b - Pflanzenzelle im Lichtmikroskop - unbeschriftet.png",
+      "beschriftet": false,
+      "variante_von": "S012 Abb 1b - Pflanzenzelle im Lichtmikroskop.jpg"
+    }
+  ]
+}
+```
+
+| Feld | Typ | Bedeutung |
+| --- | --- | --- |
+| `version` | Zahl | `1` (fehlt → 1; höher → Datei wird mit Fehler ignoriert) |
+| `titel`, `beschreibung`, `quelle` | Text | Titel, Kurzbeschreibung und Quelle des Sammlungsmaterials |
+| `bilder[].datei` | Text, **Pflicht** | Dateiname im selben Ordner (Vergleich ohne Groß/klein, Unicode-normalisiert) |
+| `titel`, `beschreibung`, `werk`, `abbildung`, `kapitel`, `original` | Text | Angaben je Bild |
+| `seite` | Zahl oder Text | z. B. `12` oder `"12–13"` |
+| `schlagwoerter` | Liste (oder Text mit `,`/`;`) | höchstens 20 |
+| `beschriftet` | `true`/`false` | fehlt = unbekannt |
+| `variante_von` | `datei`-Name oder `null` | Hauptbild dieser Fassung; `null` = ausdrücklich Hauptbild; **fehlt** = Namensregel (13.3) |
+
+Alle Felder außer `datei` sind optional; unbekannte Felder werden ignoriert. Reihenfolge der Bilder
+in der Galerie: wie in `bilder`, danach Bilder ohne Eintrag nach Dateinamen.
+
+### 13.3 Ohne oder mit unvollständiger `abbildungen.json`
+
+- **Angaben aus dem Dateinamen:** `S012 Abb 1b - Titel.jpg` → Seite 12, Abb. 1b, Titel „Titel“.
+  Ebenso `Seite 12-13 - Titel`, `S12 Titel`, `Abb 3 - Titel`; sonst wird der Dateiname zum Titel.
+- **Varianten per Namensregel:** Endet der Name (ohne Endung) auf ` - unbeschriftet`,
+  `_unbeschriftet`, `(unbeschriftet)`, ` - ohne Beschriftung` oder ` - stumm`, ist die Datei eine
+  unbeschriftete Variante des gleichnamigen Bildes ohne diese Endung (Endung `jpg`/`png` egal).
+- Varianten erben fehlende Angaben (Titel, Beschreibung, Kapitel, Seite …) vom Hauptbild und werden
+  in der Suche nicht doppelt gefunden; die Großansicht schaltet zwischen den Fassungen um.
+- Ketten (`C → B → A`) werden auf das Hauptbild verkürzt, Kreise aufgelöst (Warnung).
+
+### 13.4 Warnungen in der Vorschau
+
+| Fall | Verhalten |
+| --- | --- |
+| JSON ungültig / falsche Version / `bilder` fehlt | Datei wird nicht verwendet, Angaben aus Dateinamen, Warnung |
+| Eintrag ohne `datei`, doppelter Eintrag | Eintrag ignoriert, Warnung |
+| JSON nennt Datei, die im Ordner fehlt | Warnung („… im Ordner fehlt“), Rest wird übernommen |
+| Bild ohne Eintrag (bei vorhandener JSON) | Angaben aus dem Dateinamen, Sammelwarnung |
+| `variante_von` zeigt auf unbekannte Datei | Bild wird eigenes Hauptbild, Warnung |
+| Bild ohne Titel/Beschreibung aus dem Paket | Hinweis „… später per KI ergänzbar“ |
+| Bild ist schon als Datei in SARU | Hinweis; nur Dubletten **in derselben Sammlung** werden übersprungen |
+
+Die Vorschau zeigt je Sammlung Ordner, Zahl der Varianten, ob eine JSON gefunden wurde und die
+Bilderliste; bearbeitbar sind Titel, Kurzbeschreibung und Schlagwörter der Sammlung.
+
+### 13.5 Anlegen, Fortsetzen, Rückgängig
+
+- Jedes Bild wird ein Anhang des Sammlungsmaterials, seine Angaben liegen in `material_abbildungen`.
+- Existiert im gewählten Lehrwerk schon eine Sammlung **gleichen Titels**, werden die Bilder dort
+  **ergänzt** (Bilder mit gleicher Prüfsumme übersprungen). So lässt sich eine große CD auf mehrere
+  Stapel verteilen. „Rückgängig“ entfernt dann nur die in diesem Stapel ergänzten Bilder.
+- Die Sammlung hängt per `gehoert_zu` am Lehrwerk und erscheint in der Gruppe „Abbildungen“.
+
+### 13.6 KI-Ergänzung (optional)
+
+Bilder ohne Titel/Beschreibung aus dem Paket (Herkunft „Dateiname“) kann die **Vision-KI**
+ergänzen: Titel (nur wenn der bisherige kein sprechender Titel ist), Beschreibung, Schlagwörter,
+Beschriftet ja/nein. Sparsam: Bilder werden auf 768 px verkleinert, 4 Bilder je Anfrage, 2 Anfragen
+parallel; Abbruch nach 3 Fehlschlägen in Folge. Start im Stapel („Fehlende Bildangaben nach dem
+Anlegen per KI ergänzen“, `mapping.abbildungenKi: true`) oder jederzeit in der Sammlung („Per KI
+ergänzen“, abbrechbar). Von Hand bearbeitete Bilder fasst die KI nicht mehr an. Voraussetzung:
+KI aktiv und Vision in den KI-Einstellungen eingeschaltet.
+
+### 13.7 Checkliste
+
+- [ ] Bilder als PNG (Grafiken) oder JPEG (Fotos), keine TIFF/BMP.
+- [ ] Ein Ordner je Sammlung unter `Abbildungen/`, sprechender Ordnername oder `titel` in der JSON.
+- [ ] Dateinamen nach `S<Seite> Abb <Nr> - <Titel>.<ext>`; Varianten mit ` - unbeschriftet`.
+- [ ] `abbildungen.json`: jede `datei` existiert, `variante_von` nennt den exakten Dateinamen.
+- [ ] Paket (inkl. Bilder) unter 512 MiB, sonst auf mehrere Stapel mit demselben Lehrwerk verteilen.
+
+---
+
+## 14. Videos und interaktive Inhalte
+
+Jede Videodatei (`mp4`, `m4v`, `webm`, je ≤ 256 MiB) wird ein eigenes Material **`video`**, jede
+`.swf` ein Material **`interaktiv`** – egal in welchem Ordner. Die Materialseite und Freigabe-Links
+spielen Videos direkt ab.
+
+### 14.1 `videos.json` (Version 1)
+
+Optional im selben Ordner wie die Filme (empfohlen `<Lehrwerk>/Videos/videos.json`):
+
+```json
+{
+  "version": 1,
+  "videos": [
+    {
+      "datei": "Film - Ablauf der Mitose.mp4",
+      "titel": "Ablauf der Mitose",
+      "beschreibung": "Animation der Mitosephasen",
+      "bezug": ["Arbeitsblätter/AB6 - Film.pdf", "Kopiervorlagen/K3 AB 02 Zellzyklus.docx"]
+    }
+  ]
+}
+```
+
+| Feld | Bedeutung |
+| --- | --- |
+| `datei` (Pflicht) | Video bzw. `.swf` im selben Ordner |
+| `titel`, `beschreibung` | übernommen statt KI-Vorschlag |
+| `bezug` | Pfade **relativ zum Paket-Wurzelordner** (Text oder Liste). Liegt im ZIP noch ein gemeinsamer Wurzelordner davor, passt auch ein Pfad, auf den der Dateipfad endet; bei mehreren Treffern gewinnt der kürzeste Pfad (Warnung). |
+
+### 14.2 Verknüpfung „Bezieht sich auf“
+
+Jeder gefundene `bezug` erzeugt eine Verknüpfung vom Typ **`bezug`** vom Video zum Material der
+genannten Datei (bei einem Paar das Arbeitsblatt). Sie wird an **beiden** Materialien als
+„Bezieht sich auf“ angezeigt; ein Freigabe-Link auf eines der beiden bringt das andere mit. In der
+Vorschau steht sie wie andere Vorschläge als Haken („Vorgeschlagene Verknüpfungen“).
+
+### 14.3 Warnungen
+
+Fehlender Bezug („… im Paket nicht gefunden – keine Verknüpfung“), mehrdeutiger Bezug, Eintrag ohne
+Datei (Protokoll), ungültige JSON (Protokoll, Datei ignoriert), Video im Abbildungsordner (Hinweis).
+
+### 14.4 Checkliste
+
+- [ ] Videos ≤ 256 MiB, Format `mp4`/`m4v`/`webm` (H.264/AAC für alle Browser).
+- [ ] `videos.json` neben den Filmen; `bezug` mit Pfad ab Paketwurzel inkl. Ordner und Endung.
+- [ ] Bezugsdateien liegen im selben Stapel (Bezüge über Stapelgrenzen hinweg werden nicht aufgelöst).

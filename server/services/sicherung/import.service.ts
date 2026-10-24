@@ -31,6 +31,7 @@ import {
   lessonPhases,
   lessons,
   lessonTags,
+  materialAbbildungen,
   materialAssets,
   materialCompetencies,
   materialGradeLevels,
@@ -930,6 +931,15 @@ async function importAusfuehren(
         if (kompetenzen.length) await tx.insert(materialCompetencies).values(kompetenzen.map((competencyId) => ({ materialId: id, competencyId })))
         if (gruppen.length) await tx.insert(materialLearningGroups).values(gruppen.map((learningGroupId) => ({ materialId: id, learningGroupId })))
         if (stufen.length) await tx.insert(materialGradeLevels).values(stufen.map((gradeLevel) => ({ materialId: id, gradeLevel })))
+        // Bildangaben einer Abbildungssammlung: nur zu übernommenen Dateien, Hauptbilder zuerst.
+        const bilder = struktur
+          .nach('materialAbbildungen', 'materialId', id)
+          .filter((zeile) => dateien.has(s(zeile.assetId)))
+        const uebernommen = new Set(bilder.map((zeile) => s(zeile.id)))
+        for (const zeile of [...bilder].sort((a, b) => Number(Boolean(a.varianteVon)) - Number(Boolean(b.varianteVon)))) {
+          const variante = zeile.varianteVon && uebernommen.has(s(zeile.varianteVon)) ? s(zeile.varianteVon) : null
+          await tx.insert(materialAbbildungen).values(zeileFuerInsert(materialAbbildungen, zeile, { varianteVon: variante }))
+        }
       })
 
       materialZiel.set(id, id)
@@ -939,6 +949,9 @@ async function importAusfuehren(
       await angelegt('material', id, s(material.title))
 
       queueReindex('material', id)
+      for (const zeile of struktur.nach('materialAbbildungen', 'materialId', id)) {
+        if (dateien.has(s(zeile.assetId))) queueReindex('abbildung', s(zeile.id))
+      }
       for (const variante of varianten) {
         for (const asset of struktur.assetsNachVariante.get(s(variante.id)) ?? []) {
           const datei = dateien.get(s(asset.id))

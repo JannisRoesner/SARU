@@ -4,6 +4,7 @@ import {
   competencies,
   learningGroups,
   lessonCompetencies,
+  materialAbbildungen,
   lessonMaterials,
   lessonPhaseMaterials,
   lessonPhases,
@@ -45,6 +46,8 @@ export const SICHERUNG_TABELLEN = {
   materials,
   materialVariants,
   materialAssets,
+  /** Angaben je Bild einer Abbildungssammlung (seit Abbildungssammlungen; ältere Sicherungen: leer). */
+  materialAbbildungen,
   materialRelations,
   materialSubjects,
   materialTopics,

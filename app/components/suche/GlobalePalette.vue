@@ -5,7 +5,7 @@ import { materialPfad } from '#shared/utils/material-pfad'
 const offen = defineModel<boolean>({ required: true })
 
 interface Treffer {
-  entityType: 'material' | 'unterrichtsstunde' | 'reihe'
+  entityType: 'material' | 'unterrichtsstunde' | 'reihe' | 'abbildung'
   entityId: string
   title: string
   snippet: string | null
@@ -31,7 +31,11 @@ const PFADE = {
   material: '/materialien',
   unterrichtsstunde: '/stunden',
   reihe: '/reihen',
+  abbildung: '/materialien',
 } as const
+
+/** Höchstens so viele Bildtreffer in der Palette – die übrigen zeigt die Ergebnisseite. */
+const MAX_BILDER_IN_PALETTE = 4
 
 const VORSCHLAG_ICONS: Record<string, string> = {
   verlauf: 'clock-rotate-left',
@@ -60,7 +64,7 @@ async function suchen() {
   laedt.value = true
   try {
     const [ergebnis, hinweise] = await Promise.all([
-      $fetch<{ treffer: Treffer[] }>('/api/search', {
+      $fetch<{ treffer: Treffer[]; abbildungen?: Treffer[] }>('/api/search', {
         query: { q: query, limit: 8 },
         signal: abbruch.signal,
       }),
@@ -69,7 +73,7 @@ async function suchen() {
         signal: abbruch.signal,
       }),
     ])
-    treffer.value = ergebnis.treffer
+    treffer.value = [...ergebnis.treffer, ...(ergebnis.abbildungen ?? []).slice(0, MAX_BILDER_IN_PALETTE)]
     // Vorschläge, die schon als Treffer erscheinen, wären doppelt.
     vorschlaege.value = hinweise.vorschlaege.filter(
       (v) => !ergebnis.treffer.some((t) => t.title === v.value),
@@ -106,6 +110,10 @@ function oeffnen(index: number) {
     if (t.entityType === 'material') {
       const typ = (t.datensatz as { materialType?: string } | undefined)?.materialType
       return navigateTo(materialPfad({ id: t.entityId, materialType: typ }))
+    }
+    if (t.entityType === 'abbildung') {
+      const materialId = (t.datensatz as { materialId?: string } | undefined)?.materialId
+      return navigateTo(`/materialien/${materialId}?abbildung=${t.entityId}`)
     }
     return navigateTo(`${PFADE[t.entityType]}/${t.entityId}`)
   }

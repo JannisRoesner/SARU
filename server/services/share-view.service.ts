@@ -2,6 +2,7 @@ import { getLessonDetail } from '../repositories/lesson.repository'
 import { getMaterialDetail, listMaterials, type MaterialSummary } from '../repositories/material.repository'
 import { getSeriesDetail } from '../repositories/series.repository'
 import { notFound } from '../utils/errors'
+import { listAbbildungen, requireAbbildung, type AbbildungEintrag } from './abbildungen/abbildung.service'
 import type { FreigabeUmfang } from './share.service'
 
 /**
@@ -33,6 +34,28 @@ export interface GastMaterial {
   anhaengend: { id: string; title: string; materialType: string; relationType: string }[]
   /** Zugeordnete Materialien, z. B. die Stationen eines Lernzirkels (Lehrwerke: siehe Startansicht). */
   inhalt: GastMaterialKurz[]
+  /** Abbildungssammlung: Zahl der Bilder (die Bilder selbst lädt die Galerie gesondert). */
+  abbildungAnzahl: number | null
+}
+
+/** Bild einer geteilten Abbildungssammlung – ohne KI-Metadaten, wie bei Materialien. */
+export type GastAbbildung = Omit<AbbildungEintrag, 'ki' | 'herkunft'>
+
+function gastSicht(eintrag: AbbildungEintrag): GastAbbildung {
+  const { ki: _ki, herkunft: _herkunft, ...rest } = eintrag
+  return rest
+}
+
+export async function gastAbbildungen(umfang: FreigabeUmfang, materialId: string): Promise<GastAbbildung[]> {
+  if (!umfang.materialIds.has(materialId)) throw notFound('Das Material')
+  return (await listAbbildungen(materialId)).map(gastSicht)
+}
+
+export async function gastAbbildung(umfang: FreigabeUmfang, id: string): Promise<GastAbbildung> {
+  const row = await requireAbbildung(id)
+  const eintrag = (await gastAbbildungen(umfang, row.materialId)).find((e) => e.id === id)
+  if (!eintrag) throw notFound('Die Abbildung')
+  return eintrag
 }
 
 export interface GastMaterialKurz {
@@ -102,6 +125,8 @@ export async function gastMaterial(umfang: FreigabeUmfang, id: string): Promise<
   if (!umfang.materialIds.has(id)) throw notFound('Das Material')
   const m = await getMaterialDetail(id)
   if (!m) throw notFound('Das Material')
+  // Eine Sammlung kann tausende Bilder haben – die lädt die Galerie gesondert und seitenweise sichtbar.
+  const sammlung = m.materialType === 'abbildungssammlung'
   return {
     id: m.id,
     title: m.title,
@@ -114,7 +139,7 @@ export async function gastMaterial(umfang: FreigabeUmfang, id: string): Promise<
       id: v.id,
       label: v.label,
       isDefault: v.isDefault,
-      dateien: v.assets.map((a) => ({
+      dateien: (sammlung ? [] : v.assets).map((a) => ({
         id: a.id,
         kind: a.kind,
         role: a.role,
@@ -126,7 +151,10 @@ export async function gastMaterial(umfang: FreigabeUmfang, id: string): Promise<
       })),
     })),
     anhaengend: m.relations
-      .filter((r) => r.direction === 'ausgehend' && umfang.materialIds.has(r.material.id))
+      .filter(
+        (r) =>
+          (r.direction === 'ausgehend' || r.relationType === 'bezug') && umfang.materialIds.has(r.material.id),
+      )
       .map((r) => ({
         id: r.material.id,
         title: r.material.title,
@@ -134,6 +162,7 @@ export async function gastMaterial(umfang: FreigabeUmfang, id: string): Promise<
         relationType: r.relationType,
       })),
     inhalt: m.materialType === 'lehrwerk' ? [] : await gastLehrwerkInhalt(umfang, m.id),
+    abbildungAnzahl: sammlung ? m.variants.reduce((summe, v) => summe + v.assets.length, 0) : null,
   }
 }
 

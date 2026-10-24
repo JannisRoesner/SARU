@@ -1,4 +1,14 @@
 import { istInteraktivDatei } from './interaktiv'
+import {
+  ABBILDUNG_BILD_ERWEITERUNGEN,
+  bildUeberspringGrund,
+  istAbbildungenManifest,
+  istAbbildungsBildDatei,
+  istInAbbildungsOrdner,
+  istVideoDatei,
+  VIDEO_ERWEITERUNGEN,
+} from './abbildungen'
+import { istMedienManifest } from './medien'
 
 /** Dateiformate für „Material mit KI anlegen“ (Analyse + Metadaten-Vorschläge). */
 export const AI_MATERIAL_FILE_EXTENSIONS = [
@@ -59,7 +69,9 @@ export function aiMaterialFormatsLabel(): string {
 
 /** `accept`-Attribut für den Stapel-Upload inklusive ZIP-Pakete. */
 export function bulkMaterialAcceptAttribute(): string {
-  return `${aiMaterialAcceptAttribute()},.swf,.png,.jpg,.jpeg,.webp,application/x-shockwave-flash,.zip,application/zip`
+  const bilder = ABBILDUNG_BILD_ERWEITERUNGEN.map((ext) => `.${ext}`).join(',')
+  const videos = VIDEO_ERWEITERUNGEN.map((ext) => `.${ext}`).join(',')
+  return `${aiMaterialAcceptAttribute()},.swf,application/x-shockwave-flash,${bilder},${videos},.json,.zip,application/zip`
 }
 
 /** „cover.png“, „Cover.JPG“, „Cover - Titel.webp“ – Bild, das im Stapel als Lehrwerk-Cover dienen kann. */
@@ -69,11 +81,22 @@ export function isLehrwerkCoverFileName(fileName: string): boolean {
   return Boolean(match && /^cover(?:[\s._-].*)?$/i.test(match[1]!.trim()))
 }
 
-/** Einzeldokumente im Stapel: KI-analysierbare Formate, interaktive Inhalte (.swf) und Lehrwerk-Cover. */
-export function isBulkDocumentFileName(fileName: string): boolean {
-  return isAiMaterialFileName(fileName) || istInteraktivDatei(fileName) || isLehrwerkCoverFileName(fileName)
+/**
+ * Einzeldokumente im Stapel: KI-analysierbare Formate, interaktive Inhalte (.swf), kurze Videos,
+ * Lehrwerk-Cover sowie Bilder und `abbildungen.json` in Abbildungsordnern.
+ * `pfad` ist der relative Pfad im Paket (oder nur der Dateiname, dann zählt kein Ordner).
+ */
+export function isBulkDocumentFileName(pfad: string): boolean {
+  if (isAiMaterialFileName(pfad) || istInteraktivDatei(pfad) || istVideoDatei(pfad)) return true
+  if (isLehrwerkCoverFileName(pfad) || istMedienManifest(pfad)) return true
+  return (istAbbildungsBildDatei(pfad) || istAbbildungenManifest(pfad)) && istInAbbildungsOrdner(pfad)
 }
 
-export function isBulkMaterialFileName(fileName: string): boolean {
-  return isBulkDocumentFileName(fileName) || /\.zip$/i.test(fileName)
+export function isBulkMaterialFileName(pfad: string): boolean {
+  return isBulkDocumentFileName(pfad) || /\.zip$/i.test(pfad)
+}
+
+/** Warum eine Datei im Stapel nicht übernommen wird – für die Liste „übersprungen“ in der Vorschau. */
+export function bulkUeberspringGrund(pfad: string): string {
+  return bildUeberspringGrund(pfad) ?? 'Kein unterstütztes Dateiformat.'
 }

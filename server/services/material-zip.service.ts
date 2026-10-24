@@ -10,7 +10,24 @@ import { fileExists, readFileStream, sanitizeFileName } from './storage.service'
 export interface ZipEintrag {
   /** Pfad innerhalb des Archivs. */
   name: string
-  storageKey: string
+  /** Gespeicherte Datei – oder `daten` für erzeugte Inhalte wie `abbildungen.json`. */
+  storageKey?: string
+  daten?: Buffer
+}
+
+/** `abbildungen.json` für eine Sammlung im ZIP – dasselbe Format wie beim Import. */
+async function sammlungsManifest(materialId: string): Promise<Buffer> {
+  const { abbildungenManifest } = await import('./abbildungen/abbildung.service')
+  return Buffer.from(`${JSON.stringify(await abbildungenManifest(materialId), null, 2)}\n`, 'utf8')
+}
+
+async function sammlungsIds(ids: string[]): Promise<Set<string>> {
+  if (!ids.length) return new Set()
+  const zeilen = await useDatabase()
+    .select({ id: materials.id })
+    .from(materials)
+    .where(and(inArray(materials.id, ids), eq(materials.materialType, 'abbildungssammlung')))
+  return new Set(zeilen.map((z) => z.id))
 }
 
 /** Macht Namen im Archiv eindeutig: `a.pdf`, `a (2).pdf` … */
@@ -71,6 +88,11 @@ export async function sammleZipEintraege(
 
   const belegt = new Set<string>()
   const eintraege: ZipEintrag[] = []
+
+  // Eine Abbildungssammlung bringt ihre Bildangaben mit, damit das ZIP wieder importierbar ist.
+  if ((await sammlungsIds([materialId])).has(materialId)) {
+    eintraege.push({ name: eindeutigerName('abbildungen.json', belegt), daten: await sammlungsManifest(materialId) })
+  }
 
   for (const gruppe of gruppen) {
     if (!gruppe.ids.length) continue
@@ -206,6 +228,12 @@ export async function sammleLehrwerkZipEintraege(
   const nachTitel = (a: string, b: string) =>
     (infos.get(a)?.title ?? '').localeCompare(infos.get(b)?.title ?? '', 'de', { numeric: true })
 
+  // Sammlungen behalten Ordner und Dateinamen, damit ihre abbildungen.json passt.
+  const manifeste = new Map<string, Buffer>()
+  for (const id of ids) {
+    if (infos.get(id)?.materialType === 'abbildungssammlung') manifeste.set(id, await sammlungsManifest(id))
+  }
+
   const belegt = new Set<string>()
   const eintraege: ZipEintrag[] = []
   const platziert = new Set<string>([lehrwerkId])
@@ -217,12 +245,14 @@ export async function sammleLehrwerkZipEintraege(
     const eigene = dateien.get(id) ?? []
     const stationen = (kinder.get(id) ?? []).filter((k) => !platziert.has(k)).sort(nachTitel)
     const loes = (loesungen.get(id) ?? []).filter((l) => !platziert.has(l)).sort(nachTitel)
-    const einzeln = eigene.length === 1 && !stationen.length && !loes.length
+    const manifest = manifeste.get(id)
+    const einzeln = eigene.length === 1 && !stationen.length && !loes.length && !manifest
     const ziel = einzeln ? ordner : `${ordner}${titel}/`
 
+    if (manifest) eintraege.push({ name: eindeutigerName(`${ziel}abbildungen.json`, belegt), daten: manifest })
     for (const datei of eigene) {
       const name =
-        eigene.length === 1 ? `${titel}${endungVon(datei.fileName)}` : sanitizeFileName(datei.fileName ?? titel)
+        eigene.length === 1 && !manifest ? `${titel}${endungVon(datei.fileName)}` : sanitizeFileName(datei.fileName ?? titel)
       eintraege.push({ name: eindeutigerName(`${ziel}${name}`, belegt), storageKey: datei.storageKey })
     }
     for (const station of stationen) ablegen(station, ziel)
@@ -292,7 +322,13 @@ export function zipStream(eintraege: ZipEintrag[]): PassThrough {
   void (async () => {
     for (const eintrag of eintraege) {
       if (aus.destroyed) return
-      if (!(await fileExists(eintrag.storageKey))) continue
+      if (eintrag.daten) {
+        const datei = new ZipPassThrough(eintrag.name)
+        zip.add(datei)
+        datei.push(new Uint8Array(eintrag.daten), true)
+        continue
+      }
+      if (!eintrag.storageKey || !(await fileExists(eintrag.storageKey))) continue
       const datei = new ZipPassThrough(eintrag.name)
       zip.add(datei)
       for await (const chunk of readFileStream(eintrag.storageKey)) {

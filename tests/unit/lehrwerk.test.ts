@@ -102,9 +102,20 @@ describe('Lehrwerk-Hilfen', () => {
   })
 
   it('lässt leere Gruppen weg', () => {
-    const gruppen = gruppiereLehrwerkInhalt([{ id: '1', materialType: 'bild' }])
+    const gruppen = gruppiereLehrwerkInhalt([{ id: '1', materialType: 'video' }])
     expect(gruppen).toHaveLength(1)
     expect(gruppen[0]!.id).toBe('medien')
+  })
+
+  it('sammelt Abbildungssammlungen und Einzelbilder in der Gruppe „Abbildungen“', () => {
+    const gruppen = gruppiereLehrwerkInhalt([
+      { id: 's', materialType: 'abbildungssammlung', title: 'Abbildungen Cytologie' },
+      { id: 'b', materialType: 'bild' },
+      { id: 'v', materialType: 'video' },
+    ])
+    expect(gruppen.map((g) => g.id)).toEqual(['abbildungen', 'medien'])
+    expect(gruppen[0]!.label).toBe('Abbildungen')
+    expect(gruppen[0]!.eintraege.map((e) => e.id)).toEqual(['s', 'b'])
   })
 })
 

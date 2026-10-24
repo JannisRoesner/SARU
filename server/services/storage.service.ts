@@ -80,8 +80,8 @@ export const ALLOWED_TYPES: AllowedType[] = [
   },
   {
     label: 'Video',
-    extensions: ['mp4', 'webm', 'mov'],
-    mimeTypes: ['video/mp4', 'video/webm', 'video/quicktime'],
+    extensions: ['mp4', 'm4v', 'webm', 'mov'],
+    mimeTypes: ['video/mp4', 'video/x-m4v', 'video/webm', 'video/quicktime'],
     sniffable: true,
   },
   {

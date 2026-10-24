@@ -85,6 +85,12 @@ export const materialTypes = definitions<MaterialType>({
     tone: 'accent',
     description: 'Interaktive Animation oder Simulation (z. B. .swf), direkt im Browser abspielbar',
   },
+  abbildungssammlung: {
+    label: 'Abbildungssammlung',
+    icon: 'images',
+    tone: 'violett',
+    description: 'Viele Grafiken und Fotos als ein Material – mit Galerie, Großansicht und Suche je Bild',
+  },
   sonstiges: { label: 'Sonstiges', icon: 'shapes', tone: 'neutral' },
 })
 
@@ -155,6 +161,7 @@ export const materialRelationTypes = definitions<MaterialRelationType>({
   gehoert_zu: { label: 'Gehört zu', icon: 'link' },
   nachfolger: { label: 'Folgt auf', icon: 'arrow-right' },
   quelle: { label: 'Quelle', icon: 'quote-left' },
+  bezug: { label: 'Bezieht sich auf', icon: 'arrows-left-right' },
 })
 
 /** Aus Sicht des geöffneten Materials: eingehendes „gehört zu“ bedeutet „enthält“. */
@@ -163,6 +170,7 @@ export function relationAnzeigeLabel(
   direction: 'ausgehend' | 'eingehend',
 ): string {
   if (type === 'gehoert_zu' && direction === 'eingehend') return 'Enthält'
+  // „Bezieht sich auf“ gilt in beide Richtungen.
   return materialRelationTypes.label(type as MaterialRelationType)
 }
 
@@ -203,6 +211,7 @@ export const searchEntityTypes = definitions<SearchEntityType>({
   material: { label: 'Material', icon: 'folder-open', tone: 'primary' },
   unterrichtsstunde: { label: 'Unterrichtsstunde', icon: 'chalkboard-user', tone: 'accent' },
   reihe: { label: 'Reihe', icon: 'layer-group', tone: 'violett' },
+  abbildung: { label: 'Abbildung', icon: 'image', tone: 'violett' },
 })
 
 export const roles = definitions<Role>({
