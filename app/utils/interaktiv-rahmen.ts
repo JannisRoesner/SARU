@@ -105,6 +105,8 @@ export function interaktivRahmenDokument(origin: string): string {
       var optionen = paket
         ? { url: HERKUNFT + paket.start, base: HERKUNFT + paket.basis, parameters: paket.parameter }
         : { data: new Uint8Array(daten.slice(0)) };
+      // Anwendungen, die selbst nicht skalieren, auf die Rahmengröße einpassen (passt sich mit dem Fenster an).
+      if (paket && paket.skalieren) { optionen.scale = 'showAll'; optionen.forceScale = true; optionen.salign = ''; optionen.forceAlign = true; }
       player.load(optionen).catch(function (e) { an({ type: 'fehler', text: String(e) }); });
     }
     addEventListener('message', function (e) {

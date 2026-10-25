@@ -159,6 +159,7 @@ let paketDaten: {
   start: string
   basis: string
   parameter: Record<string, string>
+  skalieren: boolean
   verzeichnis: Record<string, { o: number; l: number; t: string }>
 } | null = null
 let erstesAnhalten = true
@@ -251,7 +252,7 @@ async function datenLaden() {
     meta.value = parseSwfMetadaten(bytes)
     const paket = meta.value?.paket
     paketDaten = paket
-      ? { start: paket.start, basis: paket.basis, parameter: { ...paket.parameter }, verzeichnis: paketVerzeichnis(bytes, paket) }
+      ? { start: paket.start, basis: paket.basis, parameter: { ...paket.parameter }, skalieren: paket.skalieren, verzeichnis: paketVerzeichnis(bytes, paket) }
       : null
     const kopf = parseSwfKopf(bytes)
     if (kopf) {

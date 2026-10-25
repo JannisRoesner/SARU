@@ -72,6 +72,11 @@ export interface InteraktivPaket {
   basis: string
   /** FlashVars der Start-SWF. */
   parameter: Record<string, string>
+  /**
+   * Inhalt auf den Rahmen einpassen, auch wenn die Start-SWF das Skalieren abschaltet (z. B. Cornelsens
+   * Flinter). Setzt voraus, dass die Bühnengröße der Start-SWF der gezeichneten Größe entspricht.
+   */
+  skalieren: boolean
   dateien: InteraktivPaketDatei[]
 }
 
@@ -134,7 +139,7 @@ function paketAus(roh: unknown): InteraktivPaket | null {
       if (typeof wert === 'string' || typeof wert === 'number' || typeof wert === 'boolean') parameter[name] = String(wert)
     }
   }
-  return { start, basis: basis ? `${basis}/` : '', parameter, dateien }
+  return { start, basis: basis ? `${basis}/` : '', parameter, skalieren: p.skalieren === true, dateien }
 }
 
 /** Lage einer Paketdatei in der Hülle: Byte-Versatz (bezogen auf den Puffer) und Länge. */

@@ -254,6 +254,14 @@ describe('interaktive Inhalte: Paket-SWF', () => {
     expect(meta?.paket?.basis).toBe('german/module1/')
   })
 
+  it('übernimmt „skalieren“ nur bei true', () => {
+    const paket = (skalieren?: unknown) =>
+      metaAus({ saru: 1, paket: { start: 'a.swf', skalieren, dateien: [{ pfad: 'a.swf', id: 1 }] } })?.paket?.skalieren
+    expect(paket(true)).toBe(true)
+    expect(paket('ja')).toBe(false)
+    expect(paket()).toBe(false)
+  })
+
   it('normalisiert Pfade wie relative URLs', () => {
     expect(paketPfad('German/Module1/../../Common/Module1/images/1_A2.JPG?x=1#a')).toBe('common/module1/images/1_a2.jpg')
     expect(paketPfad('./a//b\\C%20d.txt')).toBe('a/b/c d.txt')
