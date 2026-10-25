@@ -55,6 +55,142 @@ export interface InteraktivMetadaten {
   schieber: boolean
   /** Gesamtzahl der Frames für den Schieber; null = aus dem SWF-Kopf nehmen. */
   totalFrames: number | null
+  /** Paket-SWF: Hülle mit Start-SWF und Nachbardateien (null bei gewöhnlichen SWFs). */
+  paket: InteraktivPaket | null
+}
+
+/**
+ * Paket-SWF („Bündel“): Die Datei ist nur eine Hülle. Sie enthält die Original-SWF und alle Dateien, die
+ * diese nachlädt (SWF, XML, TXT, Bilder, MP3 …), als DefineBinaryData-Tags (87). Der Player startet
+ * `start` und beantwortet alle Ladeaufrufe aus dem Paket; relative Pfade gelten gegenüber `basis`
+ * (bei Flash im Browser: Ordner der HTML-Seite).
+ */
+export interface InteraktivPaket {
+  /** Paketpfad der Start-SWF (normalisiert, siehe `paketPfad`). */
+  start: string
+  /** Verzeichnis für relative Pfade, leer oder mit abschließendem „/“. */
+  basis: string
+  /** FlashVars der Start-SWF. */
+  parameter: Record<string, string>
+  /**
+   * Inhalt auf den Rahmen einpassen, auch wenn die Start-SWF das Skalieren abschaltet (z. B. Cornelsens
+   * Flinter). Setzt voraus, dass die Bühnengröße der Start-SWF der gezeichneten Größe entspricht.
+   */
+  skalieren: boolean
+  dateien: InteraktivPaketDatei[]
+}
+
+export interface InteraktivPaketDatei {
+  /** Normalisierter Paketpfad (Kleinschreibung, „/“, ohne `.`/`..`). */
+  pfad: string
+  /** Zeichen-ID des DefineBinaryData-Tags. */
+  id: number
+  typ: string
+}
+
+/** Höchstzahl der Paketdateien – schützt vor unsinnigen Manifesten. */
+const MAX_PAKET_DATEIEN = 20_000
+const SWF_TAG_BINAERDATEN = 87
+
+/**
+ * Normalisiert einen Paketpfad bzw. eine relative URL: „\“ → „/“, Abfrage/Anker entfernen,
+ * `.`/`..` auflösen, Prozentkodierung lösen, Kleinschreibung (die CD-ROMs waren nicht
+ * groß-/kleinschreibungsempfindlich). Pfade oberhalb der Wurzel bleiben an der Wurzel.
+ */
+export function paketPfad(roh: string): string {
+  let pfad = roh.split(/[?#]/)[0] ?? ''
+  try {
+    pfad = decodeURIComponent(pfad)
+  } catch {
+    // ungültige Kodierung – Rohtext verwenden
+  }
+  const teile: string[] = []
+  for (const teil of pfad.replace(/\\/g, '/').split('/')) {
+    if (!teil || teil === '.') continue
+    if (teil === '..') teile.pop()
+    else teile.push(teil)
+  }
+  return teile.join('/').toLowerCase()
+}
+
+function paketAus(roh: unknown): InteraktivPaket | null {
+  if (!roh || typeof roh !== 'object') return null
+  const p = roh as Record<string, unknown>
+  if (typeof p.start !== 'string' || !Array.isArray(p.dateien)) return null
+  const start = paketPfad(p.start)
+  const dateien: InteraktivPaketDatei[] = []
+  for (const eintrag of p.dateien.slice(0, MAX_PAKET_DATEIEN)) {
+    if (!eintrag || typeof eintrag !== 'object') continue
+    const e = eintrag as Record<string, unknown>
+    if (typeof e.pfad !== 'string' || !Number.isInteger(e.id) || (e.id as number) < 0 || (e.id as number) > 0xffff) continue
+    const pfad = paketPfad(e.pfad)
+    if (!pfad) continue
+    dateien.push({
+      pfad,
+      id: e.id as number,
+      typ: typeof e.typ === 'string' && /^[\w.+-]+\/[\w.+-]+$/.test(e.typ) ? e.typ : 'application/octet-stream',
+    })
+  }
+  if (!start || !dateien.some((d) => d.pfad === start)) return null
+  const basis = typeof p.basis === 'string' ? paketPfad(p.basis) : start.split('/').slice(0, -1).join('/')
+  const parameter: Record<string, string> = {}
+  if (p.parameter && typeof p.parameter === 'object' && !Array.isArray(p.parameter)) {
+    for (const [name, wert] of Object.entries(p.parameter as Record<string, unknown>)) {
+      if (typeof wert === 'string' || typeof wert === 'number' || typeof wert === 'boolean') parameter[name] = String(wert)
+    }
+  }
+  return { start, basis: basis ? `${basis}/` : '', parameter, skalieren: p.skalieren === true, dateien }
+}
+
+/** Lage einer Paketdatei in der Hülle: Byte-Versatz (bezogen auf den Puffer) und Länge. */
+export interface PaketBereich {
+  offset: number
+  laenge: number
+}
+
+/**
+ * Sucht die DefineBinaryData-Tags (87) einer unkomprimierten Paket-SWF und liefert je Zeichen-ID
+ * den Bereich der Nutzdaten. Die Daten selbst werden nicht kopiert.
+ */
+export function paketBereiche(bytes: Uint8Array): Map<number, PaketBereich> {
+  const bereiche = new Map<number, PaketBereich>()
+  if (bytes.length < 13 || bytes[0] !== 0x46 || bytes[1] !== 0x57 || bytes[2] !== 0x53) return bereiche
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  let pos = 8 + bitsInRect(bytes[8]!) + 4
+  while (pos + 2 <= bytes.length) {
+    const kopf = view.getUint16(pos, true)
+    pos += 2
+    const code = kopf >> 6
+    let laenge = kopf & 0x3f
+    if (laenge === 0x3f) {
+      if (pos + 4 > bytes.length) break
+      laenge = view.getUint32(pos, true)
+      pos += 4
+    }
+    if (code === 0 || pos + laenge > bytes.length) break
+    if (code === SWF_TAG_BINAERDATEN && laenge >= 6) {
+      bereiche.set(view.getUint16(pos, true), { offset: bytes.byteOffset + pos + 6, laenge: laenge - 6 })
+    }
+    pos += laenge
+  }
+  return bereiche
+}
+
+/**
+ * Verzeichnis des Pakets für den Player: normalisierter Pfad → Bereich und Inhaltstyp.
+ * Einträge ohne passenden DefineBinaryData-Tag entfallen.
+ */
+export function paketVerzeichnis(
+  bytes: Uint8Array,
+  paket: InteraktivPaket,
+): Record<string, { o: number; l: number; t: string }> {
+  const bereiche = paketBereiche(bytes)
+  const verzeichnis: Record<string, { o: number; l: number; t: string }> = {}
+  for (const datei of paket.dateien) {
+    const bereich = bereiche.get(datei.id)
+    if (bereich) verzeichnis[datei.pfad] = { o: bereich.offset, l: bereich.laenge, t: datei.typ }
+  }
+  return verzeichnis
 }
 
 /** Höchstzahl der Zusatzknöpfe – mehr passen nicht sinnvoll in die Steuerleiste. */
@@ -210,5 +346,6 @@ function metadatenAusText(roh: string): InteraktivMetadaten | null {
     totalFrames: Number.isInteger(daten.totalFrames) && (daten.totalFrames as number) > 0
       ? (daten.totalFrames as number)
       : null,
+    paket: paketAus(daten.paket),
   }
 }

@@ -823,3 +823,54 @@ Datei (Protokoll), ungültige JSON (Protokoll, Datei ignoriert), Video im Abbild
 - [ ] Videos ≤ 256 MiB, Format `mp4`/`m4v`/`webm` (H.264/AAC für alle Browser).
 - [ ] `videos.json` neben den Filmen; `bezug` mit Pfad ab Paketwurzel inkl. Ordner und Endung.
 - [ ] Bezugsdateien liegen im selben Stapel (Bezüge über Stapelgrenzen hinweg werden nicht aufgelöst).
+
+### 14.5 Paket-SWF (Flash-Anwendung mit Nachbardateien)
+
+Viele CD-/DVD-Anwendungen bestehen nicht aus einer einzelnen SWF, sondern laden zur Laufzeit weitere
+Dateien nach (Phasen-SWFs, XML, Texte, Bilder, MP3 – per `loadMovie`, `LoadVars`, `Sound`, `Loader`,
+`URLLoader`). Einzeln hochgeladen bliebe die Bühne leer. Dafür gibt es das **Paket-SWF**: eine kleine
+Hüllen-SWF (unkomprimiert, `FWS`), die alle Dateien **unverändert** als `DefineBinaryData`-Tags (87)
+enthält. Für den Stapel ist es eine gewöhnliche `.swf` (Material `interaktiv`, ≤ 256 MiB).
+
+Das Manifest steht wie die übrigen Metadaten im Tag 77 (`saru: 1`), Feld `paket`:
+
+```json
+{
+  "saru": 1,
+  "title": "Mitose",
+  "paket": {
+    "version": 1,
+    "start": "module/flinter/flinter.swf",
+    "basis": "html/mels/",
+    "parameter": { "MedienElementID": "mel_807552" },
+    "dateien": [
+      { "pfad": "module/flinter/flinter.swf", "id": 1, "typ": "application/x-shockwave-flash" },
+      { "pfad": "medien/mels_dyn/dswmedia/rsc/mel_807552/media/unterordner/content.xml", "id": 2, "typ": "text/xml" }
+    ]
+  }
+}
+```
+
+| Feld | Bedeutung |
+| --- | --- |
+| `start` | Paketpfad der SWF, die gestartet wird (muss in `dateien` stehen) |
+| `basis` | Verzeichnis, gegen das relative URLs aufgelöst werden – bei Flash im Browser der Ordner der **HTML-Seite**, nicht der SWF (Standard: Ordner von `start`) |
+| `parameter` | FlashVars der Start-SWF (Text, Zahl oder Wahrheitswert) |
+| `skalieren` | optional, `true`: Inhalt auf den Rahmen einpassen und zentrieren, auch wenn die Start-SWF das Skalieren abschaltet (z. B. Cornelsens Flinter). Die Bühnengröße der Start-SWF muss dann der gezeichneten Größe entsprechen (`swfpaket.py` mit `start_buehne`) |
+| `dateien[]` | `pfad` (Paketpfad), `id` (Zeichen-ID des DefineBinaryData-Tags), `typ` (Inhaltstyp) |
+
+Verhalten des Players: Ruffle lädt `start` von der virtuellen Adresse `https://paket.saru.invalid/`;
+jeder weitere Abruf dorthin wird im abgeschotteten iframe aus dem Paket beantwortet (Pfade ohne
+Groß-/Kleinschreibung, `\` wie `/`, `..` aufgelöst, Abfrage entfernt). Fehlende Dateien liefern 404 und
+eine Konsolenwarnung „Paket: Datei fehlt: …“. Seitenwechsel per `getURL` sind (für alle SWFs) abgeschaltet,
+damit der iframe den Player nicht verlässt. Ohne Paket-Unterstützung zeigt die Hülle nur einen Hinweistext.
+Haltepunkte, Erklärtexte und Zusatzknöpfe (Tag-77-Felder oben) können zusätzlich im selben Tag stehen,
+wirken aber nur, wenn die Start-SWF die Brücke (`swfStopped`, `swfPlay` …) selbst mitbringt.
+
+Erzeugen: `Tools\swfpaket.py spec.json out.swf` (allgemein) bzw. `Tools\flinterpaket.py mel_N out.swf`
+(Cornelsen-DVDs mit dem Flash-Player „Flinter“) in der Import-Vorbereitung (Claude-Code-Working-DIR).
+
+Checkliste:
+- [ ] Paket einmal komplett durchgespielt, Browser-Konsole ohne „Paket: Datei fehlt“.
+- [ ] Textdateien in UTF-16 vorher nach UTF-8 umkodieren (Ruffle liest Text nur als UTF-8).
+- [ ] Ein Paket = ein Material: eine Anwendung bzw. ein Modul je Paket, nicht ganze CDs.

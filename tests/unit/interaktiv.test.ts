@@ -3,8 +3,12 @@ import {
   erklaerungFuerFrame,
   istInteraktivDatei,
   parseSwfKopf,
+  paketBereiche,
+  paketPfad,
+  paketVerzeichnis,
   parseSwfMetadaten,
 } from '../../shared/utils/interaktiv'
+import { interaktivRahmenDokument, PAKET_HERKUNFT } from '../../app/utils/interaktiv-rahmen'
 import { guessMaterialType } from '../../shared/utils/material-type-guess'
 import { isBulkMaterialFileName } from '../../shared/utils/ai-material-formats'
 
@@ -175,5 +179,111 @@ describe('SWF-Metadaten', () => {
   it('liest die Bühnengröße aus dem Header', () => {
     const kopf = parseSwfKopf(baueSwf([]))
     expect(kopf).toMatchObject({ version: 8, breite: 550, hoehe: 400, bilder: 24 })
+  })
+})
+
+function binaer(id: number, inhalt: string): Uint8Array {
+  const daten = new TextEncoder().encode(inhalt)
+  return tag(87, new Uint8Array([id & 255, id >> 8, 0, 0, 0, 0, ...daten]))
+}
+
+describe('interaktive Inhalte: Paket-SWF', () => {
+  const manifest = {
+    saru: 1,
+    title: 'Mitose',
+    paket: {
+      version: 1,
+      start: 'module/flinter/Flinter.swf',
+      basis: 'html/mels/',
+      parameter: { MedienElementID: 'mel_807552', zahl: 3, objekt: { a: 1 } },
+      dateien: [
+        { pfad: 'module/flinter/Flinter.swf', id: 1, typ: 'application/x-shockwave-flash' },
+        { pfad: 'medien\\rsc\\mel_1\\content.xml', id: 2, typ: 'text/xml' },
+        { pfad: '../fehlt.txt', id: 3, typ: 'kein typ' },
+        { pfad: 'kaputt', id: 'x' },
+      ],
+    },
+  }
+  const swf = baueSwf([
+    tag(77, new TextEncoder().encode(JSON.stringify(manifest))),
+    binaer(1, 'FWS-Start'),
+    binaer(2, '<Pool/>'),
+  ])
+
+  it('liest das Manifest mit normalisierten Pfaden und FlashVars', () => {
+    const paket = parseSwfMetadaten(swf)?.paket
+    expect(paket).toMatchObject({
+      start: 'module/flinter/flinter.swf',
+      basis: 'html/mels/',
+      parameter: { MedienElementID: 'mel_807552', zahl: '3' },
+    })
+    expect(paket?.dateien.map((d) => d.pfad)).toEqual([
+      'module/flinter/flinter.swf',
+      'medien/rsc/mel_1/content.xml',
+      'fehlt.txt',
+    ])
+    expect(paket?.dateien[2]?.typ).toBe('application/octet-stream')
+  })
+
+  it('findet die Nutzdaten der DefineBinaryData-Tags', () => {
+    const paket = parseSwfMetadaten(swf)!.paket!
+    const verzeichnis = paketVerzeichnis(swf, paket)
+    const text = (pfad: string) => {
+      const e = verzeichnis[pfad]!
+      return new TextDecoder().decode(swf.subarray(e.o, e.o + e.l))
+    }
+    expect(text('module/flinter/flinter.swf')).toBe('FWS-Start')
+    expect(text('medien/rsc/mel_1/content.xml')).toBe('<Pool/>')
+    expect(verzeichnis['medien/rsc/mel_1/content.xml']?.t).toBe('text/xml')
+    // Eintrag ohne Daten-Tag entfällt.
+    expect(verzeichnis['fehlt.txt']).toBeUndefined()
+    expect(paketBereiche(swf).size).toBe(2)
+  })
+
+  it('verwirft Manifeste ohne Start-Datei und lässt gewöhnliche SWFs ohne Paket', () => {
+    expect(metaAus({ saru: 1, paket: { start: 'a.swf', dateien: [{ pfad: 'b.swf', id: 1 }] } })?.paket).toBeNull()
+    expect(metaAus({ saru: 1, paket: 'x' })?.paket).toBeNull()
+    expect(metaAus(json)?.paket).toBeNull()
+  })
+
+  it('nimmt ohne Basis den Ordner der Start-SWF', () => {
+    const meta = metaAus({
+      saru: 1,
+      paket: { start: 'German/Module1/Module1.swf', dateien: [{ pfad: 'german/module1/module1.swf', id: 1 }] },
+    })
+    expect(meta?.paket?.basis).toBe('german/module1/')
+  })
+
+  it('übernimmt „skalieren“ nur bei true', () => {
+    const paket = (skalieren?: unknown) =>
+      metaAus({ saru: 1, paket: { start: 'a.swf', skalieren, dateien: [{ pfad: 'a.swf', id: 1 }] } })?.paket?.skalieren
+    expect(paket(true)).toBe(true)
+    expect(paket('ja')).toBe(false)
+    expect(paket()).toBe(false)
+  })
+
+  it('normalisiert Pfade wie relative URLs', () => {
+    expect(paketPfad('German/Module1/../../Common/Module1/images/1_A2.JPG?x=1#a')).toBe('common/module1/images/1_a2.jpg')
+    expect(paketPfad('./a//b\\C%20d.txt')).toBe('a/b/c d.txt')
+    expect(paketPfad('../../x.swf')).toBe('x.swf')
+    expect(paketPfad('%E0%A4%A')).toBe('%e0%a4%a')
+  })
+})
+
+describe('interaktive Inhalte: Player-iframe', () => {
+  it('bedient Paketabrufe aus dem Paket und erlaubt keine Seitenwechsel', () => {
+    const doc = interaktivRahmenDokument('https://saru.example')
+    expect(doc).toContain(JSON.stringify(PAKET_HERKUNFT))
+    expect(doc).toContain('openUrlMode: \'deny\'')
+    expect(doc).toContain('"https://saru.example/ruffle/"')
+  })
+
+  it('normalisiert Pfade im iframe wie paketPfad()', () => {
+    const doc = interaktivRahmenDokument('https://saru.example')
+    const quelle = /function paketPfad\(roh\) \{[\s\S]*?\n {4}\}/.exec(doc)![0]
+    const iframePfad = new Function(`${quelle}; return paketPfad`)() as (roh: string) => string
+    for (const roh of ['German/Module1/../../Common/X.JPG?x', 'a\\b\\..\\c.txt', './A%20B.swf', '../../x']) {
+      expect(iframePfad(roh)).toBe(paketPfad(roh))
+    }
   })
 })

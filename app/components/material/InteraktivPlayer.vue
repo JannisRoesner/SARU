@@ -3,14 +3,18 @@ import {
   erklaerungFuerFrame,
   parseSwfKopf,
   parseSwfMetadaten,
+  paketVerzeichnis,
   type InteraktivAktion,
   type InteraktivMetadaten,
 } from '#shared/utils/interaktiv'
+import { interaktivRahmenDokument } from '~/utils/interaktiv-rahmen'
 
 /**
  * Spielt eine SWF-Animation per Ruffle in einem abgeschotteten iframe (ohne `allow-same-origin`)
  * ab. Die Datei wird hier geladen und per postMessage übergeben; Steuerung und Haltepunkte
  * laufen über dieselbe Nachrichtenbrücke. Die Elemente in der SWF bedient Ruffle selbst.
+ * Paket-SWFs (Hülle mit Start-SWF und Nachbardateien, siehe `InteraktivPaket`) werden samt
+ * Verzeichnis übergeben; der iframe beantwortet dann alle Ladeaufrufe aus dem Paket.
  */
 const props = defineProps<{
   /** Adresse der SWF-Datei (Download-Endpunkt, ggf. mit `?inline=1`). */
@@ -104,106 +108,6 @@ function sende(cmd: string, daten: Record<string, unknown> = {}, transfer: Trans
   rahmen.value?.contentWindow?.postMessage({ saru: 'cmd', cmd, ...daten }, '*', transfer)
 }
 
-/**
- * Dokument des iframes: Ruffle-Player plus Brücke für `swfStopped` und Befehle.
- * Der iframe hat keine eigene Herkunft und lädt selbst nichts nach – Ruffle-Skript und
- * WebAssembly holt die Elternseite und reicht sie per Nachricht durch (`fetch` wird umgeleitet).
- */
-function rahmenDokument(origin: string): string {
-  const ruffle = `${origin}/ruffle/`
-  const skript = `
-    window.RufflePlayer = window.RufflePlayer || {};
-    window.RufflePlayer.config = {
-      publicPath: ${JSON.stringify(ruffle)},
-      allowScriptAccess: true,
-      autoplay: 'on',
-      unmuteOverlay: 'hidden',
-      splashScreen: false,
-      contextMenu: 'off',
-      letterbox: 'on',
-      warnOnUnsupportedContent: false,
-      logLevel: 'warn'
-    };
-  `
-  const brueke = `
-    var player = null, daten = null, ruffleDa = false, anfragen = {}, zaehler = 0;
-    function an(msg) { parent.postMessage(Object.assign({ saru: 'evt' }, msg), '*'); }
-    window.addEventListener('error', function (e) { an({ type: 'warn', text: String(e.message) }); });
-    window.swfStopped = function (frame) { an({ type: 'stopped', frame: Number(frame) }); };
-
-    // Ruffle-Dateien kommen über die Elternseite.
-    var echtesFetch = window.fetch;
-    window.fetch = function (ziel) {
-      var url = String(ziel && ziel.url ? ziel.url : ziel);
-      if (url.indexOf(${JSON.stringify(ruffle)}) !== 0) return echtesFetch.apply(this, arguments);
-      return new Promise(function (ok, nein) {
-        var id = ++zaehler;
-        anfragen[id] = { ok: ok, nein: nein, url: url };
-        an({ type: 'abruf', id: id, url: url });
-      });
-    };
-
-    function ext(name) {
-      try {
-        var r = player && player.ruffle && player.ruffle();
-        if (!r) return;
-        return r.callExternalInterface.apply(r, Array.prototype.slice.call(arguments));
-      } catch (e) { an({ type: 'warn', text: String(e) }); }
-    }
-    function warteAufRuffle(versuch) {
-      if (typeof window.RufflePlayer.newest === 'function') { ruffleDa = true; an({ type: 'ruffle-bereit' }); return; }
-      if (versuch > 100) { an({ type: 'fehler', text: 'Ruffle nicht verfügbar' }); return; }
-      setTimeout(function () { warteAufRuffle(versuch + 1); }, 50);
-    }
-    function start() {
-      if (!ruffleDa || !daten) return;
-      if (player) { player.remove(); player = null; }
-      player = window.RufflePlayer.newest().createPlayer();
-      player.style.cssText = 'width:100%;height:100%;display:block';
-      document.getElementById('b').appendChild(player);
-      player.addEventListener('loadedmovie', function () { try { player.focus(); } catch (e) {} an({ type: 'geladen' }); });
-      player.load({ data: new Uint8Array(daten.slice(0)) }).catch(function (e) { an({ type: 'fehler', text: String(e) }); });
-    }
-    addEventListener('message', function (e) {
-      var m = e.data;
-      if (!m || m.saru !== 'cmd') return;
-      if (m.cmd === 'ruffle') {
-        var s = document.createElement('script');
-        s.textContent = m.js;
-        document.head.appendChild(s);
-        warteAufRuffle(0);
-      }
-      else if (m.cmd === 'antwort') {
-        var a = anfragen[m.id]; delete anfragen[m.id];
-        if (!a) return;
-        if (m.daten) a.ok(new Response(m.daten, { status: 200, headers: { 'content-type': 'application/wasm' } }));
-        else a.nein(new TypeError('Abruf fehlgeschlagen: ' + a.url));
-      }
-      else if (m.cmd === 'laden') { daten = m.daten; start(); }
-      else if (m.cmd === 'neustart') { start(); }
-      else if (m.cmd === 'weiter') { if (player) player.play(); ext('swfPlay'); }
-      else if (m.cmd === 'pause') { if (player) player.pause(); }
-      else if (m.cmd === 'fortsetzen') { if (player) player.play(); }
-      else if (m.cmd === 'erklaerung') { ext('swfSetExplanationMode', !!m.an); }
-      else if (m.cmd === 'springen') { ext('swfGoto', m.frame); }
-      else if (m.cmd === 'aufruf') { if ('arg' in m) ext('swfCall', m.fn, m.arg); else ext('swfCall', m.fn); }
-      else if (m.cmd === 'frame') {
-        var f = Number(ext('swfFrame'));
-        if (f > 0) an({ type: 'frame', frame: f });
-      }
-    });
-    an({ type: 'bereit' });
-  `
-  return [
-    '<!doctype html><html><head><meta charset="utf-8">',
-    '<style>html,body{margin:0;height:100%;overflow:hidden;background:#fff}#b{width:100%;height:100%}</style>',
-    '</head><body><div id="b"></div>',
-    `<script>${skript}</` + 'script>',
-    `<script>${brueke}</` + 'script>',
-    '</body></html>',
-  ].join('')
-}
-
 /** Ruffle-Dateien werden einmal geladen und für alle Player der Sitzung wiederverwendet. */
 const ruffleCache = new Map<string, Promise<ArrayBuffer>>()
 function ruffleDatei(url: string): Promise<ArrayBuffer> {
@@ -250,6 +154,14 @@ async function abrufBeantworten(id: number, url: string) {
 const dokument = ref('')
 
 let datenPuffer: ArrayBuffer | null = null
+/** Paket-SWF: Start, Basis, FlashVars und Verzeichnis (Pfad → Bereich in `datenPuffer`). */
+let paketDaten: {
+  start: string
+  basis: string
+  parameter: Record<string, string>
+  skalieren: boolean
+  verzeichnis: Record<string, { o: number; l: number; t: string }>
+} | null = null
 let erstesAnhalten = true
 let letzterHalt = { frame: -1, zeit: 0 }
 
@@ -323,7 +235,7 @@ function ladenInRahmen() {
   umgeschaltet.value = []
   schieberFrame.value = 1
   const kopie = datenPuffer.slice(0)
-  sende('laden', { daten: kopie }, [kopie])
+  sende('laden', { daten: kopie, paket: paketDaten }, [kopie])
 }
 
 async function datenLaden() {
@@ -332,11 +244,16 @@ async function datenLaden() {
   meta.value = null
   kopfBilder.value = 0
   datenPuffer = null
+  paketDaten = null
   try {
     const puffer = await $fetch<ArrayBuffer>(props.src, { responseType: 'arrayBuffer' })
     datenPuffer = puffer
     const bytes = new Uint8Array(puffer)
     meta.value = parseSwfMetadaten(bytes)
+    const paket = meta.value?.paket
+    paketDaten = paket
+      ? { start: paket.start, basis: paket.basis, parameter: { ...paket.parameter }, skalieren: paket.skalieren, verzeichnis: paketVerzeichnis(bytes, paket) }
+      : null
     const kopf = parseSwfKopf(bytes)
     if (kopf) {
       seitenverhaeltnis.value = `${kopf.breite} / ${kopf.hoehe}`
@@ -406,7 +323,7 @@ function beiVollbildwechsel() {
 onMounted(() => {
   erklaerungenWahlLesen()
   window.addEventListener('message', beiNachricht)
-  dokument.value = rahmenDokument(window.location.origin)
+  dokument.value = interaktivRahmenDokument(window.location.origin)
   document.addEventListener('fullscreenchange', beiVollbildwechsel)
   void datenLaden()
 })
@@ -433,7 +350,10 @@ const buehneStil = computed(() =>
       :class="(fuellend || vollbild) && 'flex-1'"
       :style="buehneStil"
     >
+      <!-- Erst mit fertigem srcdoc einfügen: Wird das srcdoc eines schon eingehängten, abgeschotteten iframes
+           gesetzt, bleibt sein Inhalt in Chrome (ab ~152) oft 0×0 groß – die Bühne bleibt weiß. -->
       <iframe
+        v-if="dokument"
         ref="rahmen"
         :srcdoc="dokument"
         sandbox="allow-scripts allow-pointer-lock"
