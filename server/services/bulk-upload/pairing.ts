@@ -681,7 +681,13 @@ export function clusterBulkFiles(
     }
   }
   clusters.push(...abbildungsCluster(sammlungsBilder, optionen.manifeste ?? new Map()))
-  medienAngabenAnwenden(clusters, files, optionen.medienManifeste ?? new Map(), optionen.warnungen ?? [])
+  // Mit den Sammlungsbildern: Ein Bezug auf ein Bild verknüpft dessen Abbildungssammlung.
+  medienAngabenAnwenden(
+    clusters,
+    [...files, ...sammlungsBilder],
+    optionen.medienManifeste ?? new Map(),
+    optionen.warnungen ?? [],
+  )
   // Filme gehören nie in eine Abbildungssammlung, auch wenn sie im Abbildungsordner liegen.
   const pfadVon = new Map(files.map((file) => [file.sourceRef, posixPath(file.relativePath || file.fileName)]))
   for (const cluster of clusters) {
