@@ -73,6 +73,7 @@ const {
   archivieren,
   duplizieren,
   loeschen,
+  lehrwerkMitInhaltLoeschen,
   alsVerwendetMerken,
 } = useMaterialAktionen(() => Promise.all([refresh(), hatInhalt.value ? inhaltLaden() : null]))
 
@@ -591,12 +592,11 @@ async function kiLoesung() {
   }
 }
 
-async function materialLoeschen() {
+async function materialLoeschen(mitInhalt = false) {
   const typ = data.value?.materialType
-  const ok = await loeschen(
-    id.value,
-    typ === 'lehrwerk' ? 'Lehrwerk gelöscht.' : 'Material gelöscht.',
-  )
+  const ok = mitInhalt
+    ? await lehrwerkMitInhaltLoeschen(id.value)
+    : await loeschen(id.value, typ === 'lehrwerk' ? 'Lehrwerk gelöscht.' : 'Material gelöscht.')
   loeschenOffen.value = false
   if (ok) await navigateTo(typ === 'lehrwerk' ? '/lehrwerke' : '/materialien')
 }
@@ -1527,11 +1527,15 @@ function loesungKorrigieren() {
       v-model="loeschenOffen"
       gefahr
       :titel="data?.materialType === 'lehrwerk' ? 'Lehrwerk löschen?' : 'Material löschen?'"
-      :text="data?.materialType === 'lehrwerk'
-        ? 'Das Lehrwerk und die Buchdatei werden unwiderruflich entfernt. Zugeordnete Materialien bleiben erhalten, nur die Zuordnung entfällt.'
-        : 'Das Material und alle Varianten sowie Anhänge werden unwiderruflich entfernt. Dieser Vorgang kann nicht rückgängig gemacht werden.'"
-      bestaetigen="Ja, ich will löschen"
-      @bestaetigt="materialLoeschen"
+      :text="!istLehrwerk
+        ? 'Das Material und alle Varianten sowie Anhänge werden unwiderruflich entfernt. Dieser Vorgang kann nicht rückgängig gemacht werden.'
+        : enthalteneAnzahl
+          ? `Das Lehrwerk und die Buchdatei werden unwiderruflich entfernt. Die ${formatZahl(enthalteneAnzahl)} zugeordneten Materialien bleiben wahlweise erhalten – nur die Zuordnung entfällt – oder werden mitgelöscht.`
+          : 'Das Lehrwerk und die Buchdatei werden unwiderruflich entfernt.'"
+      :bestaetigen="istLehrwerk && enthalteneAnzahl ? 'Nur Lehrwerk löschen' : 'Ja, ich will löschen'"
+      :zusatz="istLehrwerk && enthalteneAnzahl ? 'Mit Materialien löschen' : null"
+      @bestaetigt="materialLoeschen()"
+      @zusatz-bestaetigt="materialLoeschen(true)"
     />
 
     <UiModal

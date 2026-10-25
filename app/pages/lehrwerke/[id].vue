@@ -43,13 +43,16 @@ const {
   favoritSetzen,
   alsVerwendetMerken,
   loeschen,
+  lehrwerkMitInhaltLoeschen,
 } = useMaterialAktionen(() => Promise.all([refresh(), inhaltLaden()]))
 
 const loeschenOffen = ref(false)
 const bearbeiten = ref(false)
 
-async function lehrwerkLoeschen() {
-  const ok = await loeschen(id.value, 'Lehrwerk gelöscht.')
+async function lehrwerkLoeschen(mitInhalt = false) {
+  const ok = mitInhalt
+    ? await lehrwerkMitInhaltLoeschen(id.value)
+    : await loeschen(id.value, 'Lehrwerk gelöscht.')
   loeschenOffen.value = false
   if (ok) await navigateTo('/lehrwerke')
 }
@@ -560,9 +563,15 @@ async function zuordnungLoesen(relationId: string) {
       v-model="loeschenOffen"
       gefahr
       titel="Lehrwerk löschen?"
-      text="Das Lehrwerk und die Buchdatei werden unwiderruflich entfernt. Zugeordnete Materialien (Lösungsheft, Arbeitsblätter …) bleiben erhalten, nur die Zuordnung entfällt."
-      bestaetigen="Ja, ich will löschen"
-      @bestaetigt="lehrwerkLoeschen"
+      :text="
+        inhalt.length
+          ? `Das Lehrwerk und die Buchdatei werden unwiderruflich entfernt. Die ${formatZahl(inhalt.length)} zugeordneten Materialien (Lösungsheft, Arbeitsblätter …) bleiben wahlweise erhalten – nur die Zuordnung entfällt – oder werden mitgelöscht.`
+          : 'Das Lehrwerk und die Buchdatei werden unwiderruflich entfernt.'
+      "
+      :bestaetigen="inhalt.length ? 'Nur Lehrwerk löschen' : 'Ja, ich will löschen'"
+      :zusatz="inhalt.length ? 'Mit Materialien löschen' : null"
+      @bestaetigt="lehrwerkLoeschen()"
+      @zusatz-bestaetigt="lehrwerkLoeschen(true)"
     />
     <FreigabeDialog
       v-if="data"

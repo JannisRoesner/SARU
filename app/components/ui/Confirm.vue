@@ -9,6 +9,8 @@ const props = withDefaults(
     icon?: string
     /** Bei destruktiven Aktionen: exakt diesen Text eintippen lassen. */
     tippBestaetigung?: string | null
+    /** Beschriftung einer zweiten, weitergehenden Bestätigung (z. B. „Mit Inhalt löschen“). */
+    zusatz?: string | null
   }>(),
   {
     bestaetigen: 'Bestätigen',
@@ -16,14 +18,15 @@ const props = withDefaults(
     gefahr: false,
     icon: undefined,
     tippBestaetigung: null,
+    zusatz: null,
   },
 )
 
-const emit = defineEmits<{ bestaetigt: []; abgebrochen: [] }>()
+const emit = defineEmits<{ bestaetigt: []; zusatzBestaetigt: []; abgebrochen: [] }>()
 const offen = defineModel<boolean>({ required: true })
 
 const eingabe = ref('')
-const laeuft = ref(false)
+const laeuft = ref<'haupt' | 'zusatz' | null>(null)
 
 const freigegeben = computed(
   () => !props.tippBestaetigung || eingabe.value.trim() === props.tippBestaetigung,
@@ -32,14 +35,20 @@ const freigegeben = computed(
 watch(offen, (istOffen) => {
   if (istOffen) {
     eingabe.value = ''
-    laeuft.value = false
+    laeuft.value = null
   }
 })
 
 async function bestaetigenKlick() {
   if (!freigegeben.value) return
-  laeuft.value = true
+  laeuft.value = 'haupt'
   emit('bestaetigt')
+}
+
+function zusatzKlick() {
+  if (!freigegeben.value) return
+  laeuft.value = 'zusatz'
+  emit('zusatzBestaetigt')
 }
 
 function abbrechenKlick() {
@@ -62,12 +71,21 @@ function abbrechenKlick() {
       <UiButton variante="sekundaer" @click="abbrechenKlick">{{ abbrechen }}</UiButton>
       <UiButton
         :variante="gefahr ? 'gefahr' : 'primaer'"
-        :disabled="!freigegeben"
-        :laedt="laeuft"
+        :disabled="!freigegeben || laeuft === 'zusatz'"
+        :laedt="laeuft === 'haupt'"
         data-autofokus
         @click="bestaetigenKlick"
       >
         {{ bestaetigen }}
+      </UiButton>
+      <UiButton
+        v-if="zusatz"
+        :variante="gefahr ? 'gefahr' : 'primaer'"
+        :disabled="!freigegeben || laeuft === 'haupt'"
+        :laedt="laeuft === 'zusatz'"
+        @click="zusatzKlick"
+      >
+        {{ zusatz }}
       </UiButton>
     </template>
   </UiModal>
