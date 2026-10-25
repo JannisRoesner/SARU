@@ -349,7 +349,10 @@ const buehneStil = computed(() =>
       :class="(fuellend || vollbild) && 'flex-1'"
       :style="buehneStil"
     >
+      <!-- Erst mit fertigem srcdoc einfügen: Wird das srcdoc eines schon eingehängten, abgeschotteten iframes
+           gesetzt, bleibt sein Inhalt in Chrome (ab ~152) oft 0×0 groß – die Bühne bleibt weiß. -->
       <iframe
+        v-if="dokument"
         ref="rahmen"
         :srcdoc="dokument"
         sandbox="allow-scripts allow-pointer-lock"
