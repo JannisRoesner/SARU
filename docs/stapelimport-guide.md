@@ -856,6 +856,7 @@ Das Manifest steht wie die übrigen Metadaten im Tag 77 (`saru: 1`), Feld `paket
 | `start` | Paketpfad der SWF, die gestartet wird (muss in `dateien` stehen) |
 | `basis` | Verzeichnis, gegen das relative URLs aufgelöst werden – bei Flash im Browser der Ordner der **HTML-Seite**, nicht der SWF (Standard: Ordner von `start`) |
 | `parameter` | FlashVars der Start-SWF (Text, Zahl oder Wahrheitswert) |
+| `skalieren` | optional, `true`: Inhalt auf den Rahmen einpassen und zentrieren, auch wenn die Start-SWF das Skalieren abschaltet (z. B. Cornelsens Flinter). Die Bühnengröße der Start-SWF muss dann der gezeichneten Größe entsprechen (`swfpaket.py` mit `start_buehne`) |
 | `dateien[]` | `pfad` (Paketpfad), `id` (Zeichen-ID des DefineBinaryData-Tags), `typ` (Inhaltstyp) |
 
 Verhalten des Players: Ruffle lädt `start` von der virtuellen Adresse `https://paket.saru.invalid/`;
