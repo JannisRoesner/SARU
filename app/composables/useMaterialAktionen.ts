@@ -60,6 +60,23 @@ export function useMaterialAktionen(nachAenderung?: () => unknown) {
     return ergebnis !== null
   }
 
+  /** Löscht ein Lehrwerk samt der zugeordneten Materialien, die man löschen darf. */
+  async function lehrwerkMitInhaltLoeschen(id: string) {
+    const ergebnis = await aufruf<{ inhaltGeloescht: number; inhaltBehalten: number }>(
+      `/api/materials/${id}?mitInhalt=1`,
+      { method: 'DELETE' },
+    )
+    if (!ergebnis) return false
+    const { inhaltGeloescht: weg, inhaltBehalten: rest } = ergebnis
+    let meldung = `Lehrwerk und ${formatZahl(weg)} ${weg === 1 ? 'Material' : 'Materialien'} gelöscht.`
+    if (rest) {
+      meldung += ` ${formatZahl(rest)} ${rest === 1 ? 'Material bleibt' : 'Materialien bleiben'} erhalten (fehlende Löschrechte).`
+    }
+    hinweise.erfolg(meldung)
+    await fertig()
+    return true
+  }
+
   /** Setzt „zuletzt verwendet“, etwa beim Öffnen eines Anhangs. */
   function alsVerwendetMerken(id: string) {
     return $fetch(`/api/materials/${id}/used`, { method: 'POST' }).catch(() => undefined)
@@ -72,6 +89,7 @@ export function useMaterialAktionen(nachAenderung?: () => unknown) {
     archivieren,
     duplizieren,
     loeschen,
+    lehrwerkMitInhaltLoeschen,
     alsVerwendetMerken,
   }
 }

@@ -639,3 +639,26 @@ export async function listLehrwerkInhalt(
   )
   return (rows as unknown as LehrwerkInhaltItem[]).map(mapGradeLevels)
 }
+
+/**
+ * Zugeordnete Materialien samt Eigentümer, für das Mitlöschen.
+ * Nur Lehrwerke liefern Treffer – ein Lernzirkel behält seine Stationen.
+ */
+export async function listLehrwerkInhaltBesitzer(
+  lehrwerkId: string,
+  db: Database = useDatabase(),
+): Promise<{ id: string; ownerId: string | null }[]> {
+  return queryRows<{ id: string; ownerId: string | null }>(
+    db,
+    sql`select distinct m.id, m.owner_id as "ownerId"
+      from materials m
+      join material_relations r
+        on r.from_material_id = m.id
+       and r.relation_type = 'gehoert_zu'
+      join materials l
+        on l.id = r.to_material_id
+       and l.material_type = 'lehrwerk'
+      where l.id = ${lehrwerkId}::uuid
+        and m.id <> l.id`,
+  )
+}

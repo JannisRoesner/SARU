@@ -21,7 +21,13 @@ const {
   updateMaterial,
 } = await import('../../server/services/material.service')
 
-const { getMaterialDetail, getMaterialFacets, listLehrwerkInhalt, listMaterials } = await import(
+const {
+  getMaterialDetail,
+  getMaterialFacets,
+  listLehrwerkInhalt,
+  listLehrwerkInhaltBesitzer,
+  listMaterials,
+} = await import(
   '../../server/repositories/material.repository'
 )
 const { sammleLehrwerkZipEintraege, sammleZipEintraege, zipStream } = await import('../../server/services/material-zip.service')
@@ -399,6 +405,27 @@ describe('Materialverwaltung', () => {
       await deleteMaterial(id)
       expect(await getMaterialDetail(id)).toBeNull()
     })
+  })
+
+  it('listet zum Mitlöschen nur den Inhalt von Lehrwerken samt Eigentümer', async () => {
+    const lehrwerk = await createMaterial({ title: 'Mitlöschen', materialType: 'lehrwerk' }, userId)
+    const ab = await createMaterial({ title: 'AB zum Lehrwerk' }, userId)
+    const fremd = await createMaterial({ title: 'Ohne Eigentümer' }, null)
+    await addRelation(ab, lehrwerk, 'gehoert_zu')
+    await addRelation(fremd, lehrwerk, 'gehoert_zu')
+
+    const inhalt = await listLehrwerkInhaltBesitzer(lehrwerk)
+    expect(inhalt).toHaveLength(2)
+    expect(inhalt).toEqual(
+      expect.arrayContaining([
+        { id: ab, ownerId: userId },
+        { id: fremd, ownerId: null },
+      ]),
+    )
+
+    const lernzirkel = await createMaterial({ title: 'Zirkel', materialType: 'lernzirkel' }, userId)
+    await addRelation(ab, lernzirkel, 'gehoert_zu')
+    expect(await listLehrwerkInhaltBesitzer(lernzirkel)).toEqual([])
   })
 
   it('packt Stationen eines Lernzirkels samt Lösungen in ein ZIP', async () => {
