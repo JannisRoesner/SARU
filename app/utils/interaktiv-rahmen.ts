@@ -96,7 +96,12 @@ export function interaktivRahmenDokument(origin: string): string {
       player = window.RufflePlayer.newest().createPlayer();
       player.style.cssText = 'width:100%;height:100%;display:block';
       document.getElementById('b').appendChild(player);
-      player.addEventListener('loadedmovie', function () { try { player.focus(); } catch (e) {} an({ type: 'geladen' }); });
+      // Ruffle meldet „loadedmetadata“/„loadeddata“; „loadedmovie“ gibt es nicht. Unveränderte SWFs melden
+      // keinen Haltepunkt, die Ladeanzeige hängt also allein an diesem Ereignis.
+      var geladen = false;
+      function beiGeladen() { if (geladen) return; geladen = true; try { player.focus(); } catch (e) {} an({ type: 'geladen' }); }
+      player.addEventListener('loadedmetadata', beiGeladen);
+      player.addEventListener('loadeddata', beiGeladen);
       var optionen = paket
         ? { url: HERKUNFT + paket.start, base: HERKUNFT + paket.basis, parameters: paket.parameter }
         : { data: new Uint8Array(daten.slice(0)) };
