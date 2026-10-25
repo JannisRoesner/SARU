@@ -4,7 +4,7 @@ import { useDatabase } from '../database/client'
 import { materialAssets, materials, materialVariants } from '../database/schema'
 import type { SafeUser } from '../utils/auth'
 import { darfObjektBearbeiten } from '#shared/utils/rechte'
-import { istInteraktivDatei } from '#shared/utils/interaktiv'
+import { istHtml5PaketDatei, istInteraktivDatei } from '#shared/utils/interaktiv'
 import {
   buildCollaboraIframeUrl,
   createWopiAccessToken,
@@ -18,7 +18,7 @@ import { canHaveThumbnail } from './thumbnail.service'
 import { getPdfPageCount } from './ai/rasterize'
 import { resolveStoragePath } from './storage.service'
 
-export type PreviewMode = 'pdf' | 'bild' | 'video' | 'interaktiv' | 'text' | 'collabora' | 'download' | 'link' | 'keine'
+export type PreviewMode = 'pdf' | 'bild' | 'video' | 'interaktiv' | 'html5' | 'text' | 'collabora' | 'download' | 'link' | 'keine'
 
 export interface AssetPreviewInfo {
   mode: PreviewMode
@@ -155,6 +155,19 @@ export async function getAssetPreviewInfoFuerZugang(
       collaboraUrl: null,
       hinweis: null,
       pdfPageCount,
+    }
+  }
+
+  // HTML5-Paket: `inlineUrl` liefert die Startadresse (mit Zugriffsschlüssel) für den Player.
+  if (istHtml5PaketDatei(asset.fileName)) {
+    return {
+      ...base,
+      mode: 'html5',
+      inlineUrl: `${basis}/${asset.id}/html5`,
+      thumbnailUrl: null,
+      collaboraUrl: null,
+      hinweis: null,
+      pdfPageCount: null,
     }
   }
 

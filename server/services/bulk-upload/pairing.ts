@@ -96,8 +96,11 @@ export function fassungInfo(stem: string): { base: string; label: string } | nul
 
 /** Bezeichnung der Fassung aus dem Dateinamen („Handbuch“), sonst `null`. */
 export function fassungLabel(fileName: string): string | null {
-  return fassungInfo(basename(fileName).replace(/\.[^.]+$/, ''))?.label ?? null
+  return fassungInfo(basename(fileName).replace(DATEIENDUNG, ''))?.label ?? null
 }
+
+/** Endung – bei HTML5-Paketen beide Teile („Tafelbild.html5.zip“ → „Tafelbild“). */
+const DATEIENDUNG = /\.html5\.zip$|\.[^.]+$/i
 
 function posixPath(value: string): string {
   return value.replace(/\\/g, '/').replace(/\/+/g, '/')
@@ -114,7 +117,7 @@ function parentFolder(path: string): string {
 }
 
 function stemOf(fileName: string): string {
-  return basename(fileName).replace(/\.[^.]+$/, '')
+  return basename(fileName).replace(DATEIENDUNG, '')
 }
 
 export function detectFolderRole(

@@ -758,6 +758,18 @@ onBeforeUnmount(() => {
             />
 
             <div
+              v-else-if="info.mode === 'html5' && info.inlineUrl"
+              class="flex size-full max-w-6xl flex-col"
+            >
+              <MaterialHtml5Player
+                :quelle="info.inlineUrl"
+                :titel="info.title"
+                fuellend
+                class="shadow-2xl"
+              />
+            </div>
+
+            <div
               v-else-if="info.mode === 'interaktiv' && info.inlineUrl"
               class="flex size-full max-w-6xl flex-col"
             >

@@ -46,7 +46,7 @@ export const MATERIAL_TYPES = [
   'moodle_kurs',
   /** Interaktiver H5P-Inhalt als .h5p-Paket (ZIP-basiert). */
   'h5p',
-  /** Interaktive Animation/Simulation (zunächst .swf, per Ruffle abgespielt). */
+  /** Interaktive Animation/Simulation: .swf (per Ruffle) oder HTML5-Paket (.html5.zip). */
   'interaktiv',
   /** Viele Einzelbilder (Grafiken, Fotos) als ein Material, z. B. je Schulbuch-Kapitel. */
   'abbildungssammlung',

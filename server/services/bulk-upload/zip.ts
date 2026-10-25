@@ -1,5 +1,6 @@
 import { unzipSync } from 'fflate'
 import { bulkUeberspringGrund, isBulkDocumentFileName } from '#shared/utils/ai-material-formats'
+import { istHtml5PaketDatei } from '#shared/utils/interaktiv'
 import { invalidInput } from '../../utils/errors'
 import { extensionOf, formatBytes, sanitizeFileName } from '../storage.service'
 import { MAX_BULK_FILES, type BulkUebersprungeneDatei, type BulkUploadInputFile } from './types'
@@ -66,7 +67,8 @@ export function expandBulkArchives(
   for (const file of files) {
     const storedName = file.relativePath || file.fileName
     const extension = extensionOf(sanitizeFileName(storedName))
-    if (extension !== 'zip') {
+    // HTML5-Pakete sind selbst ein Material und werden nicht entpackt.
+    if (extension !== 'zip' || istHtml5PaketDatei(storedName)) {
       count(file.buffer.length)
       out.push(file)
       continue

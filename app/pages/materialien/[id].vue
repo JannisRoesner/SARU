@@ -11,7 +11,7 @@ import {
 import { materialPfad, materialZurueckZiel } from '#shared/utils/material-pfad'
 import { istKiMusterloesung, kiAutorAnzeige } from '#shared/utils/ki'
 import { solutionEditorMode, type SolutionEditorMode } from '#shared/utils/solution-editor'
-import { istInteraktivDatei, istInteraktivMaterial } from '#shared/utils/interaktiv'
+import { istHtml5PaketDatei, istInteraktivDatei, istInteraktivMaterial } from '#shared/utils/interaktiv'
 import { istAbbildungssammlungMaterial, istVideoDatei } from '#shared/utils/abbildungen'
 import { istMoodleKursMaterial, istH5pMaterial, kursarchivErweiterung } from '#shared/utils/moodle'
 import type { GradeLevel } from '#shared/utils/jahrgangsstufen'
@@ -1018,7 +1018,13 @@ function loesungKorrigieren() {
             icon="hand-pointer"
             :standard-offen="true"
           >
+            <MaterialHtml5Player
+              v-if="istHtml5PaketDatei(hauptVorschau.fileName)"
+              :quelle="`/api/assets/${hauptVorschau.id}/html5`"
+              :titel="hauptVorschau.title || hauptVorschau.fileName"
+            />
             <MaterialInteraktivPlayer
+              v-else
               :src="`/api/assets/${hauptVorschau.id}/download?inline=1`"
               :titel="hauptVorschau.title || hauptVorschau.fileName"
             />

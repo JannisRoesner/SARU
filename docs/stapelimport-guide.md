@@ -46,7 +46,7 @@ Dateien im selben Cluster landen – und die falschen nicht.
 
 | Regel | Wert / Verhalten |
 | --- | --- |
-| Erlaubte Dateiformate | `pdf`, `doc`, `docx`, `ppt`, `pptx`, `xls`, `xlsx`, `odt`, `odp`, `ods`, `txt`, `md`, `csv`, `swf` (interaktiver Inhalt), Videos `mp4`, `m4v`, `webm` (Abschnitt 14) |
+| Erlaubte Dateiformate | `pdf`, `doc`, `docx`, `ppt`, `pptx`, `xls`, `xlsx`, `odt`, `odp`, `ods`, `txt`, `md`, `csv`, `swf` und `html5.zip` (interaktiver Inhalt), Videos `mp4`, `m4v`, `webm` (Abschnitt 14) |
 | Bilder | `png`, `jpg`/`jpeg`, `webp`, `gif` **nur in Abbildungsordnern** (Abschnitt 13) sowie `cover.*` als Lehrwerk-Cover. `tif`/`tiff`/`bmp` werden abgelehnt – vorher in PNG/JPEG wandeln. |
 | Beschreibungsdateien | `abbildungen.json` (nur im Abbildungsordner), `videos.json` (beliebiger Ordner) – werden gelesen, nicht gespeichert |
 | Container | `.zip` (nur auf oberster Ebene – **ZIPs im ZIP werden übersprungen**) |
@@ -249,7 +249,7 @@ Für jedes Cluster wird `guessMaterialType` auf den vollständigen Pfad jeder Da
 
 | Reihenfolge | Treffer | Materialart |
 | --- | --- | --- |
-| 0 | Endung `swf` → `interaktiv`; Endung `mp4`/`m4v`/`webm` → `video` | |
+| 0 | Endung `swf` oder `html5.zip` → `interaktiv`; Endung `mp4`/`m4v`/`webm` → `video` | |
 | 1 | Pfad enthält `serviceband`, `lehrerband`, `lehrerhandbuch`, `lehrerhandreichung`, `handreichung`, `begleitband`, `kommentarband` | `serviceband` |
 | 2 | Pfad enthält `loesungsheft`, `loesungsbuch`, `loesungen zum` / `loesungen_zum` / `loesungen-zum` (**mit `oe`!**) | `loesungsbuch` |
 | 3 | Name enthält `losung`, `loesung`, `-lsg`, `_lsg` | `musterloesung` |
@@ -779,8 +779,21 @@ KI aktiv und Vision in den KI-Einstellungen eingeschaltet.
 ## 14. Videos und interaktive Inhalte
 
 Jede Videodatei (`mp4`, `m4v`, `webm`, je ≤ 256 MiB) wird ein eigenes Material **`video`**, jede
-`.swf` ein Material **`interaktiv`** – egal in welchem Ordner. Die Materialseite und Freigabe-Links
-spielen Videos direkt ab.
+`.swf` und jedes HTML5-Paket (`.html5.zip`) ein Material **`interaktiv`** – egal in welchem Ordner.
+Die Materialseite und Freigabe-Links spielen Videos und interaktive Inhalte direkt ab.
+
+**HTML5-Pakete** (z. B. Tafelbilder und Medienmodule der Klett-Unterrichtsassistenten) sind eine
+ZIP-Datei mit einer Webseite. Die doppelte Endung `.html5.zip` ist Pflicht: Gewöhnliche ZIPs entpackt
+der Stapel, HTML5-Pakete bleiben als **eine** Datei erhalten (auch innerhalb eines Stapel-ZIPs).
+
+- Startseite: die oberste `index.html`, sonst die einzige HTML-Datei im Paket. Fehlt eine eindeutige
+  Startseite, wird die Datei abgelehnt.
+- Optional `saru-html5.json` in der Wurzel des Pakets oder neben der Startseite:
+  `{ "breite": 1024, "hoehe": 677 }` – feste Bühnengröße in Pixeln; der Player passt den Inhalt
+  maßstabsgerecht ein (wie ein Beamerbild). Ohne Manifest gilt eine Breite aus
+  `<meta name="viewport" content="width=800">`, sonst füllt der Inhalt die Fläche.
+- Wiedergabe in einem abgeschotteten iframe (eigener Ursprung, keine Cookies, kein Zugriff auf SARU);
+  der Inhalt darf nur Dateien aus demselben Paket nachladen, keine externen Adressen.
 
 ### 14.1 `videos.json` (Version 1)
 
@@ -802,7 +815,7 @@ Optional im selben Ordner wie die Filme (empfohlen `<Lehrwerk>/Videos/videos.jso
 
 | Feld | Bedeutung |
 | --- | --- |
-| `datei` (Pflicht) | Video bzw. `.swf` im selben Ordner |
+| `datei` (Pflicht) | Video, `.swf` oder `.html5.zip` im selben Ordner |
 | `titel`, `beschreibung` | übernommen statt KI-Vorschlag |
 | `bezug` | Pfade **relativ zum Paket-Wurzelordner** (Text oder Liste). Liegt im ZIP noch ein gemeinsamer Wurzelordner davor, passt auch ein Pfad, auf den der Dateipfad endet; bei mehreren Treffern gewinnt der kürzeste Pfad (Warnung). |
 
