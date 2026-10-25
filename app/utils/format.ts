@@ -1,3 +1,5 @@
+import { istHtml5PaketDatei } from '#shared/utils/interaktiv'
+
 const datumKurz = new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
 const datumLang = new Intl.DateTimeFormat('de-DE', { weekday: 'short', day: '2-digit', month: 'long', year: 'numeric' })
 const datumZeit = new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' })
@@ -150,6 +152,7 @@ const DATEI_ICONS: Record<string, string> = {
 }
 
 export function dateiIcon(dateiname: string | null | undefined): string {
+  if (istHtml5PaketDatei(dateiname)) return DATEI_ICONS.swf!
   return DATEI_ICONS[dateiEndung(dateiname) ?? ''] ?? 'file'
 }
 

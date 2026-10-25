@@ -265,4 +265,27 @@ describe('videos.json', () => {
     expect(warnungen.some((w) => w.includes('Fehlt.mp4'))).toBe(true)
     expect(clusters.some((c) => c.fileRefs.includes('json'))).toBe(false)
   })
+
+  it('ein Bezug auf ein Sammlungsbild verknüpft die Abbildungssammlung', () => {
+    const manifest = JSON.stringify({
+      version: 1,
+      videos: [{ datei: 'Herz.html5.zip', bezug: ['Abbildungen/Herz/Herz.png'] }],
+    })
+    const files = [
+      datei('Interaktive Inhalte/Herz.html5.zip', 'herz'),
+      datei('Interaktive Inhalte/videos.json', 'json'),
+      datei('Abbildungen/Herz/Herz.png', 'bild'),
+    ]
+    const clusters = clusterBulkFiles(files, 'arbeitsblatt', {
+      medienManifeste: new Map([
+        [abbildungsOrdnerSchluessel('Interaktive Inhalte/videos.json', 'videos.json'), parseMedienManifest(manifest)],
+      ]),
+    })
+    const tafelbild = clusters.find((c) => c.fileRefs.includes('herz'))!
+    const sammlung = clusters.find((c) => c.kind === 'abbildungssammlung')!
+    expect(tafelbild.suggestions.materialType).toBe('interaktiv')
+    expect(tafelbild.proposedLinks).toEqual([
+      expect.objectContaining({ targetClusterId: sammlung.clusterId, relationType: 'bezug' }),
+    ])
+  })
 })

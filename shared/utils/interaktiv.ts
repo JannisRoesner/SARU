@@ -1,16 +1,46 @@
 import type { MaterialType } from '../types/domain'
 
-/** Dateiendungen interaktiver Inhalte. Später erweiterbar (z. B. HTML-Pakete). */
-export const INTERAKTIV_ERWEITERUNGEN = ['swf'] as const
-export type InteraktivFormat = (typeof INTERAKTIV_ERWEITERUNGEN)[number]
+/**
+ * Interaktive Inhalte: Flash (.swf, per Ruffle) und HTML5-Pakete (.html5.zip). Ein HTML5-Paket ist
+ * eine ZIP-Datei mit einer Webseite (HTML, JS, CSS, Bilder …), z. B. Tafelbilder und Medienmodule
+ * der Klett-Unterrichtsassistenten. Die doppelte Endung unterscheidet es von gewöhnlichen
+ * ZIP-Archiven, die der Stapel entpackt.
+ */
+export type InteraktivFormat = 'swf' | 'html5'
+
+export const HTML5_PAKET_ENDUNG = '.html5.zip'
 
 export function interaktivFormat(fileName: string | null | undefined): InteraktivFormat | null {
-  const ext = (fileName ?? '').toLowerCase().split('.').pop() ?? ''
-  return (INTERAKTIV_ERWEITERUNGEN as readonly string[]).includes(ext) ? (ext as InteraktivFormat) : null
+  const name = (fileName ?? '').toLowerCase()
+  if (name.endsWith(HTML5_PAKET_ENDUNG)) return 'html5'
+  return name.endsWith('.swf') ? 'swf' : null
 }
 
 export function istInteraktivDatei(fileName: string | null | undefined): boolean {
   return interaktivFormat(fileName) !== null
+}
+
+export function istHtml5PaketDatei(fileName: string | null | undefined): boolean {
+  return interaktivFormat(fileName) === 'html5'
+}
+
+function pfadTiefe(pfad: string): number {
+  return pfad.split('/').length - 1
+}
+
+/**
+ * Startseite eines HTML5-Pakets: die oberste `index.html`, sonst die einzige HTML-Datei.
+ * `null`, wenn es keine gibt oder mehrere gleichrangige in Frage kommen.
+ */
+export function html5Startseite(eintraege: Iterable<string>): string | null {
+  const seiten = [...eintraege]
+    .filter((n) => /\.html?$/i.test(n) && !/(^|\/)__macosx\//i.test(n))
+    .sort((a, b) => pfadTiefe(a) - pfadTiefe(b) || a.localeCompare(b))
+  const index = seiten.filter((n) => /(^|\/)index\.html?$/i.test(n))
+  if (index.length > 0) {
+    return index.length === 1 || pfadTiefe(index[0]!) < pfadTiefe(index[1]!) ? index[0]! : null
+  }
+  return seiten.length === 1 ? seiten[0]! : null
 }
 
 export function istInteraktivMaterial(

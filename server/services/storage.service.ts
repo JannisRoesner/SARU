@@ -6,6 +6,8 @@ import { fileTypeFromBuffer } from 'file-type'
 import { appError } from '../utils/errors'
 import { sha256 } from '../utils/crypto'
 import { createLogger } from '../utils/logger'
+import { istHtml5PaketDatei } from '#shared/utils/interaktiv'
+import { pruefeHtml5Paket } from './html5-paket.service'
 import { getUploadSettings } from './settings.service'
 
 const log = createLogger('storage')
@@ -90,6 +92,7 @@ export const ALLOWED_TYPES: AllowedType[] = [
     mimeTypes: ['text/plain', 'text/markdown', 'text/csv'],
     sniffable: false,
   },
+  // Auch HTML5-Pakete (.html5.zip) – sie werden zusätzlich in validateUpload geprüft.
   { label: 'ZIP-Archiv', extensions: ['zip'], mimeTypes: ['application/zip'], sniffable: true },
   { label: 'GeoGebra', extensions: ['ggb'], mimeTypes: ['application/zip'], sniffable: true },
   {
@@ -206,6 +209,9 @@ export async function validateUpload(
       `Der Inhalt von „${fileName}“ passt nicht zur Dateiendung „.swf“.`,
     )
   }
+
+  // HTML5-Paket (.html5.zip): muss eine eindeutige Startseite haben, sonst ist es nicht abspielbar.
+  if (istHtml5PaketDatei(fileName)) pruefeHtml5Paket(buffer, fileName)
 
   if (declared?.sniffable) {
     if (!sniffed) {

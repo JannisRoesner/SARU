@@ -83,7 +83,7 @@ export const materialTypes = definitions<MaterialType>({
     label: 'Interaktiver Inhalt',
     icon: 'hand-pointer',
     tone: 'accent',
-    description: 'Interaktive Animation oder Simulation (z. B. .swf), direkt im Browser abspielbar',
+    description: 'Interaktive Animation, Simulation oder Tafelbild (.swf oder HTML5-Paket .html5.zip), direkt im Browser abspielbar',
   },
   abbildungssammlung: {
     label: 'Abbildungssammlung',
